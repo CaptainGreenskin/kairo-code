@@ -35,6 +35,7 @@ public class ReplContext {
     private final Set<String> loadedSkills = new LinkedHashSet<>();
     private volatile StreamingAgentRunner runner;
     private boolean running = true;
+    private AgentEventPrinter eventPrinter;
 
     public ReplContext(
             CodeAgentSession session,
@@ -116,6 +117,14 @@ public class ReplContext {
 
     public void setRunner(StreamingAgentRunner runner) {
         this.runner = runner;
+    }
+
+    public AgentEventPrinter eventPrinter() {
+        return eventPrinter;
+    }
+
+    public void setEventPrinter(AgentEventPrinter printer) {
+        this.eventPrinter = printer;
     }
 
     public boolean isRunning() {

@@ -8,6 +8,8 @@ import io.kairo.api.hook.PreActingEvent;
 import io.kairo.api.message.Content;
 import io.kairo.api.model.ModelResponse;
 import java.io.PrintWriter;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -47,6 +49,7 @@ public class AgentEventPrinter {
 
     private final PrintWriter writer;
     private final String prefix;
+    private final Map<String, Integer> toolCallCounts = new LinkedHashMap<>();
 
     public AgentEventPrinter(PrintWriter writer) {
         this(writer, "");
@@ -78,8 +81,14 @@ public class AgentEventPrinter {
         writer.flush();
     }
 
+    /** Returns a snapshot of per-tool call counts accumulated during this session. */
+    public synchronized Map<String, Integer> getToolCallCounts() {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(toolCallCounts));
+    }
+
     @HookHandler(HookPhase.POST_ACTING)
     public synchronized void onPostActing(PostActingEvent event) {
+        toolCallCounts.merge(event.toolName(), 1, Integer::sum);
         String content = event.result().content();
         if (content != null && !content.isBlank()) {
             String display = content.length() > MAX_RESULT_LENGTH

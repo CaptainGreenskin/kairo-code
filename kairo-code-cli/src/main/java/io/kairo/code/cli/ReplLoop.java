@@ -137,6 +137,11 @@ public class ReplLoop {
                     skillRegistry,
                     snapshotStore);
             context.setRunner(runner);
+            hooks.stream()
+                    .filter(AgentEventPrinter.class::isInstance)
+                    .findFirst()
+                    .map(AgentEventPrinter.class::cast)
+                    .ifPresent(context::setEventPrinter);
 
             // Wire Ctrl+C signal handler: cancel agent if running, else no-op
             terminal.handle(Terminal.Signal.INT, signal -> {
