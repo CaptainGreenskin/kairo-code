@@ -64,6 +64,9 @@ public class KairoCodeMain implements Callable<Integer> {
     @Option(names = "--verbose", description = "Show step-by-step progress on stderr")
     private boolean verbose;
 
+    @Option(names = "--output", description = "Write final response to this file instead of stdout")
+    private Path outputFile;
+
     @Override
     public Integer call() {
         // Resolve API key: CLI arg takes precedence over env variable
@@ -153,7 +156,16 @@ public class KairoCodeMain implements Callable<Integer> {
         Msg response = mono.block();
 
         if (response != null) {
-            System.out.println(response.text());
+            try {
+                if (outputFile != null) {
+                    Files.writeString(outputFile, response.text(), StandardCharsets.UTF_8);
+                } else {
+                    System.out.println(response.text());
+                }
+            } catch (java.io.IOException e) {
+                System.err.println("Error writing output file: " + e.getMessage());
+                return 1;
+            }
             return 0;
         } else {
             System.err.println("Error: Agent returned no response.");
