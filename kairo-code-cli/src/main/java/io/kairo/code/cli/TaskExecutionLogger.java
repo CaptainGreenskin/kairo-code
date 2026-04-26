@@ -81,6 +81,9 @@ public class TaskExecutionLogger {
         sb.append("- 总调用次数：").append(e.toolCallCount()).append("\n");
         sb.append("- 成功：").append(e.toolSuccessCount()).append("\n");
         sb.append("- 失败：").append(e.toolCallCount() - e.toolSuccessCount()).append("\n");
+        if (e.crResult() != null) {
+            sb.append("- CR结果：").append(e.crResult()).append("\n");
+        }
         if (e.errorMessage() != null) {
             sb.append("\n## 错误信息\n\n").append(e.errorMessage()).append("\n");
         }
@@ -96,7 +99,8 @@ public class TaskExecutionLogger {
             String agentOutput,
             int toolCallCount,
             int toolSuccessCount,
-            String errorMessage) {
+            String errorMessage,
+            String crResult) {
 
         public static Builder builder() {
             return new Builder();
@@ -112,6 +116,7 @@ public class TaskExecutionLogger {
             private int toolCallCount;
             private int toolSuccessCount;
             private String errorMessage;
+            private String crResult;
 
             public Builder startTime(LocalDateTime v) { startTime = v; return this; }
             public Builder endTime(LocalDateTime v) { endTime = v; return this; }
@@ -122,11 +127,13 @@ public class TaskExecutionLogger {
             public Builder toolCallCount(int v) { toolCallCount = v; return this; }
             public Builder toolSuccessCount(int v) { toolSuccessCount = v; return this; }
             public Builder errorMessage(String v) { errorMessage = v; return this; }
+            public Builder crResult(String v) { crResult = v; return this; }
 
             public LogEntry build() {
                 if (endTime == null) endTime = LocalDateTime.now();
                 return new LogEntry(startTime, endTime, status, taskSource,
-                        taskDescription, agentOutput, toolCallCount, toolSuccessCount, errorMessage);
+                        taskDescription, agentOutput, toolCallCount, toolSuccessCount,
+                        errorMessage, crResult);
             }
         }
     }
