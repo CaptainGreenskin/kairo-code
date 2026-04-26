@@ -55,6 +55,9 @@ public class KairoCodeMain implements Callable<Integer> {
             defaultValue = "0")
     private int maxRetries;
 
+    @Option(names = "--verbose", description = "Show step-by-step progress on stderr")
+    private boolean verbose;
+
     @Override
     public Integer call() {
         // Resolve API key: CLI arg takes precedence over env variable
@@ -122,7 +125,9 @@ public class KairoCodeMain implements Callable<Integer> {
     }
 
     private int runOneShot(CodeAgentConfig config, String resolvedTask) {
-        Agent agent = CodeAgentFactory.create(config);
+        Agent agent = verbose
+                ? CodeAgentFactory.create(config, null, List.of(new ProgressPrinter()))
+                : CodeAgentFactory.create(config);
 
         Msg userMsg = Msg.of(MsgRole.USER, resolvedTask);
         Msg response = agent.call(userMsg).block();
