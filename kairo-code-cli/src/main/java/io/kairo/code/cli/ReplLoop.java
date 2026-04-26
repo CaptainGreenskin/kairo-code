@@ -5,6 +5,7 @@ import io.kairo.api.agent.SnapshotStore;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.skill.SkillRegistry;
+import io.kairo.code.cli.commands.CdCommand;
 import io.kairo.code.cli.commands.ClearCommand;
 import io.kairo.code.cli.commands.CostCommand;
 import io.kairo.code.cli.commands.ExitCommand;
@@ -221,6 +222,7 @@ public class ReplLoop {
 
         // Built-in commands
         registry.register(new HelpCommand());
+        registry.register(new CdCommand());
         registry.register(new ClearCommand());
         registry.register(new ModelCommand());
         registry.register(new CostCommand());

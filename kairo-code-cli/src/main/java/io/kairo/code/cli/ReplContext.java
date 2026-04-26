@@ -150,6 +150,21 @@ public class ReplContext {
         rebuildSession(null);
     }
 
+    /** Switch to a new working directory by updating the config and recreating the session. */
+    public void setWorkingDir(String newWorkingDir) {
+        if (config == null) {
+            return;
+        }
+        this.config =
+                new CodeAgentConfig(
+                        config.apiKey(),
+                        config.baseUrl(),
+                        config.modelName(),
+                        config.maxIterations(),
+                        newWorkingDir);
+        rebuildSession(null);
+    }
+
     /**
      * Recreate the session with the current loaded-skill set, preserving conversation history via
      * a snapshot/restore round-trip.
