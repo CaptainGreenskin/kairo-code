@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
@@ -74,6 +75,10 @@ public class KairoCodeMain implements Callable<Integer> {
             defaultValue = "openai")
     private String provider;
 
+    @Option(names = "--task-list",
+            description = "JSON Lines file with multiple tasks to run in parallel")
+    private Path taskListFile;
+
     @Option(names = "--output", description = "Write final response to this file instead of stdout")
     private Path outputFile;
 
@@ -86,22 +91,29 @@ public class KairoCodeMain implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        // Resolve API key: CLI arg takes precedence over env variable
+        Properties fileConfig = ConfigLoader.load();
+
+        // Resolve API key: CLI arg > env var > config file
         String resolvedApiKey = apiKey;
         if (resolvedApiKey == null || resolvedApiKey.isBlank()) {
             resolvedApiKey = System.getenv("KAIRO_CODE_API_KEY");
         }
         if (resolvedApiKey == null || resolvedApiKey.isBlank()) {
+            resolvedApiKey = fileConfig.getProperty("api-key");
+        }
+        if (resolvedApiKey == null || resolvedApiKey.isBlank()) {
             System.err.println("Error: API key is required. " +
-                    "Set --api-key or KAIRO_CODE_API_KEY environment variable.");
+                    "Set --api-key, KAIRO_CODE_API_KEY, or api-key in ~/.kairo-code/config.properties.");
             return 1;
         }
 
-        // Resolve provider from env if not explicitly set
+        // Resolve provider: CLI arg > env var > config file > default (openai)
         String resolvedProvider = provider;
         String envProvider = System.getenv("KAIRO_CODE_PROVIDER");
         if (envProvider != null && !envProvider.isBlank() && "openai".equals(provider)) {
             resolvedProvider = envProvider;
+        } else if ("openai".equals(provider) && fileConfig.getProperty("provider") != null) {
+            resolvedProvider = fileConfig.getProperty("provider");
         }
         resolvedProvider = resolvedProvider.toLowerCase();
         if (!VALID_PROVIDERS.contains(resolvedProvider)) {
@@ -110,21 +122,26 @@ public class KairoCodeMain implements Callable<Integer> {
             return 1;
         }
 
-        // Resolve model from env if not explicitly set; qianwen defaults to qwen-max
+        // Resolve model: CLI arg > env var > config file > default (gpt-4o / qwen-max)
         String resolvedModel = model;
         String envModel = System.getenv("KAIRO_CODE_MODEL");
         if (envModel != null && !envModel.isBlank() && "gpt-4o".equals(model)) {
             resolvedModel = envModel;
+        } else if ("gpt-4o".equals(model) && fileConfig.getProperty("model") != null) {
+            resolvedModel = fileConfig.getProperty("model");
         } else if ("gpt-4o".equals(model) && "qianwen".equals(resolvedProvider)) {
             resolvedModel = "qwen-max";
         }
 
-        // Resolve base URL: env overrides default; qianwen shortcut sets DashScope URL
+        // Resolve base URL: CLI arg > env var > config file > default
         String resolvedBaseUrl = baseUrl;
         String envBaseUrl = System.getenv("KAIRO_CODE_BASE_URL");
         if (envBaseUrl != null && !envBaseUrl.isBlank()
                 && "https://api.openai.com".equals(baseUrl)) {
             resolvedBaseUrl = envBaseUrl;
+        } else if ("https://api.openai.com".equals(baseUrl)
+                && fileConfig.getProperty("base-url") != null) {
+            resolvedBaseUrl = fileConfig.getProperty("base-url");
         } else if ("https://api.openai.com".equals(baseUrl)
                 && "qianwen".equals(resolvedProvider)) {
             resolvedBaseUrl = DASHSCOPE_BASE_URL;
@@ -137,9 +154,28 @@ public class KairoCodeMain implements Callable<Integer> {
         }
 
         try {
-            if (task != null && taskFile != null) {
-                System.err.println("Error: --task and --task-file are mutually exclusive.");
+            long mutuallyExclusiveCount = java.util.stream.Stream
+                    .of(task, taskFile, taskListFile)
+                    .filter(java.util.Objects::nonNull).count();
+            if (mutuallyExclusiveCount > 1) {
+                System.err.println(
+                        "Error: --task, --task-file, and --task-list are mutually exclusive.");
                 return 1;
+            }
+
+            CodeAgentConfig config = new CodeAgentConfig(
+                    resolvedApiKey, resolvedBaseUrl, resolvedModel,
+                    maxIterations, resolvedWorkingDir);
+            ModelProvider modelProvider = buildModelProvider(
+                    resolvedProvider, resolvedApiKey, resolvedBaseUrl);
+
+            if (taskListFile != null) {
+                if (!Files.exists(taskListFile)) {
+                    System.err.println("Error: task-list file not found: " + taskListFile);
+                    return 1;
+                }
+                return new ParallelTaskRunner(config, modelProvider, timeoutSeconds, System.err)
+                        .run(taskListFile);
             }
 
             String resolvedTask = task;
@@ -151,11 +187,6 @@ public class KairoCodeMain implements Callable<Integer> {
                 resolvedTask = Files.readString(taskFile, StandardCharsets.UTF_8);
             }
 
-            CodeAgentConfig config = new CodeAgentConfig(
-                    resolvedApiKey, resolvedBaseUrl, resolvedModel,
-                    maxIterations, resolvedWorkingDir);
-            ModelProvider modelProvider = buildModelProvider(
-                    resolvedProvider, resolvedApiKey, resolvedBaseUrl);
             RetryPolicy retryPolicy = new RetryPolicy(maxRetries);
 
             if (resolvedTask != null && !resolvedTask.isBlank()) {

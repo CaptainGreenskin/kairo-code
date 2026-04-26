@@ -113,4 +113,23 @@ class KairoCodeMainOptionTest {
         // picocli may reject negative int for a valid option, or KairoCodeMain catches it
         assertThat(code).isEqualTo(1);
     }
+
+    @Test
+    void maxIterationsDefaultIsAccepted() {
+        int code = run("--api-key", "fake-key", "--task", "t");
+        // Default of 50 should not cause a parse error
+        assertThat(code).isNotEqualTo(2);
+    }
+
+    @Test
+    void maxIterationsPositiveValueAccepted() {
+        int code = run("--api-key", "fake-key", "--task", "t", "--max-iterations", "10");
+        assertThat(code).isNotEqualTo(2);
+    }
+
+    @Test
+    void maxIterationsOneAccepted() {
+        int code = run("--api-key", "fake-key", "--task", "t", "--max-iterations", "1");
+        assertThat(code).isNotEqualTo(2);
+    }
 }
