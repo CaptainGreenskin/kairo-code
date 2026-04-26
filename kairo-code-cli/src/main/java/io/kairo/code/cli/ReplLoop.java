@@ -85,7 +85,7 @@ public class ReplLoop {
                 .system(true)
                 .build()) {
 
-            SkillRegistry skillRegistry = bootstrapSkillRegistry();
+            SkillRegistry skillRegistry = bootstrapSkillRegistry(kairoDir);
             SnapshotStore snapshotStore = bootstrapSnapshotStore(kairoDir);
             CommandRegistry registry = createCommandRegistry();
 
@@ -268,11 +268,11 @@ public class ReplLoop {
     }
 
     /**
-     * Build a {@link SkillRegistry} pre-loaded with the built-in skills shipped under
-     * {@code skills/} on the classpath. Skill load failures are logged at WARN — startup must
-     * never abort because of a malformed bundled markdown file.
+     * Build a {@link SkillRegistry} pre-loaded with built-in skills (classpath) and any
+     * user-defined skills found in {@code <kairoDir>/skills/*.md}. Load failures are logged at
+     * WARN — startup must never abort because of a malformed skill file.
      */
-    private SkillRegistry bootstrapSkillRegistry() {
+    private SkillRegistry bootstrapSkillRegistry(Path kairoDir) {
         DefaultSkillRegistry registry = new DefaultSkillRegistry();
         for (String name : BUILTIN_SKILLS) {
             String resourcePath = "skills/" + name + ".md";
@@ -280,6 +280,25 @@ public class ReplLoop {
                 registry.loadFromClasspath(resourcePath).block();
             } catch (Exception e) {
                 log.warn("Failed to load built-in skill '{}': {}", name, e.getMessage());
+            }
+        }
+        Path userSkillsDir = kairoDir.resolve("skills");
+        if (Files.isDirectory(userSkillsDir)) {
+            try (var stream = Files.list(userSkillsDir)) {
+                stream.filter(p -> p.toString().endsWith(".md"))
+                        .sorted()
+                        .forEach(p -> {
+                            try {
+                                registry.loadFromFile(p).block();
+                                log.debug("Loaded user skill: {}", p.getFileName());
+                            } catch (Exception e) {
+                                log.warn("Failed to load user skill '{}': {}", p.getFileName(),
+                                        e.getMessage());
+                            }
+                        });
+            } catch (IOException e) {
+                log.warn("Could not list user skills directory {}: {}", userSkillsDir,
+                        e.getMessage());
             }
         }
         return registry;
