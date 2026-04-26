@@ -17,6 +17,22 @@ Kairo Code is a governable Java Code Agent built on [Kairo](https://getkairo.dev
 - A plugin marketplace
 - A TUI rendering showcase
 
+## Why Kairo Code
+
+We compete on **different axes** from Cursor / Claude Code / cloud sandboxes —
+compliance, embeddability, governance, BYO-model economics. If your decision
+matrix has any of the rows below, the linked doc is your answer.
+
+| You're asking… | Read |
+| --- | --- |
+| Why not Cursor / Claude Code / cloud sandbox? | [01 · Compliance & Data Sovereignty](docs/positioning/01-compliance-and-sovereignty.md) |
+| Can we embed this into our Spring Boot / Jenkins / CI? | [02 · Integration & Embedding](docs/positioning/02-integration-and-embedding.md) |
+| What about multi-agent teams or vertical domain agents? | [03 · Multi-Agent & Vertical](docs/positioning/03-multi-agent-and-vertical.md) |
+| Can we use cheaper / self-hosted LLMs? | [04 · Cost & Economics](docs/positioning/04-cost-economics.md) |
+| Why should I bet on a v0.1 project? Why Java? | [05 · Governance & OSS](docs/positioning/05-governance-and-oss.md) |
+
+Full positioning index: [`docs/positioning/`](docs/positioning/README.md).
+
 ## Quick Start
 
 ```bash
