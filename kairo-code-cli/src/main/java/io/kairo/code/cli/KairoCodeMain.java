@@ -85,6 +85,10 @@ public class KairoCodeMain implements Callable<Integer> {
     @Option(names = "--show-usage", description = "Print token usage stats to stderr after completion")
     private boolean showUsage;
 
+    @Option(names = "--output-format", description = "Output format: text (default), json",
+            defaultValue = "text")
+    private String outputFormat;
+
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen");
@@ -231,20 +235,31 @@ public class KairoCodeMain implements Callable<Integer> {
         Msg response = mono.block();
 
         if (response != null) {
-            if (showUsage) {
+            long totalTokens = 0;
+            int iterations = 0;
+            if (showUsage || "json".equalsIgnoreCase(outputFormat)) {
                 try {
                     AgentSnapshot snap = agent.snapshot();
-                    System.err.printf("[USAGE] total_tokens=%d iterations=%d%n",
-                            snap.totalTokensUsed(), snap.iteration());
+                    totalTokens = snap.totalTokensUsed();
+                    iterations = snap.iteration();
+                    if (showUsage) {
+                        System.err.printf("[USAGE] total_tokens=%d iterations=%d%n",
+                                totalTokens, iterations);
+                    }
                 } catch (UnsupportedOperationException ignored) {
-                    System.err.println("[USAGE] token stats not available for this agent");
+                    if (showUsage) {
+                        System.err.println("[USAGE] token stats not available for this agent");
+                    }
                 }
             }
             try {
+                String output = "json".equalsIgnoreCase(outputFormat)
+                        ? buildJsonOutput(response.text(), iterations, totalTokens, 0)
+                        : response.text();
                 if (outputFile != null) {
-                    Files.writeString(outputFile, response.text(), StandardCharsets.UTF_8);
+                    Files.writeString(outputFile, output, StandardCharsets.UTF_8);
                 } else {
-                    System.out.println(response.text());
+                    System.out.println(output);
                 }
             } catch (java.io.IOException e) {
                 System.err.println("Error writing output file: " + e.getMessage());
@@ -255,6 +270,39 @@ public class KairoCodeMain implements Callable<Integer> {
             System.err.println("Error: Agent returned no response.");
             return 1;
         }
+    }
+
+    static String buildJsonOutput(String response, int iterations, long totalTokens, int exitCode) {
+        return "{\n"
+                + "  \"response\": " + jsonString(response) + ",\n"
+                + "  \"iterations\": " + iterations + ",\n"
+                + "  \"total_tokens\": " + totalTokens + ",\n"
+                + "  \"exit_code\": " + exitCode + "\n"
+                + "}";
+    }
+
+    private static String jsonString(String value) {
+        if (value == null) return "null";
+        StringBuilder sb = new StringBuilder("\"");
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        sb.append('"');
+        return sb.toString();
     }
 
     private int runRepl(CodeAgentConfig config) {
