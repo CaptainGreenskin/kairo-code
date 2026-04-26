@@ -73,6 +73,9 @@ public class KairoCodeMain implements Callable<Integer> {
             defaultValue = "openai")
     private String provider;
 
+    @Option(names = "--output", description = "Write final response to this file instead of stdout")
+    private Path outputFile;
+
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen");
@@ -193,7 +196,16 @@ public class KairoCodeMain implements Callable<Integer> {
         Msg response = mono.block();
 
         if (response != null) {
-            System.out.println(response.text());
+            try {
+                if (outputFile != null) {
+                    Files.writeString(outputFile, response.text(), StandardCharsets.UTF_8);
+                } else {
+                    System.out.println(response.text());
+                }
+            } catch (java.io.IOException e) {
+                System.err.println("Error writing output file: " + e.getMessage());
+                return 1;
+            }
             return 0;
         } else {
             System.err.println("Error: Agent returned no response.");
