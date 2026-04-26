@@ -1,6 +1,7 @@
 package io.kairo.code.cli;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.api.agent.AgentSnapshot;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.code.core.CodeAgentConfig;
@@ -63,6 +64,9 @@ public class KairoCodeMain implements Callable<Integer> {
 
     @Option(names = "--verbose", description = "Show step-by-step progress on stderr")
     private boolean verbose;
+
+    @Option(names = "--show-usage", description = "Print token usage stats to stderr after completion")
+    private boolean showUsage;
 
     @Override
     public Integer call() {
@@ -153,6 +157,15 @@ public class KairoCodeMain implements Callable<Integer> {
         Msg response = mono.block();
 
         if (response != null) {
+            if (showUsage) {
+                try {
+                    AgentSnapshot snap = agent.snapshot();
+                    System.err.printf("[USAGE] total_tokens=%d iterations=%d%n",
+                            snap.totalTokensUsed(), snap.iteration());
+                } catch (UnsupportedOperationException ignored) {
+                    System.err.println("[USAGE] token stats not available for this agent");
+                }
+            }
             System.out.println(response.text());
             return 0;
         } else {
