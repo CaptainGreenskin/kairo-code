@@ -14,10 +14,15 @@ import io.kairo.code.cli.commands.PlanCommand;
 import io.kairo.code.cli.commands.ResumeCommand;
 import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
+import io.kairo.code.cli.task.ConsoleWorktreeMergePrompter;
+import io.kairo.code.cli.task.ReplChildSessionSpawner;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.ConsoleApprovalHandler;
+import io.kairo.code.core.task.TaskToolDependencies;
+import io.kairo.code.core.workspace.WorktreeLifecycle;
+import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
 import io.kairo.core.agent.snapshot.JsonFileSnapshotStore;
 import io.kairo.core.session.SessionSerializer;
 import io.kairo.skill.DefaultSkillRegistry;
@@ -104,19 +109,29 @@ public class ReplLoop {
             ConsoleApprovalHandler approvalHandler =
                     new ConsoleApprovalHandler(terminalReader, writer);
 
-            // Create initial session: wire approval handler + hooks at the factory level so
-            // every rebuilt session (e.g., after :clear, :model, :skill) keeps the same
-            // approval/hook setup without callers having to re-thread them.
+            // Wire TaskTool dependencies. The provider is rooted at the user's working dir; if
+            // that dir is not a git repo, the provider transparently falls back to NONE
+            // isolation (parent workspace) for any sub-tasks. The merge prompter and child
+            // spawner reuse the same approval handler + terminal I/O as the parent.
+            TaskToolDependencies taskDeps = buildTaskDependencies(
+                    config, kairoDir, terminalReader, writer, approvalHandler);
+
+            // Create initial session: wire approval handler + hooks + task tool at the factory
+            // level so every rebuilt session (e.g., after :clear, :model, :skill) keeps the same
+            // setup without callers having to re-thread them.
             CodeAgentFactory.SessionOptions baseOpts =
                     CodeAgentFactory.SessionOptions.empty()
                             .withApprovalHandler(approvalHandler)
-                            .withHooks(hooks);
+                            .withHooks(hooks)
+                            .withTaskTool(taskDeps);
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
             StreamingAgentRunner runner = new StreamingAgentRunner(writer);
             ReplContext context = new ReplContext(
                     session, config, lineReader, registry, writer,
-                    opts -> opts.withApprovalHandler(approvalHandler).withHooks(hooks),
+                    opts -> opts.withApprovalHandler(approvalHandler)
+                            .withHooks(hooks)
+                            .withTaskTool(taskDeps),
                     approvalHandler,
                     skillRegistry,
                     snapshotStore);
@@ -223,6 +238,31 @@ public class ReplLoop {
      */
     private SnapshotStore bootstrapSnapshotStore(Path kairoDir) {
         return new JsonFileSnapshotStore(kairoDir.resolve("snapshots"), new SessionSerializer());
+    }
+
+    /**
+     * Wire the {@code task} tool's dependency bundle: a worktree-backed workspace provider rooted
+     * at the user's working dir, a JLine-backed merge prompter, and a child-session spawner that
+     * builds children through {@link CodeAgentFactory} with {@code asChildSession()}.
+     */
+    private TaskToolDependencies buildTaskDependencies(
+            CodeAgentConfig config,
+            Path kairoDir,
+            BufferedReader terminalReader,
+            PrintWriter writer,
+            ConsoleApprovalHandler approvalHandler) {
+        Path parentRoot =
+                Path.of(
+                        config.workingDir() != null && !config.workingDir().isBlank()
+                                ? config.workingDir()
+                                : System.getProperty("user.dir"));
+        WorktreeLifecycle lifecycle = new WorktreeLifecycle(kairoDir.resolve("worktrees"), "git");
+        WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(parentRoot, lifecycle);
+        ConsoleWorktreeMergePrompter prompter =
+                new ConsoleWorktreeMergePrompter(terminalReader, writer);
+        ReplChildSessionSpawner spawner =
+                new ReplChildSessionSpawner(config, approvalHandler, writer);
+        return new TaskToolDependencies(provider, spawner, prompter);
     }
 
     /**

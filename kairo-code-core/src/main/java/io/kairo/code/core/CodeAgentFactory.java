@@ -9,6 +9,8 @@ import io.kairo.api.tool.PermissionGuard;
 import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.core.agent.AgentBuilder;
 import io.kairo.core.model.openai.OpenAIProvider;
+import io.kairo.code.core.task.TaskTool;
+import io.kairo.code.core.task.TaskToolDependencies;
 import io.kairo.core.tool.DefaultPermissionGuard;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
@@ -21,8 +23,10 @@ import io.kairo.tools.file.WriteTool;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -104,6 +108,12 @@ public final class CodeAgentFactory {
         registry.registerTool(EditTool.class);
         registry.registerTool(GrepTool.class);
         registry.registerTool(GlobTool.class);
+        // Register the task tool only when dependencies are wired AND this is not a child session.
+        // Child sessions never get TaskTool — recursion is out of scope for M3.
+        TaskToolDependencies taskDeps = options.taskToolDependencies();
+        if (taskDeps != null && !options.childSession()) {
+            registry.registerTool(TaskTool.class);
+        }
 
         PermissionGuard guard = new DefaultPermissionGuard();
         DefaultToolExecutor executor = new DefaultToolExecutor(registry, guard);
@@ -120,6 +130,12 @@ public final class CodeAgentFactory {
                         .modelName(config.modelName())
                         .systemPrompt(systemPrompt)
                         .maxIterations(config.maxIterations());
+
+        if (taskDeps != null && !options.childSession()) {
+            Map<String, Object> deps = new LinkedHashMap<>();
+            deps.put(TaskToolDependencies.class.getName(), taskDeps);
+            builder.toolDependencies(deps);
+        }
 
         if (options.approvalHandler() != null) {
             builder.approvalHandler(options.approvalHandler());
@@ -203,7 +219,9 @@ public final class CodeAgentFactory {
             List<Object> hooks,
             SkillRegistry skillRegistry,
             Set<String> activeSkills,
-            AgentSnapshot restoreFrom) {
+            AgentSnapshot restoreFrom,
+            TaskToolDependencies taskToolDependencies,
+            boolean childSession) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -211,17 +229,31 @@ public final class CodeAgentFactory {
         }
 
         public static SessionOptions empty() {
-            return new SessionOptions(null, null, List.of(), null, Set.of(), null);
+            return new SessionOptions(null, null, List.of(), null, Set.of(), null, null, false);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
             return new SessionOptions(
-                    provider, approvalHandler, hooks, skillRegistry, activeSkills, restoreFrom);
+                    provider,
+                    approvalHandler,
+                    hooks,
+                    skillRegistry,
+                    activeSkills,
+                    restoreFrom,
+                    taskToolDependencies,
+                    childSession);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
             return new SessionOptions(
-                    modelProvider, handler, hooks, skillRegistry, activeSkills, restoreFrom);
+                    modelProvider,
+                    handler,
+                    hooks,
+                    skillRegistry,
+                    activeSkills,
+                    restoreFrom,
+                    taskToolDependencies,
+                    childSession);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -231,7 +263,9 @@ public final class CodeAgentFactory {
                     hookList == null ? List.of() : List.copyOf(hookList),
                     skillRegistry,
                     activeSkills,
-                    restoreFrom);
+                    restoreFrom,
+                    taskToolDependencies,
+                    childSession);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
@@ -241,12 +275,54 @@ public final class CodeAgentFactory {
                     hooks,
                     registry,
                     active == null ? Set.of() : Set.copyOf(active),
-                    restoreFrom);
+                    restoreFrom,
+                    taskToolDependencies,
+                    childSession);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
             return new SessionOptions(
-                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills, snapshot);
+                    modelProvider,
+                    approvalHandler,
+                    hooks,
+                    skillRegistry,
+                    activeSkills,
+                    snapshot,
+                    taskToolDependencies,
+                    childSession);
+        }
+
+        /**
+         * Wire TaskTool dependencies. The {@code task} tool is registered only when this is
+         * non-null AND {@link #childSession()} is false.
+         */
+        public SessionOptions withTaskTool(TaskToolDependencies deps) {
+            return new SessionOptions(
+                    modelProvider,
+                    approvalHandler,
+                    hooks,
+                    skillRegistry,
+                    activeSkills,
+                    restoreFrom,
+                    deps,
+                    childSession);
+        }
+
+        /**
+         * Mark this as a child session — TaskTool will not be registered (no recursion). Child
+         * sessions are spawned by the parent's {@code task} tool via {@link
+         * io.kairo.code.core.task.ChildSessionSpawner}.
+         */
+        public SessionOptions asChildSession() {
+            return new SessionOptions(
+                    modelProvider,
+                    approvalHandler,
+                    hooks,
+                    skillRegistry,
+                    activeSkills,
+                    restoreFrom,
+                    taskToolDependencies,
+                    true);
         }
     }
 }

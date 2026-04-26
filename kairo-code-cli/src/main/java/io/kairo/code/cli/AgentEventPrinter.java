@@ -45,18 +45,33 @@ public class AgentEventPrinter {
     }
 
     private final PrintWriter writer;
+    private final String prefix;
 
     public AgentEventPrinter(PrintWriter writer) {
+        this(writer, "");
+    }
+
+    /**
+     * Prefix-aware variant for child agents spawned via the {@code task} tool. Pass e.g. {@code
+     * "[task:t-abc12345] "} so streaming output from the child is visually distinct from the
+     * parent's. Pass an empty string for the parent.
+     */
+    public AgentEventPrinter(PrintWriter writer, String prefix) {
         this.writer = writer;
+        this.prefix = prefix == null ? "" : prefix;
+    }
+
+    private String linePrefix() {
+        return prefix.isEmpty() ? "" : DIM + prefix + RESET;
     }
 
     @HookHandler(HookPhase.PRE_ACTING)
     public synchronized void onPreActing(PreActingEvent event) {
         String argsSummary = summarizeArgs(event.input());
         if (argsSummary.isEmpty()) {
-            writer.println(YELLOW + "⚡ Running " + BOLD + event.toolName() + RESET + YELLOW + "..." + RESET);
+            writer.println(linePrefix() + YELLOW + "⚡ Running " + BOLD + event.toolName() + RESET + YELLOW + "..." + RESET);
         } else {
-            writer.println(YELLOW + "⚡ Running " + BOLD + event.toolName() + RESET
+            writer.println(linePrefix() + YELLOW + "⚡ Running " + BOLD + event.toolName() + RESET
                     + DIM + "(" + argsSummary + ")" + RESET + YELLOW + "..." + RESET);
         }
         writer.flush();
@@ -70,19 +85,19 @@ public class AgentEventPrinter {
                     ? content.substring(0, MAX_RESULT_LENGTH) + "... [truncated]"
                     : content;
             if (event.result().isError()) {
-                writer.println(RED + "  ✗ " + event.toolName() + " failed: " + RESET + truncateLines(display, MAX_RESULT_LINES));
+                writer.println(linePrefix() + RED + "  ✗ " + event.toolName() + " failed: " + RESET + truncateLines(display, MAX_RESULT_LINES));
             } else {
-                writer.println(GREEN + "  ✓ " + event.toolName() + " completed" + RESET);
+                writer.println(linePrefix() + GREEN + "  ✓ " + event.toolName() + " completed" + RESET);
                 String preview = truncateLines(display, MAX_RESULT_LINES);
                 if (!preview.isBlank()) {
-                    writer.println(DIM + "    " + preview.replace("\n", "\n    ") + RESET);
+                    writer.println(linePrefix() + DIM + "    " + preview.replace("\n", "\n    ") + RESET);
                 }
             }
         } else {
             if (event.result().isError()) {
-                writer.println(RED + "  ✗ " + event.toolName() + " failed" + RESET);
+                writer.println(linePrefix() + RED + "  ✗ " + event.toolName() + " failed" + RESET);
             } else {
-                writer.println(GREEN + "  ✓ " + event.toolName() + " completed" + RESET);
+                writer.println(linePrefix() + GREEN + "  ✓ " + event.toolName() + " completed" + RESET);
             }
         }
         writer.flush();
@@ -99,7 +114,14 @@ public class AgentEventPrinter {
                 .collect(Collectors.joining());
         if (!text.isBlank()) {
             writer.println();
-            writer.println(text);
+            if (prefix.isEmpty()) {
+                writer.println(text);
+            } else {
+                String p = linePrefix();
+                for (String line : text.split("\n", -1)) {
+                    writer.println(p + line);
+                }
+            }
             writer.println();
             writer.flush();
         }

@@ -4,6 +4,66 @@ All notable changes to Kairo Code are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-M3] — 2026-04-26
+
+Third milestone — kairo-code grows a `task` tool that spawns sub-agents in
+isolated git worktrees, then prompts the user to merge / discard / keep the
+child's changes. This is also the **first real consumer of the upstream kairo
+Workspace SPI** (`io.kairo.api.workspace`); until now the SPI had only its
+default `LocalDirectoryWorkspaceProvider`.
+
+### Added
+
+- `task` tool (`io.kairo.code.core.task.TaskTool`, `@Tool(name="task")`) — the
+  parent agent calls it with `description` + `prompt` (+ optional
+  `isolation: worktree|none`) to delegate a focused sub-goal to a child
+  session. Returns an XML `<task_result task_id=… outcome=… files_changed=…>`
+  envelope wrapping the child's final message, with metadata mirrored on the
+  `ToolResult`.
+- `WorktreeWorkspaceProvider` + `WorktreeLifecycle` (`kairo-code-core`) —
+  acquire spawns a worktree under
+  `~/.kairo-code/worktrees/<repo-fingerprint>/<task-id>/`, records the parent
+  HEAD SHA in a `.base` sidecar, and supports squash-`merge` / `discard` /
+  `keep`. Falls back to `NONE` isolation transparently when the parent dir is
+  not a git repo, so read-only sub-tasks still work.
+- `ConsoleWorktreeMergePrompter` (`kairo-code-cli/task/`) — JLine-backed
+  three-way prompt (`[m]erge / [d]iscard / [k]eep`) using the same
+  `BufferedReader` / `PrintWriter` channels as `ConsoleApprovalHandler`.
+  Reactor-cancellable: dispose interrupts the prompting thread and the
+  prompter resolves to `DISCARD` (the safest default per the
+  `WorktreeMergePrompter` contract).
+- `ReplChildSessionSpawner` (`kairo-code-cli/task/`) — builds children
+  through `CodeAgentFactory.createSession` with `SessionOptions.asChildSession()`,
+  overrides `CodeAgentConfig.workingDir` to the worktree path, and shares the
+  parent's approval handler so the user sees a single approval flow.
+- `AgentEventPrinter` gained a `prefix` constructor — children stream with a
+  dim `[task:<id>] ` prefix so parent and child output are visually distinct.
+
+### Changed
+
+- `CodeAgentFactory.SessionOptions` extended with
+  `withTaskTool(TaskToolDependencies)` and `asChildSession()`. The factory
+  registers `TaskTool` only when deps are wired **and** the session is not a
+  child — recursion is out of scope for M3 and the factory enforces it.
+- `ReplLoop` builds a `TaskToolDependencies` bundle at startup
+  (provider rooted at `config.workingDir()`, lifecycle dir
+  `~/.kairo-code/worktrees`) and threads it into both the initial session
+  and the `ReplContext` rebuild lambda, so `:clear`, `:model`, and `:skill`
+  preserve the wiring.
+
+### Tests
+
+- 108/108 green via `mvn clean verify` (kairo-code-core 44 + kairo-code-cli 64).
+- New suites: `TaskToolTest` (5 cases — merge, discard, no-op skips prompt,
+  missing deps, blank description) and `TaskToolIT` (2 cases — factory
+  registers `task` for parent only, full e2e merge of a child write into the
+  parent).
+
+### Demo
+
+See [`docs/m3-task-tool-demo.md`](docs/m3-task-tool-demo.md) for a reproducible
+REPL walkthrough.
+
 ## [0.1.0-M2] — 2026-04-25
 
 Second milestone — interactive REPL gains the controls needed for a 30-minute
