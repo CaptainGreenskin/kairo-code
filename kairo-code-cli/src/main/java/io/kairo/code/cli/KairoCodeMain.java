@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
@@ -86,22 +87,29 @@ public class KairoCodeMain implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        // Resolve API key: CLI arg takes precedence over env variable
+        Properties fileConfig = ConfigLoader.load();
+
+        // Resolve API key: CLI arg > env var > config file
         String resolvedApiKey = apiKey;
         if (resolvedApiKey == null || resolvedApiKey.isBlank()) {
             resolvedApiKey = System.getenv("KAIRO_CODE_API_KEY");
         }
         if (resolvedApiKey == null || resolvedApiKey.isBlank()) {
+            resolvedApiKey = fileConfig.getProperty("api-key");
+        }
+        if (resolvedApiKey == null || resolvedApiKey.isBlank()) {
             System.err.println("Error: API key is required. " +
-                    "Set --api-key or KAIRO_CODE_API_KEY environment variable.");
+                    "Set --api-key, KAIRO_CODE_API_KEY, or api-key in ~/.kairo-code/config.properties.");
             return 1;
         }
 
-        // Resolve provider from env if not explicitly set
+        // Resolve provider: CLI arg > env var > config file > default (openai)
         String resolvedProvider = provider;
         String envProvider = System.getenv("KAIRO_CODE_PROVIDER");
         if (envProvider != null && !envProvider.isBlank() && "openai".equals(provider)) {
             resolvedProvider = envProvider;
+        } else if ("openai".equals(provider) && fileConfig.getProperty("provider") != null) {
+            resolvedProvider = fileConfig.getProperty("provider");
         }
         resolvedProvider = resolvedProvider.toLowerCase();
         if (!VALID_PROVIDERS.contains(resolvedProvider)) {
@@ -110,21 +118,26 @@ public class KairoCodeMain implements Callable<Integer> {
             return 1;
         }
 
-        // Resolve model from env if not explicitly set; qianwen defaults to qwen-max
+        // Resolve model: CLI arg > env var > config file > default (gpt-4o / qwen-max)
         String resolvedModel = model;
         String envModel = System.getenv("KAIRO_CODE_MODEL");
         if (envModel != null && !envModel.isBlank() && "gpt-4o".equals(model)) {
             resolvedModel = envModel;
+        } else if ("gpt-4o".equals(model) && fileConfig.getProperty("model") != null) {
+            resolvedModel = fileConfig.getProperty("model");
         } else if ("gpt-4o".equals(model) && "qianwen".equals(resolvedProvider)) {
             resolvedModel = "qwen-max";
         }
 
-        // Resolve base URL: env overrides default; qianwen shortcut sets DashScope URL
+        // Resolve base URL: CLI arg > env var > config file > default
         String resolvedBaseUrl = baseUrl;
         String envBaseUrl = System.getenv("KAIRO_CODE_BASE_URL");
         if (envBaseUrl != null && !envBaseUrl.isBlank()
                 && "https://api.openai.com".equals(baseUrl)) {
             resolvedBaseUrl = envBaseUrl;
+        } else if ("https://api.openai.com".equals(baseUrl)
+                && fileConfig.getProperty("base-url") != null) {
+            resolvedBaseUrl = fileConfig.getProperty("base-url");
         } else if ("https://api.openai.com".equals(baseUrl)
                 && "qianwen".equals(resolvedProvider)) {
             resolvedBaseUrl = DASHSCOPE_BASE_URL;
