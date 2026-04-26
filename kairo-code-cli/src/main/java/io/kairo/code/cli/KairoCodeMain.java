@@ -219,16 +219,25 @@ public class KairoCodeMain implements Callable<Integer> {
     }
 
     private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider) {
+        PrintWriter errWriter = new PrintWriter(System.err, true);
         Agent agent = verbose
-                ? CodeAgentFactory.create(config, modelProvider, null, List.of(new ProgressPrinter()))
+                ? CodeAgentFactory.create(config, modelProvider, null,
+                        List.of(new AgentEventPrinter(errWriter)))
                 : CodeAgentFactory.create(config, modelProvider);
 
         Msg userMsg = Msg.of(MsgRole.USER, resolvedTask);
-        var mono = agent.call(userMsg);
-        if (timeoutSeconds > 0) {
-            mono = mono.timeout(Duration.ofSeconds(timeoutSeconds));
+        Msg response;
+        if (verbose) {
+            // Streaming mode: real-time output via AgentEventPrinter hook; timeout not supported
+            StreamingAgentRunner runner = new StreamingAgentRunner(errWriter);
+            response = runner.run(userMsg, agent);
+        } else {
+            var mono = agent.call(userMsg);
+            if (timeoutSeconds > 0) {
+                mono = mono.timeout(Duration.ofSeconds(timeoutSeconds));
+            }
+            response = mono.block();
         }
-        Msg response = mono.block();
 
         if (response != null) {
             if (showUsage) {
