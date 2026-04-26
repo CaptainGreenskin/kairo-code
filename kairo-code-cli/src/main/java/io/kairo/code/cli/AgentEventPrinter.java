@@ -6,6 +6,7 @@ import io.kairo.api.hook.PostActingEvent;
 import io.kairo.api.hook.PostReasoningEvent;
 import io.kairo.api.hook.PreActingEvent;
 import io.kairo.api.message.Content;
+import io.kairo.api.model.ModelResponse;
 import java.io.PrintWriter;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -123,8 +124,13 @@ public class AgentEventPrinter {
                 }
             }
             writer.println();
-            writer.flush();
         }
+        ModelResponse.Usage usage = event.response().usage();
+        if (usage != null) {
+            writer.printf(linePrefix() + DIM + "[model] in=%d out=%d cache_read=%d" + RESET + "%n",
+                    usage.inputTokens(), usage.outputTokens(), usage.cacheReadTokens());
+        }
+        writer.flush();
     }
 
     private static String summarizeArgs(Map<String, Object> input) {
