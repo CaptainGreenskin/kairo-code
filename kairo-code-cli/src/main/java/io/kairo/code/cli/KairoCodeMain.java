@@ -74,6 +74,10 @@ public class KairoCodeMain implements Callable<Integer> {
             defaultValue = "openai")
     private String provider;
 
+    @Option(names = "--task-list",
+            description = "JSON Lines file with multiple tasks to run in parallel")
+    private Path taskListFile;
+
     @Option(names = "--output", description = "Write final response to this file instead of stdout")
     private Path outputFile;
 
@@ -137,9 +141,28 @@ public class KairoCodeMain implements Callable<Integer> {
         }
 
         try {
-            if (task != null && taskFile != null) {
-                System.err.println("Error: --task and --task-file are mutually exclusive.");
+            long mutuallyExclusiveCount = java.util.stream.Stream
+                    .of(task, taskFile, taskListFile)
+                    .filter(java.util.Objects::nonNull).count();
+            if (mutuallyExclusiveCount > 1) {
+                System.err.println(
+                        "Error: --task, --task-file, and --task-list are mutually exclusive.");
                 return 1;
+            }
+
+            CodeAgentConfig config = new CodeAgentConfig(
+                    resolvedApiKey, resolvedBaseUrl, resolvedModel,
+                    maxIterations, resolvedWorkingDir);
+            ModelProvider modelProvider = buildModelProvider(
+                    resolvedProvider, resolvedApiKey, resolvedBaseUrl);
+
+            if (taskListFile != null) {
+                if (!Files.exists(taskListFile)) {
+                    System.err.println("Error: task-list file not found: " + taskListFile);
+                    return 1;
+                }
+                return new ParallelTaskRunner(config, modelProvider, timeoutSeconds, System.err)
+                        .run(taskListFile);
             }
 
             String resolvedTask = task;
@@ -151,11 +174,6 @@ public class KairoCodeMain implements Callable<Integer> {
                 resolvedTask = Files.readString(taskFile, StandardCharsets.UTF_8);
             }
 
-            CodeAgentConfig config = new CodeAgentConfig(
-                    resolvedApiKey, resolvedBaseUrl, resolvedModel,
-                    maxIterations, resolvedWorkingDir);
-            ModelProvider modelProvider = buildModelProvider(
-                    resolvedProvider, resolvedApiKey, resolvedBaseUrl);
             RetryPolicy retryPolicy = new RetryPolicy(maxRetries);
 
             if (resolvedTask != null && !resolvedTask.isBlank()) {
