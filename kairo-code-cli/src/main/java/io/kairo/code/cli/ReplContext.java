@@ -133,6 +133,12 @@ public class ReplContext {
         rebuildSession(null);
     }
 
+    /** Unload all loaded skills and rebuild the session from scratch. */
+    public void clearSkills() {
+        loadedSkills.clear();
+        rebuildSession(null);
+    }
+
     /**
      * Switch to a new model by updating the config and recreating the session. History is dropped.
      */
