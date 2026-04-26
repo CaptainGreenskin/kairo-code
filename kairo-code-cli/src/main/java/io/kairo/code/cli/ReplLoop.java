@@ -9,6 +9,7 @@ import io.kairo.code.cli.commands.ClearCommand;
 import io.kairo.code.cli.commands.CostCommand;
 import io.kairo.code.cli.commands.ExitCommand;
 import io.kairo.code.cli.commands.HelpCommand;
+import io.kairo.code.cli.commands.HooksCommand;
 import io.kairo.code.cli.commands.ModelCommand;
 import io.kairo.code.cli.commands.PlanCommand;
 import io.kairo.code.cli.commands.ResumeCommand;
@@ -137,6 +138,7 @@ public class ReplLoop {
                     skillRegistry,
                     snapshotStore);
             context.setRunner(runner);
+            context.setHookHandlers(hooks);
 
             // Wire Ctrl+C signal handler: cancel agent if running, else no-op
             terminal.handle(Terminal.Signal.INT, signal -> {
@@ -229,6 +231,7 @@ public class ReplLoop {
         registry.register(new SkillCommand());
         registry.register(new SnapshotCommand());
         registry.register(new ResumeCommand());
+        registry.register(new HooksCommand());
         registry.register(new ExitCommand());
 
         return registry;

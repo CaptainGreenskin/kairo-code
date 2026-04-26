@@ -9,7 +9,9 @@ import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.ConsoleApprovalHandler;
 import java.io.PrintWriter;
+import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.function.UnaryOperator;
 import org.jline.reader.LineReader;
@@ -35,6 +37,7 @@ public class ReplContext {
     private final Set<String> loadedSkills = new LinkedHashSet<>();
     private volatile StreamingAgentRunner runner;
     private boolean running = true;
+    private List<Object> hookHandlers = List.of();
 
     public ReplContext(
             CodeAgentSession session,
@@ -116,6 +119,15 @@ public class ReplContext {
 
     public void setRunner(StreamingAgentRunner runner) {
         this.runner = runner;
+    }
+
+    /** Returns the hook handlers registered for this session. */
+    public List<Object> hookHandlers() {
+        return Collections.unmodifiableList(hookHandlers);
+    }
+
+    public void setHookHandlers(List<Object> handlers) {
+        this.hookHandlers = handlers != null ? handlers : List.of();
     }
 
     public boolean isRunning() {
