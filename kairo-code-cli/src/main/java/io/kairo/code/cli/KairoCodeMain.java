@@ -3,14 +3,18 @@ package io.kairo.code.cli;
 import io.kairo.api.agent.Agent;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.api.model.ModelProvider;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
+import io.kairo.core.model.anthropic.AnthropicProvider;
+import io.kairo.core.model.openai.OpenAIProvider;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 import picocli.CommandLine;
@@ -64,6 +68,15 @@ public class KairoCodeMain implements Callable<Integer> {
     @Option(names = "--verbose", description = "Show step-by-step progress on stderr")
     private boolean verbose;
 
+    @Option(names = "--provider",
+            description = "Model API provider: openai (default), anthropic, qianwen",
+            defaultValue = "openai")
+    private String provider;
+
+    private static final String DASHSCOPE_BASE_URL =
+            "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen");
+
     @Override
     public Integer call() {
         // Resolve API key: CLI arg takes precedence over env variable
@@ -77,19 +90,37 @@ public class KairoCodeMain implements Callable<Integer> {
             return 1;
         }
 
-        // Resolve model from env if not explicitly set
+        // Resolve provider from env if not explicitly set
+        String resolvedProvider = provider;
+        String envProvider = System.getenv("KAIRO_CODE_PROVIDER");
+        if (envProvider != null && !envProvider.isBlank() && "openai".equals(provider)) {
+            resolvedProvider = envProvider;
+        }
+        resolvedProvider = resolvedProvider.toLowerCase();
+        if (!VALID_PROVIDERS.contains(resolvedProvider)) {
+            System.err.printf("Error: unknown provider '%s'. Valid: openai, anthropic, qianwen%n",
+                    resolvedProvider);
+            return 1;
+        }
+
+        // Resolve model from env if not explicitly set; qianwen defaults to qwen-max
         String resolvedModel = model;
         String envModel = System.getenv("KAIRO_CODE_MODEL");
         if (envModel != null && !envModel.isBlank() && "gpt-4o".equals(model)) {
             resolvedModel = envModel;
+        } else if ("gpt-4o".equals(model) && "qianwen".equals(resolvedProvider)) {
+            resolvedModel = "qwen-max";
         }
 
-        // Resolve base URL from env if not explicitly set
+        // Resolve base URL: env overrides default; qianwen shortcut sets DashScope URL
         String resolvedBaseUrl = baseUrl;
         String envBaseUrl = System.getenv("KAIRO_CODE_BASE_URL");
         if (envBaseUrl != null && !envBaseUrl.isBlank()
                 && "https://api.openai.com".equals(baseUrl)) {
             resolvedBaseUrl = envBaseUrl;
+        } else if ("https://api.openai.com".equals(baseUrl)
+                && "qianwen".equals(resolvedProvider)) {
+            resolvedBaseUrl = DASHSCOPE_BASE_URL;
         }
 
         // Resolve working directory
@@ -116,11 +147,13 @@ public class KairoCodeMain implements Callable<Integer> {
             CodeAgentConfig config = new CodeAgentConfig(
                     resolvedApiKey, resolvedBaseUrl, resolvedModel,
                     maxIterations, resolvedWorkingDir);
+            ModelProvider modelProvider = buildModelProvider(
+                    resolvedProvider, resolvedApiKey, resolvedBaseUrl);
             RetryPolicy retryPolicy = new RetryPolicy(maxRetries);
 
             if (resolvedTask != null && !resolvedTask.isBlank()) {
                 final String taskToRun = resolvedTask;
-                return retryPolicy.execute(() -> runOneShot(config, taskToRun));
+                return retryPolicy.execute(() -> runOneShot(config, taskToRun, modelProvider));
             } else {
                 return runRepl(config);
             }
@@ -140,10 +173,17 @@ public class KairoCodeMain implements Callable<Integer> {
         return cause instanceof TimeoutException;
     }
 
-    private int runOneShot(CodeAgentConfig config, String resolvedTask) {
+    private ModelProvider buildModelProvider(String resolvedProvider, String apiKey, String baseUrl) {
+        return switch (resolvedProvider) {
+            case "anthropic" -> new AnthropicProvider(apiKey, baseUrl);
+            default -> new OpenAIProvider(apiKey, baseUrl); // openai and qianwen
+        };
+    }
+
+    private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider) {
         Agent agent = verbose
-                ? CodeAgentFactory.create(config, null, List.of(new ProgressPrinter()))
-                : CodeAgentFactory.create(config);
+                ? CodeAgentFactory.create(config, modelProvider, null, List.of(new ProgressPrinter()))
+                : CodeAgentFactory.create(config, modelProvider);
 
         Msg userMsg = Msg.of(MsgRole.USER, resolvedTask);
         var mono = agent.call(userMsg);
