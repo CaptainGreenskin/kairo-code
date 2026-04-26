@@ -1,6 +1,7 @@
 package io.kairo.code.cli;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.api.agent.AgentSnapshot;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelProvider;
@@ -75,6 +76,9 @@ public class KairoCodeMain implements Callable<Integer> {
 
     @Option(names = "--output", description = "Write final response to this file instead of stdout")
     private Path outputFile;
+
+    @Option(names = "--show-usage", description = "Print token usage stats to stderr after completion")
+    private boolean showUsage;
 
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -196,6 +200,15 @@ public class KairoCodeMain implements Callable<Integer> {
         Msg response = mono.block();
 
         if (response != null) {
+            if (showUsage) {
+                try {
+                    AgentSnapshot snap = agent.snapshot();
+                    System.err.printf("[USAGE] total_tokens=%d iterations=%d%n",
+                            snap.totalTokensUsed(), snap.iteration());
+                } catch (UnsupportedOperationException ignored) {
+                    System.err.println("[USAGE] token stats not available for this agent");
+                }
+            }
             try {
                 if (outputFile != null) {
                     Files.writeString(outputFile, response.text(), StandardCharsets.UTF_8);
