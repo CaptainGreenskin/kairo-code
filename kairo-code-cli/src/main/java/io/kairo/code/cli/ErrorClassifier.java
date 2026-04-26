@@ -18,6 +18,9 @@ public final class ErrorClassifier {
         if (t instanceof java.nio.file.NoSuchFileException) return false;
         if (t instanceof java.nio.file.AccessDeniedException) return false;
         if (t instanceof IllegalArgumentException) return false;
+        // Non-retryable: task-level timeout (user-configured deadline expired)
+        if (t instanceof java.util.concurrent.TimeoutException) return false;
+        if (t.getCause() instanceof java.util.concurrent.TimeoutException) return false;
 
         // Non-retryable: auth failures (look for 401/403 in message)
         if (msg.contains("401") || msg.contains("unauthorized")) return false;

@@ -9,8 +9,10 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeoutException;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -54,6 +56,10 @@ public class KairoCodeMain implements Callable<Integer> {
     @Option(names = "--max-retries", description = "Max retries on transient failure (0-5)",
             defaultValue = "0")
     private int maxRetries;
+
+    @Option(names = "--timeout", description = "Task timeout in seconds (0 = no limit)",
+            defaultValue = "0")
+    private int timeoutSeconds;
 
     @Override
     public Integer call() {
@@ -116,16 +122,30 @@ public class KairoCodeMain implements Callable<Integer> {
                 return runRepl(config);
             }
         } catch (Exception e) {
+            if (isTimeoutException(e)) {
+                System.err.printf("Error: task timed out after %d seconds%n", timeoutSeconds);
+                return 2;
+            }
             System.err.println("Error: " + e.getMessage());
             return 1;
         }
+    }
+
+    private static boolean isTimeoutException(Throwable e) {
+        if (e instanceof TimeoutException) return true;
+        Throwable cause = e.getCause();
+        return cause instanceof TimeoutException;
     }
 
     private int runOneShot(CodeAgentConfig config, String resolvedTask) {
         Agent agent = CodeAgentFactory.create(config);
 
         Msg userMsg = Msg.of(MsgRole.USER, resolvedTask);
-        Msg response = agent.call(userMsg).block();
+        var mono = agent.call(userMsg);
+        if (timeoutSeconds > 0) {
+            mono = mono.timeout(Duration.ofSeconds(timeoutSeconds));
+        }
+        Msg response = mono.block();
 
         if (response != null) {
             System.out.println(response.text());
