@@ -14,6 +14,7 @@ import io.kairo.code.cli.commands.PlanCommand;
 import io.kairo.code.cli.commands.ResumeCommand;
 import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
+import io.kairo.code.cli.commands.ToolsCommand;
 import io.kairo.code.cli.commands.UsageCommand;
 import io.kairo.code.cli.task.ConsoleWorktreeMergePrompter;
 import io.kairo.code.cli.task.ReplChildSessionSpawner;
@@ -229,6 +230,7 @@ public class ReplLoop {
         registry.register(new SkillCommand());
         registry.register(new SnapshotCommand());
         registry.register(new ResumeCommand());
+        registry.register(new ToolsCommand());
         registry.register(new ExitCommand());
 
         return registry;
