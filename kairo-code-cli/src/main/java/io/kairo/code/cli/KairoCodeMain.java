@@ -6,6 +6,9 @@ import io.kairo.api.message.MsgRole;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Callable;
 import picocli.CommandLine;
@@ -27,6 +30,9 @@ public class KairoCodeMain implements Callable<Integer> {
 
     @Option(names = "--task", description = "Task to execute (omit for interactive REPL)")
     private String task;
+
+    @Option(names = "--task-file", description = "Path to a Markdown file containing the task description")
+    private Path taskFile;
 
     @Option(names = "--api-key", description = "API key (or set KAIRO_CODE_API_KEY env)")
     private String apiKey;
@@ -80,12 +86,26 @@ public class KairoCodeMain implements Callable<Integer> {
         }
 
         try {
+            if (task != null && taskFile != null) {
+                System.err.println("Error: --task and --task-file are mutually exclusive.");
+                return 1;
+            }
+
+            String resolvedTask = task;
+            if (taskFile != null) {
+                if (!Files.exists(taskFile)) {
+                    System.err.println("Error: task file not found: " + taskFile);
+                    return 1;
+                }
+                resolvedTask = Files.readString(taskFile, StandardCharsets.UTF_8);
+            }
+
             CodeAgentConfig config = new CodeAgentConfig(
                     resolvedApiKey, resolvedBaseUrl, resolvedModel,
                     maxIterations, resolvedWorkingDir);
 
-            if (task != null && !task.isBlank()) {
-                return runOneShot(config);
+            if (resolvedTask != null && !resolvedTask.isBlank()) {
+                return runOneShot(config, resolvedTask);
             } else {
                 return runRepl(config);
             }
@@ -95,10 +115,10 @@ public class KairoCodeMain implements Callable<Integer> {
         }
     }
 
-    private int runOneShot(CodeAgentConfig config) {
+    private int runOneShot(CodeAgentConfig config, String resolvedTask) {
         Agent agent = CodeAgentFactory.create(config);
 
-        Msg userMsg = Msg.of(MsgRole.USER, task);
+        Msg userMsg = Msg.of(MsgRole.USER, resolvedTask);
         Msg response = agent.call(userMsg).block();
 
         if (response != null) {
