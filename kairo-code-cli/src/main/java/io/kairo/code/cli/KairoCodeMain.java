@@ -51,6 +51,10 @@ public class KairoCodeMain implements Callable<Integer> {
     @Option(names = "--working-dir", description = "Working directory for tools")
     private String workingDir;
 
+    @Option(names = "--max-retries", description = "Max retries on transient failure (0-5)",
+            defaultValue = "0")
+    private int maxRetries;
+
     @Override
     public Integer call() {
         // Resolve API key: CLI arg takes precedence over env variable
@@ -103,9 +107,11 @@ public class KairoCodeMain implements Callable<Integer> {
             CodeAgentConfig config = new CodeAgentConfig(
                     resolvedApiKey, resolvedBaseUrl, resolvedModel,
                     maxIterations, resolvedWorkingDir);
+            RetryPolicy retryPolicy = new RetryPolicy(maxRetries);
 
             if (resolvedTask != null && !resolvedTask.isBlank()) {
-                return runOneShot(config, resolvedTask);
+                final String taskToRun = resolvedTask;
+                return retryPolicy.execute(() -> runOneShot(config, taskToRun));
             } else {
                 return runRepl(config);
             }
