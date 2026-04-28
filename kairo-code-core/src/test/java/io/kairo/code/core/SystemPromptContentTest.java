@@ -106,6 +106,24 @@ class SystemPromptContentTest {
                 .contains("Prefer `grep` over reading");
     }
 
+    @Test
+    void editToolDiscipline_sectionExists() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("## Edit Tool Discipline");
+    }
+
+    @Test
+    void editToolDiscipline_alwaysReadBeforeEditing() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("Always read before editing");
+    }
+
+    @Test
+    void editToolDiscipline_exactMatchRequired() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("Exact match required");
+    }
+
     private static String loadSystemPrompt() {
         try (InputStream is = CodeAgentFactory.class
                 .getClassLoader()
