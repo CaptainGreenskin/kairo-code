@@ -30,4 +30,4 @@ The task management system has several bugs and missing test coverage.
 
 - Do **not** modify existing test files (`TaskRepositoryTest.java`, `TaskServiceTest.java`)
 - Do **not** modify `pom.xml`
-- All ≥35 tests (24 existing + ≥10 new) must pass at the end
+- All 39 tests (24 existing + 15 new) must pass at the end
