@@ -4,12 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.api.hook.ToolResultEvent;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
+import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelConfig;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.api.model.ModelResponse;
+import io.kairo.api.tool.ToolResult;
+import io.kairo.code.core.stats.ToolUsageTracker;
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -93,6 +100,88 @@ class CodeAgentFactoryTest {
         assertThat(toolNames).contains("todo_read");
         assertThat(toolNames).contains("todo_write");
         assertThat(toolNames).contains("tree");
+    }
+
+    /**
+     * Captures the system prompt the factory built by intercepting {@link ModelConfig#systemPrompt()}
+     * on the first model call.
+     */
+    static class CapturingModelProvider implements ModelProvider {
+        final AtomicReference<String> capturedSystemPrompt = new AtomicReference<>();
+
+        @Override
+        public Mono<ModelResponse> call(List<Msg> messages, ModelConfig config) {
+            capture(config);
+            return Mono.just(stubResponse());
+        }
+
+        @Override
+        public Flux<ModelResponse> stream(List<Msg> messages, ModelConfig config) {
+            capture(config);
+            return Flux.just(stubResponse());
+        }
+
+        @Override
+        public String name() {
+            return "capturing";
+        }
+
+        private void capture(ModelConfig config) {
+            if (config == null) return;
+            capturedSystemPrompt.compareAndSet(null, config.systemPrompt());
+        }
+
+        private static ModelResponse stubResponse() {
+            return new ModelResponse(
+                    "stub-id",
+                    List.of(new Content.TextContent("ok")),
+                    null,
+                    ModelResponse.StopReason.END_TURN,
+                    "stub-model");
+        }
+    }
+
+    @Test
+    void withToolUsageTracker_injectsToolInsightsIntoSystemPrompt() {
+        CodeAgentConfig config = new CodeAgentConfig(
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null);
+
+        ToolUsageTracker tracker = new ToolUsageTracker();
+        ToolResult ok = new ToolResult("id", "out", false, Map.of());
+        tracker.onToolResult(new ToolResultEvent("bash", ok, Duration.ofMillis(120), true));
+        tracker.onToolResult(new ToolResultEvent("bash", ok, Duration.ofMillis(120), true));
+
+        CapturingModelProvider model = new CapturingModelProvider();
+        var session = CodeAgentFactory.createSession(
+                config,
+                CodeAgentFactory.SessionOptions.empty()
+                        .withModelProvider(model)
+                        .withToolUsageTracker(tracker));
+
+        session.agent().call(Msg.of(MsgRole.USER, "ping")).block();
+
+        String prompt = model.capturedSystemPrompt.get();
+        assertThat(prompt).isNotNull();
+        assertThat(prompt).contains("## Tool Insights (this session)");
+        assertThat(prompt).contains("- bash:");
+        assertThat(prompt).contains("100.0% success");
+    }
+
+    @Test
+    void withoutToolUsageTracker_systemPromptHasNoToolInsightsSection() {
+        CodeAgentConfig config = new CodeAgentConfig(
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null);
+
+        CapturingModelProvider model = new CapturingModelProvider();
+        var session = CodeAgentFactory.createSession(
+                config,
+                CodeAgentFactory.SessionOptions.empty().withModelProvider(model));
+
+        session.agent().call(Msg.of(MsgRole.USER, "ping")).block();
+
+        String prompt = model.capturedSystemPrompt.get();
+        assertThat(prompt).isNotNull();
+        assertThat(prompt).doesNotContain("## Tool Insights");
     }
 
     @Test
