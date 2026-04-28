@@ -22,6 +22,7 @@ import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
+import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.ChildSessionSpawner;
 import java.io.PrintWriter;
 import java.nio.file.Path;
@@ -45,6 +46,7 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
     private final UserApprovalHandler approvalHandler;
     private final PrintWriter writer;
     private final boolean notificationsEnabled;
+    private final String chatPath;
 
     public ReplChildSessionSpawner(
             CodeAgentConfig parentConfig,
@@ -58,10 +60,20 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
             UserApprovalHandler approvalHandler,
             PrintWriter writer,
             boolean notificationsEnabled) {
+        this(parentConfig, approvalHandler, writer, notificationsEnabled, null);
+    }
+
+    public ReplChildSessionSpawner(
+            CodeAgentConfig parentConfig,
+            UserApprovalHandler approvalHandler,
+            PrintWriter writer,
+            boolean notificationsEnabled,
+            String chatPath) {
         this.parentConfig = parentConfig;
         this.approvalHandler = approvalHandler;
         this.writer = writer;
         this.notificationsEnabled = notificationsEnabled;
+        this.chatPath = chatPath;
     }
 
     @Override
@@ -75,10 +87,19 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
                         workingDir.toString(),
                         parentConfig.mcpConfig());
 
+        // Inherit parent's chat-path configuration for the child session.
+        io.kairo.api.model.ModelProvider modelProvider;
+        if (chatPath != null && !chatPath.isBlank()) {
+            modelProvider = new OpenAIProvider(childConfig.apiKey(), childConfig.baseUrl(), chatPath);
+        } else {
+            modelProvider = new OpenAIProvider(childConfig.apiKey(), childConfig.baseUrl());
+        }
+
         AgentEventPrinter prefixedPrinter = new AgentEventPrinter(writer, "[task:" + taskId + "] ");
 
         SessionOptions opts =
                 SessionOptions.empty()
+                        .withModelProvider(modelProvider)
                         .withApprovalHandler(approvalHandler)
                         .withHooks(List.of(prefixedPrinter))
                         .asChildSession();

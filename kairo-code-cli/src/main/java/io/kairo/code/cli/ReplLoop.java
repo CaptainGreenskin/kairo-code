@@ -56,6 +56,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
@@ -383,8 +384,17 @@ public class ReplLoop {
         WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(parentRoot, lifecycle);
         ConsoleWorktreeMergePrompter prompter =
                 new ConsoleWorktreeMergePrompter(terminalReader, writer);
+
+        // Resolve chat-path for child sessions: env var > config.properties > null
+        String chatPath = System.getenv("KAIRO_CODE_CHAT_PATH");
+        if (chatPath == null || chatPath.isBlank()) {
+            Properties fileConfig = ConfigLoader.load();
+            chatPath = fileConfig.getProperty("chat-path");
+        }
+
         ReplChildSessionSpawner spawner =
-                new ReplChildSessionSpawner(config, approvalHandler, writer, notificationsEnabled);
+                new ReplChildSessionSpawner(config, approvalHandler, writer, notificationsEnabled,
+                        chatPath);
         return new TaskToolDependencies(provider, spawner, prompter);
     }
 
