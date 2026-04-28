@@ -31,7 +31,7 @@
 | L3    | 93    | 33        | 18             | 20          | 13      | 9          | TurnMetricsCollector self-improvement, 12 tests |
 | L4    | 96    | 35        | 18             | 20          | 14      | 9          | 5 cross-file bugs, 33 tests, SWE-bench caliber |
 | L5    | 99    | 35        | 20             | 20          | 15      | 9          | 5 bugs + create TaskValidatorTest, 40 tests (16 new) |
-| L6    | TBD   | TBD       | TBD            | TBD         | TBD     | TBD        | library system, 7 bugs + create MemberValidatorTest, 48+ tests |
+| L6    | **84** | 30        | 12             | 13          | 16      | 5          | library system, 5 bugs + create MemberValidatorTest, 49 tests (print mode issue) |
 
 ### 各级别详细得分
 
