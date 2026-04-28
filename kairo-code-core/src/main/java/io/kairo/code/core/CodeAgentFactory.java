@@ -20,6 +20,7 @@ import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
+import io.kairo.code.core.hook.SessionResultWriterHook;
 import io.kairo.code.core.hook.StaleReadDetectorHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
 import io.kairo.core.agent.AgentBuilder;
@@ -211,6 +212,13 @@ public final class CodeAgentFactory {
             builder.hook(new PostEditHintHook());
             builder.hook(new PostBatchEditVerifyHook());
             builder.hook(new AutoCommitOnSuccessHook());
+
+            // Auto-register SessionResultWriterHook: writes KAIRO_SESSION_RESULT.json on session
+            // end so the dispatcher can machine-read the outcome.
+            String wd = config.workingDir();
+            if (wd != null && !wd.isBlank()) {
+                builder.hook(new SessionResultWriterHook(Path.of(wd)));
+            }
         }
 
         if (options.textDeltaConsumer() != null) {
