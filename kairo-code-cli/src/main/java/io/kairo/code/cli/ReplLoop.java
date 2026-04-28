@@ -19,11 +19,13 @@ import io.kairo.code.cli.commands.PlanCommand;
 import io.kairo.code.cli.commands.ResumeCommand;
 import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
+import io.kairo.code.cli.commands.StatsCommand;
 import io.kairo.code.cli.commands.UsageCommand;
 import io.kairo.code.core.evolution.FailurePatternTracker;
 import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.evolution.ReflectionPipeline;
 import io.kairo.code.core.evolution.ToolStrikeEvent;
+import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.cli.hooks.HookExecutor;
 import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.cli.hooks.ShellHookListener;
@@ -190,6 +192,10 @@ public class ReplLoop {
                         hooksConfig.getAll().values().stream().mapToInt(List::size).sum());
             }
 
+            // Wire tool usage tracker: collects per-tool call count, success rate, avg duration.
+            ToolUsageTracker usageTracker = new ToolUsageTracker();
+            allHooks.add(usageTracker);
+
             // Wire failure pattern tracker: warns user after 3 consecutive tool failures
             // and triggers reflection pipeline to auto-generate a lesson.
             final PrintWriter failureWriter = writer;
@@ -342,6 +348,7 @@ public class ReplLoop {
         registry.register(new HookCommand());
         registry.register(new McpCommand());
         registry.register(new LearnedCommand());
+        registry.register(new StatsCommand());
 
         return registry;
     }
