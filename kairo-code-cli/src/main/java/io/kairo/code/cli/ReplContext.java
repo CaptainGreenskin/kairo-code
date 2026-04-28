@@ -2,6 +2,7 @@ package io.kairo.code.cli;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentSnapshot;
+import io.kairo.api.agent.AgentState;
 import io.kairo.api.agent.SnapshotStore;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
@@ -12,7 +13,9 @@ import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.ConsoleApprovalHandler;
 import java.io.PrintWriter;
+import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.UnaryOperator;
@@ -226,13 +229,16 @@ public class ReplContext {
     }
 
     /**
-     * Clear the session to start fresh after compaction.
-     *
-     * <p>The summary is acknowledged to the user via the command's output message. The new session
-     * starts clean — the user's next prompt will implicitly carry forward the context from the summary.
+     * Reset the session and seed it with a compact summary as the first USER message,
+     * so the next agent call has the summarized context available from the start.
      */
     public void resetWithSummary(String summary) {
-        rebuildSession(null);
+        AgentSnapshot seed = new AgentSnapshot(
+                "compact-seed", "compact-seed", AgentState.IDLE,
+                0, 0L,
+                List.of(Msg.of(MsgRole.USER, "[Previous conversation summary]\n" + summary)),
+                Map.of(), Instant.now());
+        rebuildSession(seed);
     }
 
     private void rebuildSession(AgentSnapshot restoreFrom) {
