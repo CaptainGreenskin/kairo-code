@@ -15,6 +15,7 @@ import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
+import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
@@ -191,6 +192,10 @@ public final class CodeAgentFactory {
         // Auto-register PlanWithoutActionHook: detects plan-only responses (todo_write without
         // implementation tools) and injects a corrective message. Disabled in REPL mode.
         if (!options.isRepl()) {
+            TurnMetricsCollector metrics = findTurnMetricsCollector(hooks);
+            if (metrics != null) {
+                builder.hook(new MaxTurnsGuardHook(metrics));
+            }
             builder.hook(new PlanWithoutActionHook());
             builder.hook(new PostEditHintHook());
             builder.hook(new PostBatchEditVerifyHook());
