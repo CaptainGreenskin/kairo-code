@@ -117,7 +117,7 @@ class SlashCommandsTest {
 
         String output = outputCapture.toString();
         assertThat(output).contains("Session Token Usage");
-        assertThat(output).contains("Total tokens: 12,450");
+        assertThat(output).contains("Total tokens : 12,450");
     }
 
     @Test

@@ -240,8 +240,22 @@ public class KairoCodeMain implements Callable<Integer> {
             if (showUsage) {
                 try {
                     AgentSnapshot snap = agent.snapshot();
-                    System.err.printf("[USAGE] total_tokens=%d iterations=%d%n",
-                            snap.totalTokensUsed(), snap.iteration());
+                    long tokens = snap.totalTokensUsed();
+                    io.kairo.code.core.cost.CostEstimator
+                            .estimate(config.modelName(), tokens)
+                            .ifPresentOrElse(
+                                    cost ->
+                                            System.err.printf(
+                                                    "[USAGE] total_tokens=%d iterations=%d"
+                                                            + " est_cost_usd=~%s%n",
+                                                    tokens,
+                                                    snap.iteration(),
+                                                    io.kairo.code.core.cost.CostEstimator.format(
+                                                            cost)),
+                                    () ->
+                                            System.err.printf(
+                                                    "[USAGE] total_tokens=%d iterations=%d%n",
+                                                    tokens, snap.iteration()));
                 } catch (UnsupportedOperationException ignored) {
                     System.err.println("[USAGE] token stats not available for this agent");
                 }

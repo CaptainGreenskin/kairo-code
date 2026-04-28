@@ -4,15 +4,14 @@ import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentSnapshot;
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.cli.SlashCommand;
+import io.kairo.code.core.cost.CostEstimator;
 import java.io.PrintWriter;
+import java.util.OptionalDouble;
 
 /**
- * Shows token usage for the current session.
+ * Shows token usage and estimated USD cost for the current session.
  *
  * <p>Usage: {@code :cost}
- *
- * <p>Retrieves token usage from the agent's snapshot. If snapshot is not supported,
- * a helpful message is displayed.
  */
 public class CostCommand implements SlashCommand {
 
@@ -23,13 +22,14 @@ public class CostCommand implements SlashCommand {
 
     @Override
     public String description() {
-        return "Show token usage for this session";
+        return "Show token usage and estimated cost for this session";
     }
 
     @Override
     public void execute(String args, ReplContext context) {
         PrintWriter writer = context.writer();
         Agent agent = context.agent();
+        String modelName = context.config().modelName();
 
         long totalTokens = 0;
         boolean available = false;
@@ -39,7 +39,6 @@ public class CostCommand implements SlashCommand {
             totalTokens = snapshot.totalTokensUsed();
             available = true;
         } catch (UnsupportedOperationException e) {
-            // Snapshot not supported — try reflection for DefaultReActAgent.totalTokensUsed()
             try {
                 var method = agent.getClass().getMethod("totalTokensUsed");
                 totalTokens = (long) method.invoke(agent);
@@ -51,9 +50,17 @@ public class CostCommand implements SlashCommand {
 
         writer.println();
         writer.println("Session Token Usage");
-        writer.println("─────────────────────");
+        writer.println("──────────────────────────────");
         if (available) {
-            writer.printf("Total tokens: %,d%n", totalTokens);
+            writer.printf("Total tokens : %,d%n", totalTokens);
+            writer.printf("Model        : %s%n", modelName != null ? modelName : "unknown");
+            OptionalDouble cost = CostEstimator.estimate(modelName, totalTokens);
+            if (cost.isPresent()) {
+                writer.printf("Est. cost    : ~%s USD%n", CostEstimator.format(cost.getAsDouble()));
+                writer.println("               (public pricing, indicative only)");
+            } else {
+                writer.println("Est. cost    : unknown model");
+            }
         } else {
             writer.println("Token tracking not available for this agent.");
         }
