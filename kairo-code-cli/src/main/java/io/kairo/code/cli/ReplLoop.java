@@ -9,12 +9,16 @@ import io.kairo.code.cli.commands.ClearCommand;
 import io.kairo.code.cli.commands.CostCommand;
 import io.kairo.code.cli.commands.ExitCommand;
 import io.kairo.code.cli.commands.HelpCommand;
+import io.kairo.code.cli.commands.HookCommand;
 import io.kairo.code.cli.commands.ModelCommand;
 import io.kairo.code.cli.commands.PlanCommand;
 import io.kairo.code.cli.commands.ResumeCommand;
 import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
 import io.kairo.code.cli.commands.UsageCommand;
+import io.kairo.code.cli.hooks.HookExecutor;
+import io.kairo.code.cli.hooks.HooksConfig;
+import io.kairo.code.cli.hooks.ShellHookListener;
 import io.kairo.code.cli.task.ConsoleWorktreeMergePrompter;
 import io.kairo.code.cli.task.ReplChildSessionSpawner;
 import io.kairo.code.core.CodeAgentConfig;
@@ -33,6 +37,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.jline.reader.EndOfFileException;
@@ -71,10 +76,21 @@ public class ReplLoop {
 
     private final CodeAgentConfig config;
     private final List<Object> hooks;
+    private final HooksConfig hooksConfig;
 
     public ReplLoop(CodeAgentConfig config, List<Object> hooks) {
         this.config = config;
         this.hooks = hooks != null ? hooks : List.of();
+        this.hooksConfig = HooksConfig.loadDefault();
+    }
+
+    /**
+     * Constructor that allows injecting a pre-loaded hooks config (useful for testing).
+     */
+    public ReplLoop(CodeAgentConfig config, List<Object> hooks, HooksConfig hooksConfig) {
+        this.config = config;
+        this.hooks = hooks != null ? hooks : List.of();
+        this.hooksConfig = hooksConfig != null ? hooksConfig : HooksConfig.loadDefault();
     }
 
     /** Run the interactive REPL. Blocks until the user exits. */
@@ -117,25 +133,40 @@ public class ReplLoop {
             TaskToolDependencies taskDeps = buildTaskDependencies(
                     config, kairoDir, terminalReader, writer, approvalHandler);
 
+            // Wire shell hooks if configured. ShellHookListener bridges kairo @HookHandler events
+            // to user-configured shell commands (~/.kairo-code/hooks.json).
+            List<Object> allHooks = new ArrayList<>(hooks);
+            ShellHookListener shellHookListener = null;
+            HookExecutor hookExecutor = null;
+            if (!hooksConfig.isEmpty()) {
+                hookExecutor = new HookExecutor(hooksConfig);
+                shellHookListener = new ShellHookListener(hookExecutor);
+                allHooks.add(shellHookListener);
+                log.info("Loaded {} shell hooks from config",
+                        hooksConfig.getAll().values().stream().mapToInt(List::size).sum());
+            }
+
             // Create initial session: wire approval handler + hooks + task tool at the factory
             // level so every rebuilt session (e.g., after :clear, :model, :skill) keeps the same
             // setup without callers having to re-thread them.
+            final List<Object> effectiveHooks = List.copyOf(allHooks);
             CodeAgentFactory.SessionOptions baseOpts =
                     CodeAgentFactory.SessionOptions.empty()
                             .withApprovalHandler(approvalHandler)
-                            .withHooks(hooks)
+                            .withHooks(effectiveHooks)
                             .withTaskTool(taskDeps);
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
-            StreamingAgentRunner runner = new StreamingAgentRunner(writer);
+            StreamingAgentRunner runner = new StreamingAgentRunner(writer, shellHookListener, hookExecutor);
             ReplContext context = new ReplContext(
                     session, config, lineReader, registry, writer,
                     opts -> opts.withApprovalHandler(approvalHandler)
-                            .withHooks(hooks)
+                            .withHooks(effectiveHooks)
                             .withTaskTool(taskDeps),
                     approvalHandler,
                     skillRegistry,
-                    snapshotStore);
+                    snapshotStore,
+                    hooksConfig);
             context.setRunner(runner);
 
             // Wire Ctrl+C signal handler: cancel agent if running, else no-op
@@ -230,6 +261,7 @@ public class ReplLoop {
         registry.register(new SnapshotCommand());
         registry.register(new ResumeCommand());
         registry.register(new ExitCommand());
+        registry.register(new HookCommand());
 
         return registry;
     }

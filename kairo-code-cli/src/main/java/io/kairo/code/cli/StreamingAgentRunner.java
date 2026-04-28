@@ -2,6 +2,8 @@ package io.kairo.code.cli;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.message.Msg;
+import io.kairo.code.cli.hooks.HookExecutor;
+import io.kairo.code.cli.hooks.ShellHookListener;
 import java.io.PrintWriter;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -26,9 +28,18 @@ public class StreamingAgentRunner {
     private final AtomicReference<Agent> agentRef = new AtomicReference<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final PrintWriter writer;
+    private final ShellHookListener shellHookListener;
+    private final HookExecutor hookExecutor;
 
     public StreamingAgentRunner(PrintWriter writer) {
+        this(writer, null, null);
+    }
+
+    public StreamingAgentRunner(PrintWriter writer, ShellHookListener shellHookListener,
+                                HookExecutor hookExecutor) {
         this.writer = writer;
+        this.shellHookListener = shellHookListener;
+        this.hookExecutor = hookExecutor;
     }
 
     /**
@@ -50,6 +61,9 @@ public class StreamingAgentRunner {
         Disposable disposable = agent.call(userMessage)
                 .doFinally(signal -> {
                     running.set(false);
+                    if (shellHookListener != null) {
+                        shellHookListener.onStop();
+                    }
                     latch.countDown();
                 })
                 .subscribe(
