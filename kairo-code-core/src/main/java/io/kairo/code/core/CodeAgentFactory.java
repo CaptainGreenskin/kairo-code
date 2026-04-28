@@ -14,6 +14,7 @@ import io.kairo.code.core.memory.KairoMdLoader;
 import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
+import io.kairo.code.core.hook.ContextWindowGuardHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
@@ -182,6 +183,10 @@ public final class CodeAgentFactory {
         for (Object hook : hooks) {
             builder.hook(hook);
         }
+
+        // Auto-register ContextWindowGuardHook: warns on large context to prevent GLM-5.1
+        // overflow. Active in both REPL and one-shot mode.
+        builder.hook(new ContextWindowGuardHook());
 
         // Auto-register PlanWithoutActionHook: detects plan-only responses (todo_write without
         // implementation tools) and injects a corrective message. Disabled in REPL mode.
