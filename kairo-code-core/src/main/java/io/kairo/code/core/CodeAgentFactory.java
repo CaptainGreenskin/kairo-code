@@ -13,6 +13,7 @@ import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.memory.KairoMdLoader;
 import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
+import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
@@ -200,7 +201,8 @@ public final class CodeAgentFactory {
 
         Agent agent = builder.build();
         ToolUsageTracker tracker = findToolUsageTracker(hooks);
-        return new CodeAgentSession(agent, executor, registry, activeSkills, mcpRegistry, tracker);
+        TurnMetricsCollector metricsCollector = findTurnMetricsCollector(hooks);
+        return new CodeAgentSession(agent, executor, registry, activeSkills, mcpRegistry, tracker, metricsCollector);
     }
 
     /**
@@ -211,6 +213,18 @@ public final class CodeAgentFactory {
         if (hooks == null) return null;
         for (Object hook : hooks) {
             if (hook instanceof ToolUsageTracker t) return t;
+        }
+        return null;
+    }
+
+    /**
+     * Find the TurnMetricsCollector instance from the hooks list so it can be exposed
+     * via CodeAgentSession for the /metrics command.
+     */
+    private static TurnMetricsCollector findTurnMetricsCollector(List<Object> hooks) {
+        if (hooks == null) return null;
+        for (Object hook : hooks) {
+            if (hook instanceof TurnMetricsCollector c) return c;
         }
         return null;
     }
@@ -327,6 +341,7 @@ public final class CodeAgentFactory {
             boolean childSession,
             java.util.function.Consumer<String> textDeltaConsumer,
             ToolUsageTracker toolUsageTracker,
+            TurnMetricsCollector turnMetricsCollector,
             boolean isRepl) {
 
         public SessionOptions {
@@ -336,21 +351,21 @@ public final class CodeAgentFactory {
 
         public static SessionOptions empty() {
             return new SessionOptions(
-                    null, null, List.of(), null, Set.of(), null, null, false, null, null, false);
+                    null, null, List.of(), null, Set.of(), null, null, false, null, null, null, false);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
             return new SessionOptions(
                     provider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
             return new SessionOptions(
                     modelProvider, handler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -358,7 +373,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler,
                     hookList == null ? List.of() : List.copyOf(hookList),
                     skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
-                    childSession, textDeltaConsumer, toolUsageTracker, isRepl);
+                    childSession, textDeltaConsumer, toolUsageTracker, turnMetricsCollector,
+                    isRepl);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
@@ -366,14 +382,14 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, registry,
                     active == null ? Set.of() : Set.copyOf(active),
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     snapshot, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl);
         }
 
         /**
@@ -384,7 +400,7 @@ public final class CodeAgentFactory {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker,
-                    isRepl);
+                    turnMetricsCollector, isRepl);
         }
 
         /**
@@ -396,7 +412,7 @@ public final class CodeAgentFactory {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, consumer,
-                    toolUsageTracker, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl);
         }
 
         /**
@@ -408,7 +424,7 @@ public final class CodeAgentFactory {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, true, textDeltaConsumer,
-                    toolUsageTracker, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl);
         }
 
         /**
@@ -421,7 +437,19 @@ public final class CodeAgentFactory {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    tracker, isRepl);
+                    tracker, turnMetricsCollector, isRepl);
+        }
+
+        /**
+         * Wire a {@link TurnMetricsCollector} so it is exposed via CodeAgentSession for the
+         * /metrics command. The collector should also be registered as a hook (via
+         * {@link #withHooks(List)}) so it keeps accumulating across session rebuilds.
+         */
+        public SessionOptions withTurnMetricsCollector(TurnMetricsCollector collector) {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker, collector, isRepl);
         }
 
         /**
@@ -433,7 +461,7 @@ public final class CodeAgentFactory {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, true);
+                    toolUsageTracker, turnMetricsCollector, true);
         }
     }
 }

@@ -20,12 +20,14 @@ import io.kairo.code.cli.commands.ResumeCommand;
 import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
 import io.kairo.code.cli.commands.StatsCommand;
+import io.kairo.code.cli.commands.MetricsCommand;
 import io.kairo.code.cli.commands.UsageCommand;
 import io.kairo.code.core.evolution.FailurePatternTracker;
 import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.evolution.ReflectionPipeline;
 import io.kairo.code.core.evolution.ToolStrikeEvent;
 import io.kairo.code.core.stats.ToolUsageTracker;
+import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.cli.hooks.HookExecutor;
 import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.cli.hooks.ShellHookListener;
@@ -192,6 +194,10 @@ public class ReplLoop {
             ToolUsageTracker usageTracker = new ToolUsageTracker();
             allHooks.add(usageTracker);
 
+            // Wire turn metrics collector: collects per-turn tool calls, success, duration.
+            TurnMetricsCollector turnMetrics = new TurnMetricsCollector();
+            allHooks.add(turnMetrics);
+
             // Wire failure pattern tracker: warns user after 3 consecutive tool failures
             // and triggers reflection pipeline to auto-generate a lesson.
             final PrintWriter failureWriter = writer;
@@ -232,6 +238,7 @@ public class ReplLoop {
                             .withTaskTool(taskDeps)
                             .withTextDeltaConsumer(textDelta)
                             .withToolUsageTracker(usageTracker)
+                            .withTurnMetricsCollector(turnMetrics)
                             .asReplSession();
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
@@ -242,7 +249,8 @@ public class ReplLoop {
                             .withHooks(effectiveHooks)
                             .withTaskTool(taskDeps)
                             .withTextDeltaConsumer(textDelta)
-                            .withToolUsageTracker(usageTracker),
+                            .withToolUsageTracker(usageTracker)
+                            .withTurnMetricsCollector(turnMetrics),
                     approvalHandler,
                     skillRegistry,
                     snapshotStore,
@@ -348,6 +356,7 @@ public class ReplLoop {
         registry.register(new McpCommand());
         registry.register(new LearnedCommand());
         registry.register(new StatsCommand());
+        registry.register(new MetricsCommand());
 
         return registry;
     }
