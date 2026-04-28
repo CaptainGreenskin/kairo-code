@@ -218,10 +218,17 @@ public class KairoCodeMain implements Callable<Integer> {
     }
 
     private ModelProvider buildModelProvider(String resolvedProvider, String apiKey, String baseUrl) {
-        return switch (resolvedProvider) {
-            case "anthropic" -> new AnthropicProvider(apiKey, baseUrl);
-            default -> new OpenAIProvider(apiKey, baseUrl); // openai and qianwen
-        };
+        if ("anthropic".equals(resolvedProvider)) {
+            return new AnthropicProvider(apiKey, baseUrl);
+        }
+        // KAIRO_CODE_CHAT_PATH lets callers override the appended path (default: /v1/chat/completions).
+        // Needed for providers like GLM Coding Plan whose base URL already contains the version
+        // segment (e.g. https://open.bigmodel.cn/api/coding/paas/v4 + /chat/completions).
+        String chatPath = System.getenv("KAIRO_CODE_CHAT_PATH");
+        if (chatPath != null && !chatPath.isBlank()) {
+            return new OpenAIProvider(apiKey, baseUrl, chatPath);
+        }
+        return new OpenAIProvider(apiKey, baseUrl);
     }
 
     private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider) {
