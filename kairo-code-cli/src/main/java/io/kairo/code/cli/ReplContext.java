@@ -3,6 +3,8 @@ package io.kairo.code.cli;
 import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentSnapshot;
 import io.kairo.api.agent.SnapshotStore;
+import io.kairo.api.message.Msg;
+import io.kairo.api.message.MsgRole;
 import io.kairo.api.skill.SkillRegistry;
 import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.core.CodeAgentConfig;
@@ -221,6 +223,16 @@ public class ReplContext {
     /** Restore the session from a previously saved snapshot. Loaded skills are preserved. */
     public void restoreFromSnapshot(AgentSnapshot snapshot) {
         rebuildSession(snapshot);
+    }
+
+    /**
+     * Clear the session to start fresh after compaction.
+     *
+     * <p>The summary is acknowledged to the user via the command's output message. The new session
+     * starts clean — the user's next prompt will implicitly carry forward the context from the summary.
+     */
+    public void resetWithSummary(String summary) {
+        rebuildSession(null);
     }
 
     private void rebuildSession(AgentSnapshot restoreFrom) {
