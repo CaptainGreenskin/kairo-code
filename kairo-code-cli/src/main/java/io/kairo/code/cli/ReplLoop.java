@@ -10,6 +10,7 @@ import io.kairo.code.cli.commands.CostCommand;
 import io.kairo.code.cli.commands.ExitCommand;
 import io.kairo.code.cli.commands.HelpCommand;
 import io.kairo.code.cli.commands.HookCommand;
+import io.kairo.code.cli.commands.LearnedCommand;
 import io.kairo.code.cli.commands.McpCommand;
 import io.kairo.code.cli.commands.ModelCommand;
 import io.kairo.code.cli.commands.PlanCommand;
@@ -17,6 +18,7 @@ import io.kairo.code.cli.commands.ResumeCommand;
 import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
 import io.kairo.code.cli.commands.UsageCommand;
+import io.kairo.code.core.evolution.FailurePatternTracker;
 import io.kairo.code.cli.hooks.HookExecutor;
 import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.cli.hooks.ShellHookListener;
@@ -183,6 +185,22 @@ public class ReplLoop {
                         hooksConfig.getAll().values().stream().mapToInt(List::size).sum());
             }
 
+            // Wire failure pattern tracker: warns user after 3 consecutive tool failures.
+            final PrintWriter failureWriter = writer;
+            FailurePatternTracker failureTracker = new FailurePatternTracker(
+                    toolName -> {
+                        failureWriter.println();
+                        failureWriter.println(
+                                "⚠ Tool '"
+                                        + toolName
+                                        + "' has failed 3 consecutive times."
+                                        + " Use ':learned add "
+                                        + toolName
+                                        + " <lesson>' to record what to avoid.");
+                        failureWriter.flush();
+                    });
+            allHooks.add(failureTracker);
+
             // Create initial session: wire approval handler + hooks + task tool at the factory
             // level so every rebuilt session (e.g., after :clear, :model, :skill) keeps the same
             // setup without callers having to re-thread them.
@@ -310,6 +328,7 @@ public class ReplLoop {
         registry.register(new ExitCommand());
         registry.register(new HookCommand());
         registry.register(new McpCommand());
+        registry.register(new LearnedCommand());
 
         return registry;
     }

@@ -9,6 +9,7 @@ import io.kairo.api.tool.PermissionGuard;
 import io.kairo.api.tool.ToolDefinition;
 import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.code.core.mcp.McpConfig;
+import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.memory.KairoMdLoader;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
@@ -239,7 +240,25 @@ public final class CodeAgentFactory {
             kairoMd.ifPresent(content ->
                     prompt.append("\n\n## Project Instructions (KAIRO.md)\n").append(content));
         }
+        injectLearnedLessons(prompt);
         return prompt.toString();
+    }
+
+    private static void injectLearnedLessons(StringBuilder prompt) {
+        Path globalKairoDir =
+                Path.of(System.getProperty("user.home"), ".kairo-code");
+        LearnedLessonStore store = LearnedLessonStore.fromKairoDir(globalKairoDir);
+        var approved = store.listApproved();
+        if (!approved.isEmpty()) {
+            prompt.append("\n\n## Learned Lessons\n");
+            approved.forEach(
+                    l ->
+                            prompt.append("- [")
+                                    .append(l.toolName())
+                                    .append("] ")
+                                    .append(l.lessonText())
+                                    .append("\n"));
+        }
     }
 
     private static String renderSkillSection(SkillRegistry registry, Set<String> activeSkills) {
