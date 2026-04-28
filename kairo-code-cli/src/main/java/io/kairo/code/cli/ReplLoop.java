@@ -19,6 +19,9 @@ import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
 import io.kairo.code.cli.commands.UsageCommand;
 import io.kairo.code.core.evolution.FailurePatternTracker;
+import io.kairo.code.core.evolution.LearnedLessonStore;
+import io.kairo.code.core.evolution.ReflectionPipeline;
+import io.kairo.code.core.evolution.ToolStrikeEvent;
 import io.kairo.code.cli.hooks.HookExecutor;
 import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.cli.hooks.ShellHookListener;
@@ -185,19 +188,25 @@ public class ReplLoop {
                         hooksConfig.getAll().values().stream().mapToInt(List::size).sum());
             }
 
-            // Wire failure pattern tracker: warns user after 3 consecutive tool failures.
+            // Wire failure pattern tracker: warns user after 3 consecutive tool failures
+            // and triggers reflection pipeline to auto-generate a lesson.
             final PrintWriter failureWriter = writer;
+            final LearnedLessonStore lessonStore = LearnedLessonStore.fromKairoDir(kairoDir);
+            final CodeAgentConfig effectiveConfig = config;
             FailurePatternTracker failureTracker = new FailurePatternTracker(
-                    toolName -> {
+                    event -> {
                         failureWriter.println();
                         failureWriter.println(
                                 "⚠ Tool '"
-                                        + toolName
+                                        + event.toolName()
                                         + "' has failed 3 consecutive times."
                                         + " Use ':learned add "
-                                        + toolName
+                                        + event.toolName()
                                         + " <lesson>' to record what to avoid.");
+                        failureWriter.println("  ✦ 正在后台生成教训，完成后用 :learned list 查看");
                         failureWriter.flush();
+
+                        ReflectionPipeline.generateAndSave(event, effectiveConfig, lessonStore);
                     });
             allHooks.add(failureTracker);
 
