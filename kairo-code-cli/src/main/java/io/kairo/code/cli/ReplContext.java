@@ -4,6 +4,7 @@ import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentSnapshot;
 import io.kairo.api.agent.SnapshotStore;
 import io.kairo.api.skill.SkillRegistry;
+import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentSession;
@@ -32,6 +33,7 @@ public class ReplContext {
     private final ConsoleApprovalHandler approvalHandler;
     private final SkillRegistry skillRegistry;
     private final SnapshotStore snapshotStore;
+    private final HooksConfig hooksConfig;
     private final Set<String> loadedSkills = new LinkedHashSet<>();
     private volatile StreamingAgentRunner runner;
     private boolean running = true;
@@ -46,6 +48,21 @@ public class ReplContext {
             ConsoleApprovalHandler approvalHandler,
             SkillRegistry skillRegistry,
             SnapshotStore snapshotStore) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, new HooksConfig(java.util.Map.of()));
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig) {
         this.session = session;
         this.config = config;
         this.lineReader = lineReader;
@@ -56,6 +73,7 @@ public class ReplContext {
         this.approvalHandler = approvalHandler;
         this.skillRegistry = skillRegistry;
         this.snapshotStore = snapshotStore;
+        this.hooksConfig = hooksConfig != null ? hooksConfig : new HooksConfig(java.util.Map.of());
         if (session != null && session.loadedSkills() != null) {
             loadedSkills.addAll(session.loadedSkills());
         }
@@ -95,6 +113,11 @@ public class ReplContext {
     /** The snapshot store used by {@code :snapshot}/{@code :resume}. */
     public SnapshotStore snapshotStore() {
         return snapshotStore;
+    }
+
+    /** The loaded shell hooks configuration. */
+    public HooksConfig hooksConfig() {
+        return hooksConfig;
     }
 
     /** The set of skills currently injected into the system prompt (mutable). */
