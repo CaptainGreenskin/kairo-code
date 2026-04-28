@@ -11,6 +11,7 @@ import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.ConsoleApprovalHandler;
 import java.io.PrintWriter;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.UnaryOperator;
 import org.jline.reader.LineReader;
@@ -35,6 +36,7 @@ public class ReplContext {
     private final SnapshotStore snapshotStore;
     private final HooksConfig hooksConfig;
     private final Set<String> loadedSkills = new LinkedHashSet<>();
+    private final Map<String, String> skillSources;
     private volatile StreamingAgentRunner runner;
     private boolean running = true;
 
@@ -49,7 +51,8 @@ public class ReplContext {
             SkillRegistry skillRegistry,
             SnapshotStore snapshotStore) {
         this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
-                approvalHandler, skillRegistry, snapshotStore, new HooksConfig(java.util.Map.of()));
+                approvalHandler, skillRegistry, snapshotStore, new HooksConfig(java.util.Map.of()),
+                java.util.Map.of());
     }
 
     public ReplContext(
@@ -63,6 +66,22 @@ public class ReplContext {
             SkillRegistry skillRegistry,
             SnapshotStore snapshotStore,
             HooksConfig hooksConfig) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, java.util.Map.of());
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig,
+            Map<String, String> skillSources) {
         this.session = session;
         this.config = config;
         this.lineReader = lineReader;
@@ -74,6 +93,7 @@ public class ReplContext {
         this.skillRegistry = skillRegistry;
         this.snapshotStore = snapshotStore;
         this.hooksConfig = hooksConfig != null ? hooksConfig : new HooksConfig(java.util.Map.of());
+        this.skillSources = skillSources != null ? skillSources : java.util.Map.of();
         if (session != null && session.loadedSkills() != null) {
             loadedSkills.addAll(session.loadedSkills());
         }
@@ -123,6 +143,11 @@ public class ReplContext {
     /** The set of skills currently injected into the system prompt (mutable). */
     public Set<String> loadedSkills() {
         return loadedSkills;
+    }
+
+    /** Map of skill name to source tag (classpath/global/project). */
+    public Map<String, String> skillSources() {
+        return skillSources;
     }
 
     public CodeAgentConfig config() {

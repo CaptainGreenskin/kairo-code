@@ -19,6 +19,7 @@ import io.kairo.skill.DefaultSkillRegistry;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -154,16 +155,44 @@ class SkillCommandTest {
         CodeAgentSession session =
                 new CodeAgentSession(stubAgent(), executor, toolRegistry, Set.of());
         ReplContext context = new ReplContext(
-                session, config, null, commandRegistry, writer, null, null, null, null);
+                session, config, null, commandRegistry, writer, null, null, null, null, null, null);
 
         new SkillCommand().execute("list", context);
 
         assertThat(outputCapture.toString()).contains("Skills unavailable");
     }
 
+    @Test
+    void listShowsSourceColumn() {
+        ReplContext context = createContext(Map.of(
+                "code-review", "classpath",
+                "test-writer", "global"));
+
+        new SkillCommand().execute("list", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("[classpath]");
+        assertThat(output).contains("[global]");
+    }
+
+    @Test
+    void listShowsProjectSourceColumn() {
+        ReplContext context = createContext(Map.of(
+                "code-review", "project"));
+
+        new SkillCommand().execute("list", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("[project]");
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────
 
     private ReplContext createContext() {
+        return createContext(Map.of());
+    }
+
+    private ReplContext createContext(Map<String, String> skillSources) {
         DefaultToolRegistry toolRegistry = new DefaultToolRegistry();
         DefaultToolExecutor executor =
                 new DefaultToolExecutor(toolRegistry, new DefaultPermissionGuard());
@@ -178,7 +207,9 @@ class SkillCommandTest {
                 null,
                 null,
                 skillRegistry,
-                null);
+                null,
+                null,
+                skillSources);
     }
 
     private static SkillDefinition skillDef(String name, String description) {
