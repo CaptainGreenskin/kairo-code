@@ -17,6 +17,7 @@ import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
 import io.kairo.code.core.hook.MaxTurnsGuardHook;
+import io.kairo.code.core.hook.MissingTestHintHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
@@ -211,6 +212,7 @@ public final class CodeAgentFactory {
             builder.hook(new PlanWithoutActionHook());
             builder.hook(new PostEditHintHook());
             builder.hook(new PostBatchEditVerifyHook());
+            builder.hook(new MissingTestHintHook());
             builder.hook(new AutoCommitOnSuccessHook());
 
             // Auto-register SessionResultWriterHook: writes KAIRO_SESSION_RESULT.json on session
