@@ -96,6 +96,15 @@ public class KairoCodeMain implements Callable<Integer> {
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen");
 
+    /** Discipline prefix prepended to one-shot task prompts. */
+    static final String ONE_SHOT_DISCIPLINE_PREFIX =
+            "Complete this task fully. Use your tools to investigate, implement, and verify."
+                    + " Do not stop after planning — execute each step with tool calls.\n\n"
+                    + "When all tests pass and the task is complete, commit your changes with:\n"
+                    + "  git add -A && git commit -m \"<type>(<scope>): <concise description>\"\n"
+                    + "Use conventional commit format. Focus the message on WHAT changed and WHY.\n"
+                    + "Do NOT include \"completed\" or \"task done\" in the message.\n\n";
+
     @Override
     public Integer call() {
         Properties fileConfig = ConfigLoader.load();
@@ -247,10 +256,7 @@ public class KairoCodeMain implements Callable<Integer> {
                 ? CodeAgentFactory.create(config, modelProvider, null, List.of(new ProgressPrinter()))
                 : CodeAgentFactory.create(config, modelProvider);
 
-        String taskWithDiscipline =
-                "Complete this task fully. Use your tools to investigate, implement, and verify."
-                        + " Do not stop after planning — execute each step with tool calls.\n\n"
-                        + resolvedTask;
+        String taskWithDiscipline = ONE_SHOT_DISCIPLINE_PREFIX + resolvedTask;
         Msg userMsg = Msg.of(MsgRole.USER, taskWithDiscipline);
         var mono = agent.call(userMsg);
         if (timeoutSeconds > 0) {
