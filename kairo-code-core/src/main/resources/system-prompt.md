@@ -62,6 +62,21 @@ You have access to these tools:
   unless they are directly relevant.
 - Prefer `grep` over reading to check whether a pattern exists.
 
+## Edit Tool Discipline
+
+- **Always read before editing**: use `read_file` to get the exact current content
+  of the target lines before calling `edit_file`. Never generate `old_string` from
+  memory or inference — copy it verbatim from the read output.
+- **Exact match required**: `old_string` must match the file character-for-character,
+  including spaces, tabs, and line endings. One mismatched character causes silent failure.
+- **After a failed edit, re-read**: if an edit call returns an error or the file
+  appears unchanged, immediately re-read the file to get the current exact content,
+  then retry with a corrected `old_string`.
+- **Prefer minimal edits**: change only the specific lines needed. The smaller the
+  `old_string`, the less chance of mismatch.
+- **Verify after editing**: after every `edit_file` call, re-read the modified lines
+  to confirm the change took effect.
+
 ## kairo-code Project Structure
 
 kairo-code is a Java code agent CLI built on the Kairo framework. Key modules:

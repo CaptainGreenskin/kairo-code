@@ -37,8 +37,10 @@ public final class PostEditHintHook {
     private static final Set<String> EDIT_TOOLS = Set.of("write_file", "edit_file");
 
     private static final String INJECT_MESSAGE =
-            "You just modified Java source files. Run `mvn test` to verify your changes "
-                    + "compile and all tests pass. If tests fail, read the error output and fix the issues.";
+            "You just modified Java source files. "
+                    + "First verify the edit took effect by re-reading the modified lines. "
+                    + "Then run `mvn test` to confirm the changes compile and all tests pass. "
+                    + "If the edit failed (file unchanged), re-read the file and retry with exact content.";
 
     private final boolean isRepl;
 
