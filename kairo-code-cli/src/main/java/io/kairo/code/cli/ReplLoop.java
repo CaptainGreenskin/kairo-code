@@ -21,6 +21,7 @@ import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
 import io.kairo.code.cli.commands.StatsCommand;
 import io.kairo.code.cli.commands.MetricsCommand;
+import io.kairo.code.cli.commands.SessionCommand;
 import io.kairo.code.cli.commands.UsageCommand;
 import io.kairo.code.core.evolution.FailurePatternTracker;
 import io.kairo.code.core.evolution.LearnedLessonStore;
@@ -357,6 +358,7 @@ public class ReplLoop {
         registry.register(new LearnedCommand());
         registry.register(new StatsCommand());
         registry.register(new MetricsCommand());
+        registry.register(new SessionCommand());
 
         return registry;
     }

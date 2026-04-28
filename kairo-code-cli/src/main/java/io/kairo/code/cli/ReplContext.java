@@ -44,6 +44,7 @@ public class ReplContext {
     private final Map<String, String> skillSources;
     private volatile StreamingAgentRunner runner;
     private boolean running = true;
+    private final Instant sessionStartTime;
 
     public ReplContext(
             CodeAgentSession session,
@@ -99,6 +100,7 @@ public class ReplContext {
         this.snapshotStore = snapshotStore;
         this.hooksConfig = hooksConfig != null ? hooksConfig : new HooksConfig(java.util.Map.of());
         this.skillSources = skillSources != null ? skillSources : java.util.Map.of();
+        this.sessionStartTime = Instant.now();
         if (session != null && session.loadedSkills() != null) {
             loadedSkills.addAll(session.loadedSkills());
         }
@@ -173,6 +175,11 @@ public class ReplContext {
 
     public boolean isRunning() {
         return running;
+    }
+
+    /** The time when this REPL session started. */
+    public Instant sessionStartTime() {
+        return sessionStartTime;
     }
 
     public void requestExit() {
