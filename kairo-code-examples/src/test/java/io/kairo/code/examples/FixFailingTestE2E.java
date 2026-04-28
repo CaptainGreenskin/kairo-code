@@ -44,7 +44,7 @@ class FixFailingTestE2E {
         String model = System.getenv().getOrDefault("KAIRO_CODE_MODEL", "gpt-4o");
 
         CodeAgentConfig config = new CodeAgentConfig(
-                apiKey, baseUrl, model, 30, workspace.toString()
+                apiKey, baseUrl, model, 30, workspace.toString(), null
         );
         Agent agent = CodeAgentFactory.create(config);
 

@@ -42,7 +42,7 @@ class CodeAgentFactoryTest {
     @Test
     void createReturnsNonNullAgent() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null);
 
         Agent agent = CodeAgentFactory.create(config, new StubModelProvider());
 
@@ -52,7 +52,7 @@ class CodeAgentFactoryTest {
     @Test
     void agentHasCorrectName() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null);
 
         Agent agent = CodeAgentFactory.create(config, new StubModelProvider());
 
@@ -61,7 +61,7 @@ class CodeAgentFactoryTest {
 
     @Test
     void configDefaultsAreApplied() {
-        CodeAgentConfig config = new CodeAgentConfig("test-key", null, null, 0, null);
+        CodeAgentConfig config = new CodeAgentConfig("test-key", null, null, 0, null, null);
 
         assertThat(config.baseUrl()).isEqualTo("https://api.openai.com");
         assertThat(config.modelName()).isEqualTo("gpt-4o");
@@ -70,7 +70,7 @@ class CodeAgentFactoryTest {
 
     @Test
     void configRejectsBlankApiKey() {
-        assertThatThrownBy(() -> new CodeAgentConfig("", null, null, 0, null))
+        assertThatThrownBy(() -> new CodeAgentConfig("", null, null, 0, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("apiKey");
     }
@@ -78,7 +78,7 @@ class CodeAgentFactoryTest {
     @Test
     void shouldRegisterExpandedToolSet() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null);
 
         var session = CodeAgentFactory.createSession(config,
                 CodeAgentFactory.SessionOptions.empty().withModelProvider(new StubModelProvider()));
@@ -93,5 +93,17 @@ class CodeAgentFactoryTest {
         assertThat(toolNames).contains("todo_read");
         assertThat(toolNames).contains("todo_write");
         assertThat(toolNames).contains("tree");
+    }
+
+    @Test
+    void nullMcpConfigCreatesSessionWithNullMcpRegistry() {
+        CodeAgentConfig config = new CodeAgentConfig(
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null);
+
+        var session = CodeAgentFactory.createSession(config,
+                CodeAgentFactory.SessionOptions.empty().withModelProvider(new StubModelProvider()));
+
+        assertThat(session).isNotNull();
+        assertThat(session.mcpRegistry()).isNull();
     }
 }

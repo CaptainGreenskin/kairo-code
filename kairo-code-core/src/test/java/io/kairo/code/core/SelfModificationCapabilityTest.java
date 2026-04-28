@@ -20,7 +20,7 @@ import reactor.core.publisher.Mono;
 class SelfModificationCapabilityTest {
 
     private static final CodeAgentConfig CONFIG =
-            new CodeAgentConfig("test-key", "https://api.openai.com", "gpt-4o", 50, "/tmp");
+            new CodeAgentConfig("test-key", "https://api.openai.com", "gpt-4o", 50, "/tmp", null);
 
     @Test
     void bashToolIsRegistered() {

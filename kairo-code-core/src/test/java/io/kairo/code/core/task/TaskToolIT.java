@@ -65,7 +65,7 @@ import reactor.core.publisher.Mono;
 class TaskToolIT {
 
     private static final CodeAgentConfig CONFIG =
-            new CodeAgentConfig("test-key", "https://api.openai.com", "gpt-4o", 50, null);
+            new CodeAgentConfig("test-key", "https://api.openai.com", "gpt-4o", 50, null, null);
 
     @BeforeAll
     static void requireGit() {

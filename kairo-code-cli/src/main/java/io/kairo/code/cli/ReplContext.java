@@ -169,7 +169,8 @@ public class ReplContext {
                         config.baseUrl(),
                         newModelName,
                         config.maxIterations(),
-                        config.workingDir());
+                        config.workingDir(),
+                        config.mcpConfig());
         rebuildSession(null);
     }
 

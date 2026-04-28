@@ -10,6 +10,7 @@ import io.kairo.code.cli.commands.CostCommand;
 import io.kairo.code.cli.commands.ExitCommand;
 import io.kairo.code.cli.commands.HelpCommand;
 import io.kairo.code.cli.commands.HookCommand;
+import io.kairo.code.cli.commands.McpCommand;
 import io.kairo.code.cli.commands.ModelCommand;
 import io.kairo.code.cli.commands.PlanCommand;
 import io.kairo.code.cli.commands.ResumeCommand;
@@ -262,6 +263,7 @@ public class ReplLoop {
         registry.register(new ResumeCommand());
         registry.register(new ExitCommand());
         registry.register(new HookCommand());
+        registry.register(new McpCommand());
 
         return registry;
     }

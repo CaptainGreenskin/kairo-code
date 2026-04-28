@@ -1,5 +1,7 @@
 package io.kairo.code.core;
 
+import io.kairo.code.core.mcp.McpConfig;
+
 /**
  * Configuration for creating a CodeAgent.
  *
@@ -8,13 +10,15 @@ package io.kairo.code.core;
  * @param modelName    the model name to use (default: "gpt-4o")
  * @param maxIterations maximum ReAct loop iterations (default: 50)
  * @param workingDir   the working directory for file/exec tools (nullable)
+ * @param mcpConfig    MCP server config from ~/.kairo-code/mcp.json (nullable)
  */
 public record CodeAgentConfig(
         String apiKey,
         String baseUrl,
         String modelName,
         int maxIterations,
-        String workingDir
+        String workingDir,
+        McpConfig mcpConfig
 ) {
     public CodeAgentConfig {
         if (apiKey == null || apiKey.isBlank()) {

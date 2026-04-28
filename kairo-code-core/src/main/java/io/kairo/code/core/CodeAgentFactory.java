@@ -6,7 +6,9 @@ import io.kairo.api.model.ModelProvider;
 import io.kairo.api.skill.SkillDefinition;
 import io.kairo.api.skill.SkillRegistry;
 import io.kairo.api.tool.PermissionGuard;
+import io.kairo.api.tool.ToolDefinition;
 import io.kairo.api.tool.UserApprovalHandler;
+import io.kairo.code.core.mcp.McpConfig;
 import io.kairo.core.agent.AgentBuilder;
 import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.TaskTool;
@@ -14,6 +16,9 @@ import io.kairo.code.core.task.TaskToolDependencies;
 import io.kairo.core.tool.DefaultPermissionGuard;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
+import io.kairo.mcp.McpClientRegistry;
+import io.kairo.mcp.McpToolExecutor;
+import io.kairo.mcp.McpToolGroup;
 import io.kairo.tools.exec.BashTool;
 import io.kairo.tools.exec.GitTool;
 import io.kairo.tools.file.EditTool;
@@ -127,6 +132,9 @@ public final class CodeAgentFactory {
             registry.registerTool(TaskTool.class);
         }
 
+        // Wire MCP tools from config if present.
+        McpClientRegistry mcpRegistry = registerMcpTools(registry, config);
+
         PermissionGuard guard = new DefaultPermissionGuard();
         DefaultToolExecutor executor = new DefaultToolExecutor(registry, guard);
 
@@ -166,7 +174,43 @@ public final class CodeAgentFactory {
         }
 
         Agent agent = builder.build();
-        return new CodeAgentSession(agent, executor, registry, activeSkills);
+        return new CodeAgentSession(agent, executor, registry, activeSkills, mcpRegistry);
+    }
+
+    /**
+     * Register MCP tools from the given config into the tool registry.
+     *
+     * <p>Returns the {@link McpClientRegistry} if any servers were configured, or null otherwise.
+     * Connection failures are logged as warnings and do not block startup.
+     */
+    private static McpClientRegistry registerMcpTools(
+            DefaultToolRegistry registry, CodeAgentConfig config) {
+        McpConfig mcpConfig = config.mcpConfig();
+        if (mcpConfig == null || mcpConfig.servers().isEmpty()) {
+            return null;
+        }
+
+        McpClientRegistry mcpRegistry = new McpClientRegistry();
+        for (var entry : mcpConfig.servers().entrySet()) {
+            String name = entry.getKey();
+            try {
+                io.kairo.mcp.McpServerConfig serverConfig =
+                        entry.getValue().toServerConfig();
+                McpToolGroup group = mcpRegistry.register(serverConfig).block();
+                if (group != null) {
+                    for (ToolDefinition def : group.getAllToolDefinitions()) {
+                        registry.register(def);
+                        McpToolExecutor executor = group.getExecutor(def.name());
+                        if (executor != null) {
+                            registry.registerInstance(def.name(), executor);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to connect to MCP server '{}': {}", name, e.getMessage());
+            }
+        }
+        return mcpRegistry;
     }
 
     private static String resolveSystemPrompt(
