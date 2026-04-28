@@ -179,11 +179,19 @@ public class ReplLoop {
             // level so every rebuilt session (e.g., after :clear, :model, :skill) keeps the same
             // setup without callers having to re-thread them.
             final List<Object> effectiveHooks = List.copyOf(allHooks);
+            // Per-token text delta consumer: prints each text chunk as it arrives from the model.
+            // AgentEventPrinter.onPostReasoning is set to streamingText=true to suppress
+            // double-printing.
+            final java.util.function.Consumer<String> textDelta = delta -> {
+                writer.print(delta);
+                writer.flush();
+            };
             CodeAgentFactory.SessionOptions baseOpts =
                     CodeAgentFactory.SessionOptions.empty()
                             .withApprovalHandler(approvalHandler)
                             .withHooks(effectiveHooks)
-                            .withTaskTool(taskDeps);
+                            .withTaskTool(taskDeps)
+                            .withTextDeltaConsumer(textDelta);
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
             StreamingAgentRunner runner = new StreamingAgentRunner(writer, shellHookListener, hookExecutor);
@@ -191,7 +199,8 @@ public class ReplLoop {
                     session, config, lineReader, registry, writer,
                     opts -> opts.withApprovalHandler(approvalHandler)
                             .withHooks(effectiveHooks)
-                            .withTaskTool(taskDeps),
+                            .withTaskTool(taskDeps)
+                            .withTextDeltaConsumer(textDelta),
                     approvalHandler,
                     skillRegistry,
                     snapshotStore,

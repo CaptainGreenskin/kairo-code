@@ -47,9 +47,10 @@ public class AgentEventPrinter {
 
     private final PrintWriter writer;
     private final String prefix;
+    private final boolean streamingText;
 
     public AgentEventPrinter(PrintWriter writer) {
-        this(writer, "");
+        this(writer, "", false);
     }
 
     /**
@@ -58,8 +59,17 @@ public class AgentEventPrinter {
      * parent's. Pass an empty string for the parent.
      */
     public AgentEventPrinter(PrintWriter writer, String prefix) {
+        this(writer, prefix, false);
+    }
+
+    /**
+     * Full constructor. When {@code streamingText} is true, per-token text output is handled by a
+     * separate consumer; {@link #onPostReasoning} skips printing the text body to avoid duplication.
+     */
+    public AgentEventPrinter(PrintWriter writer, String prefix, boolean streamingText) {
         this.writer = writer;
         this.prefix = prefix == null ? "" : prefix;
+        this.streamingText = streamingText;
     }
 
     private String linePrefix() {
@@ -109,20 +119,27 @@ public class AgentEventPrinter {
         if (event.response() == null || event.response().contents() == null) {
             return;
         }
-        String text = event.response().contents().stream()
-                .filter(Content.TextContent.class::isInstance)
-                .map(c -> ((Content.TextContent) c).text())
-                .collect(Collectors.joining());
-        if (!text.isBlank()) {
-            writer.println();
-            if (prefix.isEmpty()) {
-                writer.println(text);
-            } else {
-                String p = linePrefix();
-                for (String line : text.split("\n", -1)) {
-                    writer.println(p + line);
+        if (!streamingText) {
+            // Block-output path: print full text here (no per-token consumer).
+            String text = event.response().contents().stream()
+                    .filter(Content.TextContent.class::isInstance)
+                    .map(c -> ((Content.TextContent) c).text())
+                    .collect(Collectors.joining());
+            if (!text.isBlank()) {
+                writer.println();
+                if (prefix.isEmpty()) {
+                    writer.println(text);
+                } else {
+                    String p = linePrefix();
+                    for (String line : text.split("\n", -1)) {
+                        writer.println(p + line);
+                    }
                 }
+                writer.println();
             }
+        } else {
+            // Streaming path: text was already printed per-token; just add trailing newlines.
+            writer.println();
             writer.println();
         }
         ModelResponse.Usage usage = event.response().usage();

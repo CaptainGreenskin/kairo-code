@@ -164,12 +164,15 @@ public final class CodeAgentFactory {
             builder.approvalHandler(options.approvalHandler());
         }
 
+        // Always enable streaming so per-token output works even without hooks.
+        builder.streaming(true);
         List<Object> hooks = options.hooks();
-        if (!hooks.isEmpty()) {
-            builder.streaming(true);
-            for (Object hook : hooks) {
-                builder.hook(hook);
-            }
+        for (Object hook : hooks) {
+            builder.hook(hook);
+        }
+
+        if (options.textDeltaConsumer() != null) {
+            builder.textDeltaConsumer(options.textDeltaConsumer());
         }
 
         if (options.restoreFrom() != null) {
@@ -284,7 +287,8 @@ public final class CodeAgentFactory {
             Set<String> activeSkills,
             AgentSnapshot restoreFrom,
             TaskToolDependencies taskToolDependencies,
-            boolean childSession) {
+            boolean childSession,
+            java.util.function.Consumer<String> textDeltaConsumer) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -292,67 +296,41 @@ public final class CodeAgentFactory {
         }
 
         public static SessionOptions empty() {
-            return new SessionOptions(null, null, List.of(), null, Set.of(), null, null, false);
+            return new SessionOptions(
+                    null, null, List.of(), null, Set.of(), null, null, false, null);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
             return new SessionOptions(
-                    provider,
-                    approvalHandler,
-                    hooks,
-                    skillRegistry,
-                    activeSkills,
-                    restoreFrom,
-                    taskToolDependencies,
-                    childSession);
+                    provider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
             return new SessionOptions(
-                    modelProvider,
-                    handler,
-                    hooks,
-                    skillRegistry,
-                    activeSkills,
-                    restoreFrom,
-                    taskToolDependencies,
-                    childSession);
+                    modelProvider, handler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
             return new SessionOptions(
-                    modelProvider,
-                    approvalHandler,
+                    modelProvider, approvalHandler,
                     hookList == null ? List.of() : List.copyOf(hookList),
-                    skillRegistry,
-                    activeSkills,
-                    restoreFrom,
-                    taskToolDependencies,
-                    childSession);
+                    skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
+                    childSession, textDeltaConsumer);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
             return new SessionOptions(
-                    modelProvider,
-                    approvalHandler,
-                    hooks,
-                    registry,
+                    modelProvider, approvalHandler, hooks, registry,
                     active == null ? Set.of() : Set.copyOf(active),
-                    restoreFrom,
-                    taskToolDependencies,
-                    childSession);
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
             return new SessionOptions(
-                    modelProvider,
-                    approvalHandler,
-                    hooks,
-                    skillRegistry,
-                    activeSkills,
-                    snapshot,
-                    taskToolDependencies,
-                    childSession);
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    snapshot, taskToolDependencies, childSession, textDeltaConsumer);
         }
 
         /**
@@ -361,14 +339,19 @@ public final class CodeAgentFactory {
          */
         public SessionOptions withTaskTool(TaskToolDependencies deps) {
             return new SessionOptions(
-                    modelProvider,
-                    approvalHandler,
-                    hooks,
-                    skillRegistry,
-                    activeSkills,
-                    restoreFrom,
-                    deps,
-                    childSession);
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, deps, childSession, textDeltaConsumer);
+        }
+
+        /**
+         * Register a per-token text output consumer fired during streaming model calls.
+         * Set to null to disable (default). Child sessions inherit this from the parent.
+         */
+        public SessionOptions withTextDeltaConsumer(
+                java.util.function.Consumer<String> consumer) {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, consumer);
         }
 
         /**
@@ -378,14 +361,8 @@ public final class CodeAgentFactory {
          */
         public SessionOptions asChildSession() {
             return new SessionOptions(
-                    modelProvider,
-                    approvalHandler,
-                    hooks,
-                    skillRegistry,
-                    activeSkills,
-                    restoreFrom,
-                    taskToolDependencies,
-                    true);
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, true, textDeltaConsumer);
         }
     }
 }
