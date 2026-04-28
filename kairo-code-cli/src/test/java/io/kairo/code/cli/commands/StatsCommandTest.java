@@ -101,7 +101,7 @@ class StatsCommandTest {
         DefaultToolExecutor toolExecutor =
                 new DefaultToolExecutor(toolRegistry, new DefaultPermissionGuard());
         CodeAgentSession session =
-                new CodeAgentSession(stubAgent(), toolExecutor, toolRegistry, Set.of(), null, tracker);
+                new CodeAgentSession(stubAgent(), toolExecutor, toolRegistry, Set.of(), null, tracker, null);
         return new ReplContext(
                 session, config, null, registry, writer, null, null, null, null);
     }

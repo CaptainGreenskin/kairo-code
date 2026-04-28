@@ -2,6 +2,7 @@ package io.kairo.code.core;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.code.core.stats.ToolUsageTracker;
+import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
 import io.kairo.mcp.McpClientRegistry;
@@ -21,6 +22,7 @@ import java.util.Set;
  * @param loadedSkills immutable set of skill names currently active in the system prompt
  * @param mcpRegistry MCP client registry for querying server info (null if no MCP servers configured)
  * @param toolUsageTracker tracks per-tool call counts, success rates, and durations
+ * @param turnMetricsCollector tracks per-turn tool call counts, success rates, and durations
  */
 public record CodeAgentSession(
         Agent agent,
@@ -28,14 +30,16 @@ public record CodeAgentSession(
         DefaultToolRegistry toolRegistry,
         Set<String> loadedSkills,
         McpClientRegistry mcpRegistry,
-        ToolUsageTracker toolUsageTracker) {
+        ToolUsageTracker toolUsageTracker,
+        TurnMetricsCollector turnMetricsCollector) {
 
     public CodeAgentSession(
             Agent agent,
             DefaultToolExecutor toolExecutor,
             DefaultToolRegistry toolRegistry,
             Set<String> loadedSkills) {
-        this(agent, toolExecutor, toolRegistry, loadedSkills, null, new ToolUsageTracker());
+        this(agent, toolExecutor, toolRegistry, loadedSkills, null,
+                new ToolUsageTracker(), new TurnMetricsCollector());
     }
 
     public CodeAgentSession(
@@ -44,7 +48,8 @@ public record CodeAgentSession(
             DefaultToolRegistry toolRegistry,
             Set<String> loadedSkills,
             McpClientRegistry mcpRegistry) {
-        this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry, new ToolUsageTracker());
+        this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
+                new ToolUsageTracker(), new TurnMetricsCollector());
     }
 
     public CodeAgentSession {
@@ -53,5 +58,6 @@ public record CodeAgentSession(
         if (toolRegistry == null) throw new IllegalArgumentException("toolRegistry must not be null");
         loadedSkills = loadedSkills == null ? Set.of() : Set.copyOf(loadedSkills);
         if (toolUsageTracker == null) toolUsageTracker = new ToolUsageTracker();
+        if (turnMetricsCollector == null) turnMetricsCollector = new TurnMetricsCollector();
     }
 }
