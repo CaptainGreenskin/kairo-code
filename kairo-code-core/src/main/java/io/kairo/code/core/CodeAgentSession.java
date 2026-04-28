@@ -1,6 +1,7 @@
 package io.kairo.code.core;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
 import io.kairo.mcp.McpClientRegistry;
@@ -11,27 +12,39 @@ import java.util.Set;
  *
  * <p>Holds references the slash commands need to mutate state without recreating the whole agent:
  * the {@link DefaultToolExecutor} for plan-mode toggling, the {@link DefaultToolRegistry} for tool
- * lookup, and the set of skill names currently injected into the system prompt.
+ * lookup, the set of skill names currently injected into the system prompt, and the
+ * {@link ToolUsageTracker} for :stats command.
  *
  * @param agent the live agent
  * @param toolExecutor the tool executor (for plan mode toggle)
  * @param toolRegistry the tool registry
  * @param loadedSkills immutable set of skill names currently active in the system prompt
  * @param mcpRegistry MCP client registry for querying server info (null if no MCP servers configured)
+ * @param toolUsageTracker tracks per-tool call counts, success rates, and durations
  */
 public record CodeAgentSession(
         Agent agent,
         DefaultToolExecutor toolExecutor,
         DefaultToolRegistry toolRegistry,
         Set<String> loadedSkills,
-        McpClientRegistry mcpRegistry) {
+        McpClientRegistry mcpRegistry,
+        ToolUsageTracker toolUsageTracker) {
 
     public CodeAgentSession(
             Agent agent,
             DefaultToolExecutor toolExecutor,
             DefaultToolRegistry toolRegistry,
             Set<String> loadedSkills) {
-        this(agent, toolExecutor, toolRegistry, loadedSkills, null);
+        this(agent, toolExecutor, toolRegistry, loadedSkills, null, new ToolUsageTracker());
+    }
+
+    public CodeAgentSession(
+            Agent agent,
+            DefaultToolExecutor toolExecutor,
+            DefaultToolRegistry toolRegistry,
+            Set<String> loadedSkills,
+            McpClientRegistry mcpRegistry) {
+        this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry, new ToolUsageTracker());
     }
 
     public CodeAgentSession {
@@ -39,5 +52,6 @@ public record CodeAgentSession(
         if (toolExecutor == null) throw new IllegalArgumentException("toolExecutor must not be null");
         if (toolRegistry == null) throw new IllegalArgumentException("toolRegistry must not be null");
         loadedSkills = loadedSkills == null ? Set.of() : Set.copyOf(loadedSkills);
+        if (toolUsageTracker == null) toolUsageTracker = new ToolUsageTracker();
     }
 }

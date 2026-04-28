@@ -11,6 +11,7 @@ import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.code.core.mcp.McpConfig;
 import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.memory.KairoMdLoader;
+import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
 import io.kairo.core.model.openai.OpenAIProvider;
@@ -181,7 +182,20 @@ public final class CodeAgentFactory {
         }
 
         Agent agent = builder.build();
-        return new CodeAgentSession(agent, executor, registry, activeSkills, mcpRegistry);
+        ToolUsageTracker tracker = findToolUsageTracker(hooks);
+        return new CodeAgentSession(agent, executor, registry, activeSkills, mcpRegistry, tracker);
+    }
+
+    /**
+     * Find the ToolUsageTracker instance from the hooks list so it can be exposed
+     * via CodeAgentSession for the :stats command.
+     */
+    private static ToolUsageTracker findToolUsageTracker(List<Object> hooks) {
+        if (hooks == null) return null;
+        for (Object hook : hooks) {
+            if (hook instanceof ToolUsageTracker t) return t;
+        }
+        return null;
     }
 
     /**
