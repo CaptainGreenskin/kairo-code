@@ -14,6 +14,7 @@ import io.kairo.code.core.memory.KairoMdLoader;
 import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
+import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
@@ -186,6 +187,7 @@ public final class CodeAgentFactory {
         if (!options.isRepl()) {
             builder.hook(new PlanWithoutActionHook());
             builder.hook(new PostEditHintHook());
+            builder.hook(new PostBatchEditVerifyHook());
         }
 
         if (options.textDeltaConsumer() != null) {
