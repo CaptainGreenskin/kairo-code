@@ -14,6 +14,7 @@ import io.kairo.code.core.memory.KairoMdLoader;
 import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
+import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
 import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
@@ -204,6 +205,7 @@ public final class CodeAgentFactory {
             builder.hook(new PlanWithoutActionHook());
             builder.hook(new PostEditHintHook());
             builder.hook(new PostBatchEditVerifyHook());
+            builder.hook(new AutoCommitOnSuccessHook());
         }
 
         if (options.textDeltaConsumer() != null) {
