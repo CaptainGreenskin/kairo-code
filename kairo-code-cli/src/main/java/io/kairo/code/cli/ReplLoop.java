@@ -137,11 +137,6 @@ public class ReplLoop {
             // Start hot reload watcher for FS skill directories.
             hotReloadWatcher = createHotReloadWatcher(skillRegistry);
             if (hotReloadWatcher != null) {
-                hotReloadWatcher.addListener(event -> {
-                    log.info("Skill reload event: {} {}", event.skillId(), event.type());
-                    // The watcher already updates the registry; we just refresh source map.
-                    refreshSkillSources(skillRegistry);
-                });
                 try {
                     hotReloadWatcher.start();
                 } catch (IOException e) {
