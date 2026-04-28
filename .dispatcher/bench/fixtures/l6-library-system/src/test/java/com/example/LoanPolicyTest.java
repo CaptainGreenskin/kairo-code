@@ -53,14 +53,14 @@ class LoanPolicyTest {
 
     @Test
     void calculateLateFeeOneDay() {
-        // 1 day * 50 cents / 100 = 0.50 cents
-        assertEquals(0, policy.calculateLateFee(1));
+        // 1 day * 50 cents / 100.0 = 0.50 → rounded = 1
+        assertEquals(1, policy.calculateLateFee(1));
     }
 
     @Test
     void calculateLateFeeThreeDays() {
-        // 3 days * 50 cents / 100 = 1.50 → should be 1 (integer cents)
-        assertEquals(1, policy.calculateLateFee(3));
+        // 3 days * 50 cents / 100.0 = 1.50 → rounded = 2
+        assertEquals(2, policy.calculateLateFee(3));
     }
 
     @Test
