@@ -132,4 +132,16 @@ class KairoCodeMainOptionTest {
         int code = run("--api-key", "fake-key", "--task", "t", "--max-iterations", "1");
         assertThat(code).isNotEqualTo(2);
     }
+
+    @Test
+    void disciplinePrefixIncludesCommitInstruction() {
+        // Verify the one-shot discipline prefix contains conventional commit instructions.
+        String prefix = KairoCodeMain.ONE_SHOT_DISCIPLINE_PREFIX;
+        assertThat(prefix).contains("git add -A && git commit -m");
+        assertThat(prefix).contains("conventional commit");
+        // The prefix tells the agent NOT to use these phrases in commit messages:
+        assertThat(prefix).contains("Do NOT");
+        assertThat(prefix).contains("\"completed\"");
+        assertThat(prefix).contains("\"task done\"");
+    }
 }
