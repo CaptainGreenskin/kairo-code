@@ -13,7 +13,6 @@ Fix all bugs so all 33 tests pass. Read the source carefully to understand the d
 - `src/main/java/com/example/OrderService.java` — Order lifecycle orchestration
 
 **Do not modify:**
-- `Product.java` — correct, no bugs
 - `OrderItem.java` — correct, no bugs
 - Any test files
 - `pom.xml`
@@ -31,7 +30,7 @@ Fix all bugs so all 33 tests pass. Read the source carefully to understand the d
 - **Order.addItem()**: When adding an item for a product that already exists in the order, the quantities should be merged into a single line item rather than creating duplicate entries.
 - **PricingEngine discount calculation**: Applying a percentage discount produces incorrect results — a 10% discount on $100 should yield $90, but the system returns $100.
 - **PricingEngine empty order**: Calculating the total for an order with no items should return $0, not crash.
-- **InventoryTracker release**: Releasing reserved stock should never result in available stock exceeding the product's maximum capacity.
+- **Stock release cap**: Releasing reserved stock should never result in available stock exceeding the product's maximum capacity. Trace the call chain from `InventoryTracker.release()` down to understand where the missing guard is.
 - **OrderService placeOrder**: When placing an order fails due to insufficient stock on one item, any stock already reserved for earlier items in the same order must be rolled back.
 
 ## Success Criteria
