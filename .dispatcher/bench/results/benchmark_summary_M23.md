@@ -46,7 +46,7 @@
 | L2    | 96    | 35        | 18             | 20          | 14      | 9          |
 | L3    | 93    | 33        | 18             | 20          | 13      | 9          |
 | L4    | 96    | 35        | 18             | 20          | 14      | 9          |
-| L5    | TBD   | TBD       | TBD            | TBD         | TBD     | TBD        |
+| L5    | **99** | 35        | 20             | 20          | 15      | 9          |
 
 ### 得分趋势说明
 
@@ -54,7 +54,7 @@
 - **L2 (96)**: EventDispatcher feature implementation，17 tests — 单次实现，minor quality deduction
 - **L3 (93)**: TurnMetricsCollector self-improvement，12 tests — 真实代码库，复杂度略高
 - **L4 (96)**: Order system 5-bug，33 tests — cross-file 推理能力强
-- **L5 (TBD)**: Task manager + missing test creation，39 tests (24 existing + 15 new) — 依赖 M24-001 完成
+- **L5 (99)**: Task manager 5-bug + create TaskValidatorTest.java，40 tests (24+16 new) — 超出 L4，测试创建无损耗
 
 ---
 
