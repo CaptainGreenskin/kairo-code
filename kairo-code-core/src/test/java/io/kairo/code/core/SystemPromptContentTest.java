@@ -88,6 +88,24 @@ class SystemPromptContentTest {
                 .contains("Match response to task");
     }
 
+    @Test
+    void readEfficiency_sectionExists() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("## Read Efficiency");
+    }
+
+    @Test
+    void readEfficiency_over200LinesConstraint() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("over 200 lines");
+    }
+
+    @Test
+    void readEfficiency_preferGrepOverReading() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("Prefer `grep` over reading");
+    }
+
     private static String loadSystemPrompt() {
         try (InputStream is = CodeAgentFactory.class
                 .getClassLoader()
