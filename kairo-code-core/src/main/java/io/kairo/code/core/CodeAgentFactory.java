@@ -19,6 +19,7 @@ import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
+import io.kairo.code.core.hook.TestFailureFeedbackHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
 import io.kairo.core.model.openai.OpenAIProvider;
@@ -188,6 +189,10 @@ public final class CodeAgentFactory {
         // Auto-register ContextWindowGuardHook: warns on large context to prevent GLM-5.1
         // overflow. Active in both REPL and one-shot mode.
         builder.hook(new ContextWindowGuardHook());
+
+        // Auto-register TestFailureFeedbackHook: intercepts bash mvn test failures and injects
+        // structured error context so the agent focuses on the right fixes.
+        builder.hook(new TestFailureFeedbackHook());
 
         // Auto-register PlanWithoutActionHook: detects plan-only responses (todo_write without
         // implementation tools) and injects a corrective message. Disabled in REPL mode.
