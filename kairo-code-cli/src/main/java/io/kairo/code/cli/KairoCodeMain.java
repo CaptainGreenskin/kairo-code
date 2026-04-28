@@ -76,6 +76,9 @@ public class KairoCodeMain implements Callable<Integer> {
             defaultValue = "openai")
     private String provider;
 
+    @Option(names = "--chat-path", description = "Chat completions path suffix (or set KAIRO_CODE_CHAT_PATH env)")
+    private String chatPath;
+
     @Option(names = "--task-list",
             description = "JSON Lines file with multiple tasks to run in parallel")
     private Path taskListFile;
@@ -151,6 +154,17 @@ public class KairoCodeMain implements Callable<Integer> {
             resolvedBaseUrl = DASHSCOPE_BASE_URL;
         }
 
+        // Resolve chat path: CLI arg > env var > config file > null (use default)
+        String resolvedChatPath = chatPath;
+        String envChatPath = System.getenv("KAIRO_CODE_CHAT_PATH");
+        if (envChatPath != null && !envChatPath.isBlank()
+                && (resolvedChatPath == null || resolvedChatPath.isBlank())) {
+            resolvedChatPath = envChatPath;
+        } else if ((resolvedChatPath == null || resolvedChatPath.isBlank())
+                && fileConfig.getProperty("chat-path") != null) {
+            resolvedChatPath = fileConfig.getProperty("chat-path");
+        }
+
         // Resolve working directory
         String resolvedWorkingDir = workingDir;
         if (resolvedWorkingDir == null || resolvedWorkingDir.isBlank()) {
@@ -173,7 +187,7 @@ public class KairoCodeMain implements Callable<Integer> {
                     resolvedApiKey, resolvedBaseUrl, resolvedModel,
                     maxIterations, resolvedWorkingDir, mcpConfig);
             ModelProvider modelProvider = buildModelProvider(
-                    resolvedProvider, resolvedApiKey, resolvedBaseUrl);
+                    resolvedProvider, resolvedApiKey, resolvedBaseUrl, resolvedChatPath);
 
             if (taskListFile != null) {
                 if (!Files.exists(taskListFile)) {
@@ -217,14 +231,11 @@ public class KairoCodeMain implements Callable<Integer> {
         return cause instanceof TimeoutException;
     }
 
-    private ModelProvider buildModelProvider(String resolvedProvider, String apiKey, String baseUrl) {
+    private ModelProvider buildModelProvider(
+            String resolvedProvider, String apiKey, String baseUrl, String chatPath) {
         if ("anthropic".equals(resolvedProvider)) {
             return new AnthropicProvider(apiKey, baseUrl);
         }
-        // KAIRO_CODE_CHAT_PATH lets callers override the appended path (default: /v1/chat/completions).
-        // Needed for providers like GLM Coding Plan whose base URL already contains the version
-        // segment (e.g. https://open.bigmodel.cn/api/coding/paas/v4 + /chat/completions).
-        String chatPath = System.getenv("KAIRO_CODE_CHAT_PATH");
         if (chatPath != null && !chatPath.isBlank()) {
             return new OpenAIProvider(apiKey, baseUrl, chatPath);
         }
