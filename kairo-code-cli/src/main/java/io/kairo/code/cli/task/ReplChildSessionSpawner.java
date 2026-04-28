@@ -15,6 +15,7 @@
  */
 package io.kairo.code.cli.task;
 
+import io.kairo.api.agent.Agent;
 import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.code.cli.AgentEventPrinter;
 import io.kairo.code.core.CodeAgentConfig;
@@ -43,14 +44,24 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
     private final CodeAgentConfig parentConfig;
     private final UserApprovalHandler approvalHandler;
     private final PrintWriter writer;
+    private final boolean notificationsEnabled;
 
     public ReplChildSessionSpawner(
             CodeAgentConfig parentConfig,
             UserApprovalHandler approvalHandler,
             PrintWriter writer) {
+        this(parentConfig, approvalHandler, writer, true);
+    }
+
+    public ReplChildSessionSpawner(
+            CodeAgentConfig parentConfig,
+            UserApprovalHandler approvalHandler,
+            PrintWriter writer,
+            boolean notificationsEnabled) {
         this.parentConfig = parentConfig;
         this.approvalHandler = approvalHandler;
         this.writer = writer;
+        this.notificationsEnabled = notificationsEnabled;
     }
 
     @Override
@@ -72,6 +83,17 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
                         .withHooks(List.of(prefixedPrinter))
                         .asChildSession();
 
-        return CodeAgentFactory.createSession(childConfig, opts);
+        CodeAgentSession session = CodeAgentFactory.createSession(childConfig, opts);
+        if (notificationsEnabled) {
+            Agent notifying =
+                    new NotifyingAgent(session.agent(), "Kairo Code", "子任务已完成: " + taskId);
+            return new CodeAgentSession(
+                    notifying,
+                    session.toolExecutor(),
+                    session.toolRegistry(),
+                    session.loadedSkills(),
+                    session.mcpRegistry());
+        }
+        return session;
     }
 }

@@ -85,22 +85,30 @@ public class ReplLoop {
     private final CodeAgentConfig config;
     private final List<Object> hooks;
     private final HooksConfig hooksConfig;
+    private final boolean notificationsEnabled;
     private SkillHotReloadWatcher hotReloadWatcher;
     private final Map<String, String> skillSources = new ConcurrentHashMap<>();
 
     public ReplLoop(CodeAgentConfig config, List<Object> hooks) {
-        this.config = config;
-        this.hooks = hooks != null ? hooks : List.of();
-        this.hooksConfig = HooksConfig.loadDefault();
+        this(config, hooks, null, true);
     }
 
     /**
      * Constructor that allows injecting a pre-loaded hooks config (useful for testing).
      */
     public ReplLoop(CodeAgentConfig config, List<Object> hooks, HooksConfig hooksConfig) {
+        this(config, hooks, hooksConfig, true);
+    }
+
+    public ReplLoop(
+            CodeAgentConfig config,
+            List<Object> hooks,
+            HooksConfig hooksConfig,
+            boolean notificationsEnabled) {
         this.config = config;
         this.hooks = hooks != null ? hooks : List.of();
         this.hooksConfig = hooksConfig != null ? hooksConfig : HooksConfig.loadDefault();
+        this.notificationsEnabled = notificationsEnabled;
     }
 
     /** Run the interactive REPL. Blocks until the user exits. */
@@ -335,7 +343,7 @@ public class ReplLoop {
         ConsoleWorktreeMergePrompter prompter =
                 new ConsoleWorktreeMergePrompter(terminalReader, writer);
         ReplChildSessionSpawner spawner =
-                new ReplChildSessionSpawner(config, approvalHandler, writer);
+                new ReplChildSessionSpawner(config, approvalHandler, writer, notificationsEnabled);
         return new TaskToolDependencies(provider, spawner, prompter);
     }
 

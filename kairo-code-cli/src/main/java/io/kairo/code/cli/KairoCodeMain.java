@@ -86,6 +86,9 @@ public class KairoCodeMain implements Callable<Integer> {
     @Option(names = "--show-usage", description = "Print token usage stats to stderr after completion")
     private boolean showUsage;
 
+    @Option(names = "--no-notifications", description = "Disable desktop notifications on task completion")
+    private boolean noNotifications;
+
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen");
@@ -196,7 +199,7 @@ public class KairoCodeMain implements Callable<Integer> {
                 final String taskToRun = resolvedTask;
                 return retryPolicy.execute(() -> runOneShot(config, taskToRun, modelProvider));
             } else {
-                return runRepl(config);
+                return runRepl(config, !noNotifications);
             }
         } catch (Exception e) {
             if (isTimeoutException(e)) {
@@ -260,14 +263,14 @@ public class KairoCodeMain implements Callable<Integer> {
         }
     }
 
-    private int runRepl(CodeAgentConfig config) {
+    private int runRepl(CodeAgentConfig config, boolean notificationsEnabled) {
         // Create event printer for hook-based output during agent calls
         PrintWriter sysWriter = new PrintWriter(System.out, true);
         AgentEventPrinter eventPrinter = new AgentEventPrinter(sysWriter, "", true);
 
         // ReplLoop owns the ConsoleApprovalHandler lifecycle —
         // it creates the handler wired to JLine's terminal I/O.
-        new ReplLoop(config, List.of(eventPrinter)).run();
+        new ReplLoop(config, List.of(eventPrinter), null, notificationsEnabled).run();
         return 0;
     }
 
