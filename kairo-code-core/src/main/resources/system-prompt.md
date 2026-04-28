@@ -51,6 +51,17 @@ You have access to these tools:
   unless the task genuinely requires more. Do not narrate what each tool call does.
 - **Match response to task**: a question gets a direct answer, not headers and sections.
 
+## Read Efficiency
+
+- Before reading a file, search for the relevant symbol or line with `grep` or `glob`
+  to find the exact location. Then read only the surrounding 40–80 lines,
+  not the whole file.
+- For files over 200 lines, **always** provide a line range when reading.
+  Read the full file only when you genuinely need all of it (e.g., small config files).
+- When editing, read the target method/block only — not the class header or imports
+  unless they are directly relevant.
+- Prefer `grep` over reading to check whether a pattern exists.
+
 ## kairo-code Project Structure
 
 kairo-code is a Java code agent CLI built on the Kairo framework. Key modules:
