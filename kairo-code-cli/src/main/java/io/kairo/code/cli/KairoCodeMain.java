@@ -247,7 +247,11 @@ public class KairoCodeMain implements Callable<Integer> {
                 ? CodeAgentFactory.create(config, modelProvider, null, List.of(new ProgressPrinter()))
                 : CodeAgentFactory.create(config, modelProvider);
 
-        Msg userMsg = Msg.of(MsgRole.USER, resolvedTask);
+        String taskWithDiscipline =
+                "Complete this task fully. Use your tools to investigate, implement, and verify."
+                        + " Do not stop after planning — execute each step with tool calls.\n\n"
+                        + resolvedTask;
+        Msg userMsg = Msg.of(MsgRole.USER, taskWithDiscipline);
         var mono = agent.call(userMsg);
         if (timeoutSeconds > 0) {
             mono = mono.timeout(Duration.ofSeconds(timeoutSeconds));
