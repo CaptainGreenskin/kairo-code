@@ -57,7 +57,7 @@ class ReplInteractionE2E {
     }
 
     private static CodeAgentConfig defaultConfig() {
-        return new CodeAgentConfig(apiKey, baseUrl, model, 30, System.getProperty("java.io.tmpdir"));
+        return new CodeAgentConfig(apiKey, baseUrl, model, 30, System.getProperty("java.io.tmpdir"), null);
     }
 
     // ──────────────────────────────────────────────────────────────────────

@@ -43,7 +43,7 @@ class SnapshotResumeCommandTest {
         store = new JsonFileSnapshotStore(tempDir, new SessionSerializer());
         outputCapture = new StringWriter();
         writer = new PrintWriter(outputCapture, true);
-        config = new CodeAgentConfig("test-key", "https://api.test.com", "gpt-4o", 50, "/tmp");
+        config = new CodeAgentConfig("test-key", "https://api.test.com", "gpt-4o", 50, "/tmp", null);
         commandRegistry = new CommandRegistry();
     }
 

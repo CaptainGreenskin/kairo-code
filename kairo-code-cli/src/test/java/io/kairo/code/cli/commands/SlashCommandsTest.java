@@ -43,10 +43,11 @@ class SlashCommandsTest {
         registry.register(new PlanCommand());
         registry.register(new SkillCommand());
         registry.register(new ExitCommand());
+        registry.register(new McpCommand());
 
         outputCapture = new StringWriter();
         writer = new PrintWriter(outputCapture, true);
-        config = new CodeAgentConfig("test-key", "https://api.test.com", "gpt-4o", 50, "/tmp");
+        config = new CodeAgentConfig("test-key", "https://api.test.com", "gpt-4o", 50, "/tmp", null);
     }
 
     // ─── :help ───────────────────────────────────────────────────
@@ -183,6 +184,28 @@ class SlashCommandsTest {
         assertThat(outputCapture.toString()).contains("Usage: :plan");
     }
 
+    // ─── :mcp ────────────────────────────────────────────────────
+
+    @Test
+    void mcpListShowsNoServersWhenNotConfigured() {
+        ReplContext context = createContext(stubAgent());
+
+        new McpCommand().execute("list", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("No MCP servers configured");
+    }
+
+    @Test
+    void mcpDefaultSubcommandIsList() {
+        ReplContext context = createContext(stubAgent());
+
+        new McpCommand().execute("", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("No MCP servers configured");
+    }
+
     // ─── :exit ───────────────────────────────────────────────────
 
     @Test
@@ -202,9 +225,9 @@ class SlashCommandsTest {
 
     @Test
     void allCommandsAreRegistered() {
-        assertThat(registry.allCommands()).hasSize(7);
+        assertThat(registry.allCommands()).hasSize(8);
         assertThat(registry.allCommandNames())
-                .containsExactly("help", "clear", "model", "cost", "plan", "skill", "exit");
+                .containsExactly("help", "clear", "model", "cost", "plan", "skill", "exit", "mcp");
     }
 
     @Test

@@ -61,7 +61,8 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
                         parentConfig.baseUrl(),
                         parentConfig.modelName(),
                         parentConfig.maxIterations(),
-                        workingDir.toString());
+                        workingDir.toString(),
+                        parentConfig.mcpConfig());
 
         AgentEventPrinter prefixedPrinter = new AgentEventPrinter(writer, "[task:" + taskId + "] ");
 

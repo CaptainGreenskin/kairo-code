@@ -3,6 +3,7 @@ package io.kairo.code.core;
 import io.kairo.api.agent.Agent;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
+import io.kairo.mcp.McpClientRegistry;
 import java.util.Set;
 
 /**
@@ -16,12 +17,22 @@ import java.util.Set;
  * @param toolExecutor the tool executor (for plan mode toggle)
  * @param toolRegistry the tool registry
  * @param loadedSkills immutable set of skill names currently active in the system prompt
+ * @param mcpRegistry MCP client registry for querying server info (null if no MCP servers configured)
  */
 public record CodeAgentSession(
         Agent agent,
         DefaultToolExecutor toolExecutor,
         DefaultToolRegistry toolRegistry,
-        Set<String> loadedSkills) {
+        Set<String> loadedSkills,
+        McpClientRegistry mcpRegistry) {
+
+    public CodeAgentSession(
+            Agent agent,
+            DefaultToolExecutor toolExecutor,
+            DefaultToolRegistry toolRegistry,
+            Set<String> loadedSkills) {
+        this(agent, toolExecutor, toolRegistry, loadedSkills, null);
+    }
 
     public CodeAgentSession {
         if (agent == null) throw new IllegalArgumentException("agent must not be null");

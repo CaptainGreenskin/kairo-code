@@ -7,6 +7,7 @@ import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
+import io.kairo.code.core.mcp.McpConfig;
 import io.kairo.core.model.anthropic.AnthropicProvider;
 import io.kairo.core.model.openai.OpenAIProvider;
 import java.io.PrintWriter;
@@ -163,9 +164,11 @@ public class KairoCodeMain implements Callable<Integer> {
                 return 1;
             }
 
+            McpConfig mcpConfig = McpConfig.loadDefault();
+
             CodeAgentConfig config = new CodeAgentConfig(
                     resolvedApiKey, resolvedBaseUrl, resolvedModel,
-                    maxIterations, resolvedWorkingDir);
+                    maxIterations, resolvedWorkingDir, mcpConfig);
             ModelProvider modelProvider = buildModelProvider(
                     resolvedProvider, resolvedApiKey, resolvedBaseUrl);
 
