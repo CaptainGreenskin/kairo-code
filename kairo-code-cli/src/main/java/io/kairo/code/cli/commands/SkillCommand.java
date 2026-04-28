@@ -77,7 +77,9 @@ public class SkillCommand implements SlashCommand {
         for (SkillDefinition skill : all) {
             String marker = loaded.contains(skill.name()) ? "●" : "○";
             String desc = skill.description() == null ? "" : skill.description();
-            writer.printf("  %s %-20s %s%n", marker, skill.name(), desc);
+            String source = context.skillSources().getOrDefault(skill.name(), "");
+            String sourceTag = source.isBlank() ? "" : "  [" + source + "]";
+            writer.printf("  %s %-20s%s  %s%n", marker, skill.name(), sourceTag, desc);
         }
         writer.println();
         writer.println("● = loaded   ○ = available");

@@ -29,9 +29,14 @@ import io.kairo.code.core.ConsoleApprovalHandler;
 import io.kairo.code.core.task.TaskToolDependencies;
 import io.kairo.code.core.workspace.WorktreeLifecycle;
 import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
+import io.kairo.code.core.skill.FsSkillLoader;
+import io.kairo.code.core.skill.FsSkillLoader.SkillWithSource;
 import io.kairo.core.agent.snapshot.JsonFileSnapshotStore;
 import io.kairo.core.session.SessionSerializer;
 import io.kairo.skill.DefaultSkillRegistry;
+import io.kairo.skill.SkillHotReloadWatcher;
+import io.kairo.skill.SkillLoader;
+import io.kairo.skill.SkillReloadEvent;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -40,7 +45,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -78,6 +85,8 @@ public class ReplLoop {
     private final CodeAgentConfig config;
     private final List<Object> hooks;
     private final HooksConfig hooksConfig;
+    private SkillHotReloadWatcher hotReloadWatcher;
+    private final Map<String, String> skillSources = new ConcurrentHashMap<>();
 
     public ReplLoop(CodeAgentConfig config, List<Object> hooks) {
         this.config = config;
@@ -103,6 +112,25 @@ public class ReplLoop {
                 .build()) {
 
             SkillRegistry skillRegistry = bootstrapSkillRegistry();
+
+            // Load FS skills (global + project) and register them, overriding classpath by name.
+            loadFsSkills(skillRegistry);
+
+            // Start hot reload watcher for FS skill directories.
+            hotReloadWatcher = createHotReloadWatcher(skillRegistry);
+            if (hotReloadWatcher != null) {
+                hotReloadWatcher.addListener(event -> {
+                    log.info("Skill reload event: {} {}", event.skillId(), event.type());
+                    // The watcher already updates the registry; we just refresh source map.
+                    refreshSkillSources(skillRegistry);
+                });
+                try {
+                    hotReloadWatcher.start();
+                } catch (IOException e) {
+                    log.warn("Failed to start skill hot-reload watcher: {}", e.getMessage());
+                }
+            }
+
             SnapshotStore snapshotStore = bootstrapSnapshotStore(kairoDir);
             CommandRegistry registry = createCommandRegistry();
 
@@ -167,7 +195,8 @@ public class ReplLoop {
                     approvalHandler,
                     skillRegistry,
                     snapshotStore,
-                    hooksConfig);
+                    hooksConfig,
+                    skillSources);
             context.setRunner(runner);
 
             // Wire Ctrl+C signal handler: cancel agent if running, else no-op
@@ -325,6 +354,65 @@ public class ReplLoop {
         writer.println("Type your request, or :help for commands. :exit to quit.");
         writer.println();
         writer.flush();
+    }
+
+    /**
+     * Load skills from global (~/.kairo-code/skills/) and project (.kairo-code/skills/)
+     * directories. FS skills override classpath skills by name.
+     */
+    private void loadFsSkills(SkillRegistry registry) {
+        Path globalDir = Path.of(System.getProperty("user.home"), KAIRO_CODE_DIR, "skills");
+        Path projectDir = config.workingDir() != null && !config.workingDir().isBlank()
+                ? Path.of(config.workingDir(), ".kairo-code", "skills")
+                : Path.of(System.getProperty("user.dir"), ".kairo-code", "skills");
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir);
+        for (SkillWithSource ws : loader.loadAll()) {
+            registry.register(ws.skill());
+            skillSources.put(ws.skill().name(), ws.source());
+        }
+
+        // Mark classpath skills that weren't overridden
+        for (String name : BUILTIN_SKILLS) {
+            skillSources.putIfAbsent(name, "classpath");
+        }
+    }
+
+    /**
+     * Create a hot-reload watcher for the global and project skill directories.
+     * Returns null if neither directory exists.
+     */
+    private SkillHotReloadWatcher createHotReloadWatcher(SkillRegistry registry) {
+        Path globalDir = Path.of(System.getProperty("user.home"), KAIRO_CODE_DIR, "skills");
+        Path projectDir = config.workingDir() != null && !config.workingDir().isBlank()
+                ? Path.of(config.workingDir(), ".kairo-code", "skills")
+                : Path.of(System.getProperty("user.dir"), ".kairo-code", "skills");
+
+        Path dirToWatch = Files.isDirectory(projectDir) ? projectDir
+                : Files.isDirectory(globalDir) ? globalDir
+                : null;
+
+        if (dirToWatch == null) {
+            return null;
+        }
+
+        SkillLoader skillLoader = new SkillLoader(registry);
+        return new SkillHotReloadWatcher(dirToWatch, skillLoader, registry);
+    }
+
+    /**
+     * Refresh the skill source map after a hot-reload event.
+     */
+    private void refreshSkillSources(SkillRegistry registry) {
+        Path globalDir = Path.of(System.getProperty("user.home"), KAIRO_CODE_DIR, "skills");
+        Path projectDir = config.workingDir() != null && !config.workingDir().isBlank()
+                ? Path.of(config.workingDir(), ".kairo-code", "skills")
+                : Path.of(System.getProperty("user.dir"), ".kairo-code", "skills");
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir);
+        for (SkillWithSource ws : loader.loadAll()) {
+            skillSources.put(ws.skill().name(), ws.source());
+        }
     }
 
     private static Path ensureKairoDir() {
