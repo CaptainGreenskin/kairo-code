@@ -9,7 +9,9 @@ import io.kairo.api.tool.PermissionGuard;
 import io.kairo.api.tool.ToolDefinition;
 import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.code.core.mcp.McpConfig;
+import io.kairo.code.core.memory.KairoMdLoader;
 import io.kairo.core.agent.AgentBuilder;
+import java.nio.file.Path;
 import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.TaskTool;
 import io.kairo.code.core.task.TaskToolDependencies;
@@ -38,6 +40,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -228,6 +231,10 @@ public final class CodeAgentFactory {
                     .append(
                             "\nAll file operations and commands should be relative to this"
                                     + " directory.");
+            Optional<String> kairoMd =
+                    KairoMdLoader.findAndLoad(Path.of(config.workingDir()));
+            kairoMd.ifPresent(content ->
+                    prompt.append("\n\n## Project Instructions (KAIRO.md)\n").append(content));
         }
         return prompt.toString();
     }
