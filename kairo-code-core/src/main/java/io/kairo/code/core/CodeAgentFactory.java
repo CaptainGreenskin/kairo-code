@@ -14,6 +14,7 @@ import io.kairo.code.core.memory.KairoMdLoader;
 import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
+import io.kairo.code.core.hook.PostEditHintHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
 import io.kairo.core.model.openai.OpenAIProvider;
@@ -184,6 +185,7 @@ public final class CodeAgentFactory {
         // implementation tools) and injects a corrective message. Disabled in REPL mode.
         if (!options.isRepl()) {
             builder.hook(new PlanWithoutActionHook());
+            builder.hook(new PostEditHintHook());
         }
 
         if (options.textDeltaConsumer() != null) {
