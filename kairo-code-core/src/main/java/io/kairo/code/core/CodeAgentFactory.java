@@ -11,6 +11,7 @@ import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.code.core.mcp.McpConfig;
 import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.memory.KairoMdLoader;
+import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
@@ -144,7 +145,12 @@ public final class CodeAgentFactory {
         DefaultToolExecutor executor = new DefaultToolExecutor(registry, guard);
 
         Set<String> activeSkills = options.activeSkills();
-        String systemPrompt = resolveSystemPrompt(config, options.skillRegistry(), activeSkills);
+        String systemPrompt =
+                resolveSystemPrompt(
+                        config,
+                        options.skillRegistry(),
+                        activeSkills,
+                        options.toolUsageTracker());
 
         AgentBuilder builder =
                 AgentBuilder.create()
@@ -235,7 +241,10 @@ public final class CodeAgentFactory {
     }
 
     private static String resolveSystemPrompt(
-            CodeAgentConfig config, SkillRegistry skillRegistry, Set<String> activeSkills) {
+            CodeAgentConfig config,
+            SkillRegistry skillRegistry,
+            Set<String> activeSkills,
+            ToolUsageTracker toolUsageTracker) {
         StringBuilder prompt = new StringBuilder(loadSystemPrompt());
         if (skillRegistry != null && !activeSkills.isEmpty()) {
             String skillSection = renderSkillSection(skillRegistry, activeSkills);
@@ -254,25 +263,9 @@ public final class CodeAgentFactory {
             kairoMd.ifPresent(content ->
                     prompt.append("\n\n## Project Instructions (KAIRO.md)\n").append(content));
         }
-        injectLearnedLessons(prompt);
-        return prompt.toString();
-    }
-
-    private static void injectLearnedLessons(StringBuilder prompt) {
-        Path globalKairoDir =
-                Path.of(System.getProperty("user.home"), ".kairo-code");
-        LearnedLessonStore store = LearnedLessonStore.fromKairoDir(globalKairoDir);
-        var approved = store.listApproved();
-        if (!approved.isEmpty()) {
-            prompt.append("\n\n## Learned Lessons\n");
-            approved.forEach(
-                    l ->
-                            prompt.append("- [")
-                                    .append(l.toolName())
-                                    .append("] ")
-                                    .append(l.lessonText())
-                                    .append("\n"));
-        }
+        Path globalKairoDir = Path.of(System.getProperty("user.home"), ".kairo-code");
+        LearnedLessonStore lessonStore = LearnedLessonStore.fromKairoDir(globalKairoDir);
+        return SessionContextEnricher.enrich(prompt.toString(), toolUsageTracker, lessonStore);
     }
 
     private static String renderSkillSection(SkillRegistry registry, Set<String> activeSkills) {
@@ -321,7 +314,8 @@ public final class CodeAgentFactory {
             AgentSnapshot restoreFrom,
             TaskToolDependencies taskToolDependencies,
             boolean childSession,
-            java.util.function.Consumer<String> textDeltaConsumer) {
+            java.util.function.Consumer<String> textDeltaConsumer,
+            ToolUsageTracker toolUsageTracker) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -330,19 +324,21 @@ public final class CodeAgentFactory {
 
         public static SessionOptions empty() {
             return new SessionOptions(
-                    null, null, List.of(), null, Set.of(), null, null, false, null);
+                    null, null, List.of(), null, Set.of(), null, null, false, null, null);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
             return new SessionOptions(
                     provider, approvalHandler, hooks, skillRegistry, activeSkills,
-                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer);
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
             return new SessionOptions(
                     modelProvider, handler, hooks, skillRegistry, activeSkills,
-                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer);
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -350,20 +346,22 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler,
                     hookList == null ? List.of() : List.copyOf(hookList),
                     skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
-                    childSession, textDeltaConsumer);
+                    childSession, textDeltaConsumer, toolUsageTracker);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, registry,
                     active == null ? Set.of() : Set.copyOf(active),
-                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer);
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
-                    snapshot, taskToolDependencies, childSession, textDeltaConsumer);
+                    snapshot, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker);
         }
 
         /**
@@ -373,7 +371,7 @@ public final class CodeAgentFactory {
         public SessionOptions withTaskTool(TaskToolDependencies deps) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
-                    restoreFrom, deps, childSession, textDeltaConsumer);
+                    restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker);
         }
 
         /**
@@ -384,7 +382,8 @@ public final class CodeAgentFactory {
                 java.util.function.Consumer<String> consumer) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
-                    restoreFrom, taskToolDependencies, childSession, consumer);
+                    restoreFrom, taskToolDependencies, childSession, consumer,
+                    toolUsageTracker);
         }
 
         /**
@@ -395,7 +394,21 @@ public final class CodeAgentFactory {
         public SessionOptions asChildSession() {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
-                    restoreFrom, taskToolDependencies, true, textDeltaConsumer);
+                    restoreFrom, taskToolDependencies, true, textDeltaConsumer,
+                    toolUsageTracker);
+        }
+
+        /**
+         * Wire a {@link ToolUsageTracker} so its current snapshot is rendered into the system
+         * prompt's "Tool Insights" section at agent build time. The same tracker should also be
+         * registered as a hook (via {@link #withHooks(List)}) so it keeps accumulating across
+         * session rebuilds (e.g. {@code :clear}).
+         */
+        public SessionOptions withToolUsageTracker(ToolUsageTracker tracker) {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    tracker);
         }
     }
 }

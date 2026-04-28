@@ -234,7 +234,8 @@ public class ReplLoop {
                             .withApprovalHandler(approvalHandler)
                             .withHooks(effectiveHooks)
                             .withTaskTool(taskDeps)
-                            .withTextDeltaConsumer(textDelta);
+                            .withTextDeltaConsumer(textDelta)
+                            .withToolUsageTracker(usageTracker);
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
             StreamingAgentRunner runner = new StreamingAgentRunner(writer, shellHookListener, hookExecutor);
@@ -243,7 +244,8 @@ public class ReplLoop {
                     opts -> opts.withApprovalHandler(approvalHandler)
                             .withHooks(effectiveHooks)
                             .withTaskTool(taskDeps)
-                            .withTextDeltaConsumer(textDelta),
+                            .withTextDeltaConsumer(textDelta)
+                            .withToolUsageTracker(usageTracker),
                     approvalHandler,
                     skillRegistry,
                     snapshotStore,
