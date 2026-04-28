@@ -236,7 +236,8 @@ public class ReplLoop {
                             .withHooks(effectiveHooks)
                             .withTaskTool(taskDeps)
                             .withTextDeltaConsumer(textDelta)
-                            .withToolUsageTracker(usageTracker);
+                            .withToolUsageTracker(usageTracker)
+                            .asReplSession();
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
             StreamingAgentRunner runner = new StreamingAgentRunner(writer, shellHookListener, hookExecutor);
