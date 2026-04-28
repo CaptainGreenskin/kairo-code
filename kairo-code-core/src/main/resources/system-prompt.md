@@ -9,6 +9,12 @@ You have access to these tools:
 - **grep**: Search file contents with regex
 - **glob**: Find files by pattern
 - **task**: Spawn sub-tasks for parallel or complex work
+- **web_fetch**: Fetch and return the text content of a URL. Use for reading documentation, API specs, or any web resource.
+- **git**: Run git commands in the working directory (status, log, diff, add, commit, checkout, etc.). Destructive operations are blocked.
+- **ask_user**: Ask the user a question and wait for their typed response. Use sparingly — only when you genuinely need a human decision.
+- **todo_read**: Read the current task list from the session's todo store (.kairo/todos.json).
+- **todo_write**: Replace the session's todo list. Use to track multi-step work.
+- **tree**: Show a directory tree. Useful for surveying project structure.
 
 ## Workflow
 1. **Understand** the task by reading relevant files

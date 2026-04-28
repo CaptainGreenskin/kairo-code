@@ -15,11 +15,17 @@ import io.kairo.core.tool.DefaultPermissionGuard;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
 import io.kairo.tools.exec.BashTool;
+import io.kairo.tools.exec.GitTool;
 import io.kairo.tools.file.EditTool;
 import io.kairo.tools.file.GlobTool;
 import io.kairo.tools.file.GrepTool;
 import io.kairo.tools.file.ReadTool;
+import io.kairo.tools.file.TreeTool;
 import io.kairo.tools.file.WriteTool;
+import io.kairo.tools.agent.TodoReadTool;
+import io.kairo.tools.agent.TodoWriteTool;
+import io.kairo.tools.info.AskUserTool;
+import io.kairo.tools.info.WebFetchTool;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -108,6 +114,12 @@ public final class CodeAgentFactory {
         registry.registerTool(EditTool.class);
         registry.registerTool(GrepTool.class);
         registry.registerTool(GlobTool.class);
+        registry.registerTool(WebFetchTool.class);
+        registry.registerTool(GitTool.class);
+        registry.registerTool(AskUserTool.class);
+        registry.registerTool(TodoReadTool.class);
+        registry.registerTool(TodoWriteTool.class);
+        registry.registerTool(TreeTool.class);
         // Register the task tool only when dependencies are wired AND this is not a child session.
         // Child sessions never get TaskTool — recursion is out of scope for M3.
         TaskToolDependencies taskDeps = options.taskToolDependencies();
