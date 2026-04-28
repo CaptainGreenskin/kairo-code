@@ -69,6 +69,18 @@ class SystemPromptContentTest {
     }
 
     @Test
+    void executionDiscipline_mustUseWriteEditTools() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("You MUST use `write` or `edit` tools to create and modify files");
+    }
+
+    @Test
+    void executionDiscipline_noBashForFileWrites() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("Never use `bash` with `echo >`, `cat >`, `tee`");
+    }
+
+    @Test
     void executionDiscipline_parallelToolCalls() {
         assertThat(SYSTEM_PROMPT)
                 .contains("Parallel tool calls");

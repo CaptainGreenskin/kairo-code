@@ -18,6 +18,7 @@ import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
 import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.MissingTestHintHook;
+import io.kairo.code.core.hook.NoWriteDetectedHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
@@ -210,6 +211,7 @@ public final class CodeAgentFactory {
                 builder.hook(new MaxTurnsGuardHook(metrics));
             }
             builder.hook(new PlanWithoutActionHook());
+            builder.hook(new NoWriteDetectedHook());
             builder.hook(new PostEditHintHook());
             builder.hook(new PostBatchEditVerifyHook());
             builder.hook(new MissingTestHintHook());
