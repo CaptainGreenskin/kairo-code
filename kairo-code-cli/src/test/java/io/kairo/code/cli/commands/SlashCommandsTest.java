@@ -37,6 +37,7 @@ class SlashCommandsTest {
     void setUp() {
         registry = new CommandRegistry();
         registry.register(new HelpCommand());
+        registry.register(new HistoryCommand());
         registry.register(new ClearCommand());
         registry.register(new ModelCommand());
         registry.register(new CostCommand());
@@ -225,9 +226,9 @@ class SlashCommandsTest {
 
     @Test
     void allCommandsAreRegistered() {
-        assertThat(registry.allCommands()).hasSize(8);
+        assertThat(registry.allCommands()).hasSize(9);
         assertThat(registry.allCommandNames())
-                .containsExactly("help", "clear", "model", "cost", "plan", "skill", "exit", "mcp");
+                .containsExactly("help", "history", "clear", "model", "cost", "plan", "skill", "exit", "mcp");
     }
 
     @Test
