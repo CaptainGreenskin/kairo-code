@@ -20,6 +20,7 @@ import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
+import io.kairo.code.core.hook.StaleReadDetectorHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
@@ -190,6 +191,10 @@ public final class CodeAgentFactory {
         // Auto-register ContextWindowGuardHook: warns on large context to prevent GLM-5.1
         // overflow. Active in both REPL and one-shot mode.
         builder.hook(new ContextWindowGuardHook());
+
+        // Auto-register StaleReadDetectorHook: warns when the agent re-reads the same file
+        // multiple times, to improve token efficiency. Active in both REPL and one-shot mode.
+        builder.hook(new StaleReadDetectorHook());
 
         // Auto-register TestFailureFeedbackHook: intercepts bash mvn test failures and injects
         // structured error context so the agent focuses on the right fixes.
