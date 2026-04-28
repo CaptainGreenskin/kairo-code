@@ -74,4 +74,24 @@ class CodeAgentFactoryTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("apiKey");
     }
+
+    @Test
+    void shouldRegisterExpandedToolSet() {
+        CodeAgentConfig config = new CodeAgentConfig(
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null);
+
+        var session = CodeAgentFactory.createSession(config,
+                CodeAgentFactory.SessionOptions.empty().withModelProvider(new StubModelProvider()));
+
+        var toolNames = session.toolRegistry().getAll().stream()
+                .map(io.kairo.api.tool.ToolDefinition::name)
+                .toList();
+
+        assertThat(toolNames).contains("web_fetch");
+        assertThat(toolNames).contains("git");
+        assertThat(toolNames).contains("ask_user");
+        assertThat(toolNames).contains("todo_read");
+        assertThat(toolNames).contains("todo_write");
+        assertThat(toolNames).contains("tree");
+    }
 }
