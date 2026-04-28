@@ -62,6 +62,32 @@ class SystemPromptContentTest {
                 .contains("substitute for doing the actual work");
     }
 
+    @Test
+    void executionDiscipline_preferDedicatedToolsOverBash() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("Prefer dedicated tools over bash");
+    }
+
+    @Test
+    void executionDiscipline_parallelToolCalls() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("Parallel tool calls");
+    }
+
+    @Test
+    void executionDiscipline_terseOutput() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("Terse output");
+        assertThat(SYSTEM_PROMPT)
+                .contains("≤ 25 words");
+    }
+
+    @Test
+    void executionDiscipline_matchResponseToTask() {
+        assertThat(SYSTEM_PROMPT)
+                .contains("Match response to task");
+    }
+
     private static String loadSystemPrompt() {
         try (InputStream is = CodeAgentFactory.class
                 .getClassLoader()

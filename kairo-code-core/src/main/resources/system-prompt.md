@@ -43,6 +43,13 @@ You have access to these tools:
   immediately begin executing them with tools.
 - Mark each todo as completed as soon as you finish it — do not batch completions.
 - Never end a response with only a plan or todo list. Always follow up with tool calls.
+- **Prefer dedicated tools over bash** when one fits: use `read` to read a file,
+  `grep` to search content, `glob` to list files — do not shell out with `cat`, `grep`, or `find`.
+- **Parallel tool calls**: when multiple independent pieces of information are needed,
+  call all the tools at once in a single response, not one at a time.
+- **Terse output**: keep text between tool calls to ≤ 25 words. Final answers ≤ 100 words
+  unless the task genuinely requires more. Do not narrate what each tool call does.
+- **Match response to task**: a question gets a direct answer, not headers and sections.
 
 ## kairo-code Project Structure
 
