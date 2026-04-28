@@ -34,7 +34,7 @@ import picocli.CommandLine.Option;
         name = "kairo-code",
         description = "Kairo Code — Same Models. Governable.",
         mixinStandardHelpOptions = true,
-        version = "kairo-code 0.1.0")
+        version = "kairo-code 0.2.0")
 public class KairoCodeMain implements Callable<Integer> {
 
     @Option(names = "--task", description = "Task to execute (omit for interactive REPL)")
