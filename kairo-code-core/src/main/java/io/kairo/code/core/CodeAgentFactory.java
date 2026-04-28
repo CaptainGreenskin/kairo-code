@@ -13,6 +13,7 @@ import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.memory.KairoMdLoader;
 import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
+import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
 import io.kairo.core.model.openai.OpenAIProvider;
@@ -179,6 +180,12 @@ public final class CodeAgentFactory {
             builder.hook(hook);
         }
 
+        // Auto-register PlanWithoutActionHook: detects plan-only responses (todo_write without
+        // implementation tools) and injects a corrective message. Disabled in REPL mode.
+        if (!options.isRepl()) {
+            builder.hook(new PlanWithoutActionHook());
+        }
+
         if (options.textDeltaConsumer() != null) {
             builder.textDeltaConsumer(options.textDeltaConsumer());
         }
@@ -315,7 +322,8 @@ public final class CodeAgentFactory {
             TaskToolDependencies taskToolDependencies,
             boolean childSession,
             java.util.function.Consumer<String> textDeltaConsumer,
-            ToolUsageTracker toolUsageTracker) {
+            ToolUsageTracker toolUsageTracker,
+            boolean isRepl) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -324,21 +332,21 @@ public final class CodeAgentFactory {
 
         public static SessionOptions empty() {
             return new SessionOptions(
-                    null, null, List.of(), null, Set.of(), null, null, false, null, null);
+                    null, null, List.of(), null, Set.of(), null, null, false, null, null, false);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
             return new SessionOptions(
                     provider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker);
+                    toolUsageTracker, isRepl);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
             return new SessionOptions(
                     modelProvider, handler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker);
+                    toolUsageTracker, isRepl);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -346,7 +354,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler,
                     hookList == null ? List.of() : List.copyOf(hookList),
                     skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
-                    childSession, textDeltaConsumer, toolUsageTracker);
+                    childSession, textDeltaConsumer, toolUsageTracker, isRepl);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
@@ -354,14 +362,14 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, registry,
                     active == null ? Set.of() : Set.copyOf(active),
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker);
+                    toolUsageTracker, isRepl);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     snapshot, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker);
+                    toolUsageTracker, isRepl);
         }
 
         /**
@@ -371,7 +379,8 @@ public final class CodeAgentFactory {
         public SessionOptions withTaskTool(TaskToolDependencies deps) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
-                    restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker);
+                    restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker,
+                    isRepl);
         }
 
         /**
@@ -383,7 +392,7 @@ public final class CodeAgentFactory {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, consumer,
-                    toolUsageTracker);
+                    toolUsageTracker, isRepl);
         }
 
         /**
@@ -395,7 +404,7 @@ public final class CodeAgentFactory {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, true, textDeltaConsumer,
-                    toolUsageTracker);
+                    toolUsageTracker, isRepl);
         }
 
         /**
@@ -408,7 +417,19 @@ public final class CodeAgentFactory {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    tracker);
+                    tracker, isRepl);
+        }
+
+        /**
+         * Mark this session as running in REPL/interactive mode. When true,
+         * {@link io.kairo.code.core.hook.PlanWithoutActionHook} will not inject corrective
+         * messages.
+         */
+        public SessionOptions asReplSession() {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker, true);
         }
     }
 }
