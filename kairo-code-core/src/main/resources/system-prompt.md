@@ -43,6 +43,9 @@ You have access to these tools:
   immediately begin executing them with tools.
 - Mark each todo as completed as soon as you finish it — do not batch completions.
 - Never end a response with only a plan or todo list. Always follow up with tool calls.
+- **You MUST use `write` or `edit` tools to create and modify files.**
+  Never use `bash` with `echo >`, `cat >`, `tee`, heredoc, or any other shell redirect to write files.
+  `bash` is for running commands (build, test, git), not for file creation or modification.
 - **Prefer dedicated tools over bash** when one fits: use `read` to read a file,
   `grep` to search content, `glob` to list files — do not shell out with `cat`, `grep`, or `find`.
 - **Parallel tool calls**: when multiple independent pieces of information are needed,
