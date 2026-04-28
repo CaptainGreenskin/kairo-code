@@ -26,4 +26,4 @@ The library lending system has several bugs and missing test coverage.
 
 - Do **not** modify existing test files (`LoanTest.java`, `LoanPolicyTest.java`, `LibraryServiceTest.java`)
 - Do **not** modify `pom.xml`
-- All 45+ tests (35 existing + ≥10 new) must pass at the end
+- All 48+ tests (38 existing + ≥10 new) must pass at the end
