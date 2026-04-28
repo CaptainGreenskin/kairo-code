@@ -118,6 +118,41 @@ class SnapshotResumeCommandTest {
     }
 
     @Test
+    void snapshotLoadRestoresFromSavedSnapshot() {
+        // First, save a snapshot.
+        ReplContext saveCtx = createContext(snapshotAgent(3, 9876));
+        new SnapshotCommand().execute("save check", saveCtx);
+
+        // Use a fresh context to load.
+        ReplContext loadCtx = createContext(stubAgent());
+        outputCapture.getBuffer().setLength(0);
+
+        new SnapshotCommand().execute("load check", loadCtx);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("✓ Snapshot 'check' loaded");
+        assertThat(output).contains("9876 tokens");
+    }
+
+    @Test
+    void snapshotLoadMissingKeyReportsNotFound() {
+        ReplContext context = createContext(stubAgent());
+
+        new SnapshotCommand().execute("load nonexistent", context);
+
+        assertThat(outputCapture.toString()).contains("Snapshot 'nonexistent' not found");
+    }
+
+    @Test
+    void snapshotLoadWithoutKeyShowsUsage() {
+        ReplContext context = createContext(stubAgent());
+
+        new SnapshotCommand().execute("load", context);
+
+        assertThat(outputCapture.toString()).contains("Usage: :snapshot load");
+    }
+
+    @Test
     void snapshotNoArgsShowsUsage() {
         ReplContext context = createContext(stubAgent());
 

@@ -16,6 +16,7 @@ import java.util.List;
  * <p>Usage:
  * <ul>
  *   <li>{@code :snapshot save <key>} — write the current session under {@code <key>}</li>
+ *   <li>{@code :snapshot load <key>} — restore a saved snapshot into the current session</li>
  *   <li>{@code :snapshot list} — show all saved keys</li>
  *   <li>{@code :snapshot delete <key>} — remove a saved snapshot</li>
  * </ul>
@@ -54,6 +55,7 @@ public class SnapshotCommand implements SlashCommand {
 
         switch (sub) {
             case "save" -> handleSave(rest, store, context, writer);
+            case "load" -> handleLoad(rest, store, context, writer);
             case "list", "ls" -> handleList(store, writer);
             case "delete", "rm" -> handleDelete(rest, store, writer);
             default -> printUsage(writer);
@@ -91,6 +93,39 @@ public class SnapshotCommand implements SlashCommand {
         writer.flush();
     }
 
+    private void handleLoad(
+            String key, SnapshotStore store, ReplContext context, PrintWriter writer) {
+        if (key.isBlank()) {
+            writer.println("Usage: :snapshot load <key>");
+            writer.flush();
+            return;
+        }
+
+        AgentSnapshot snapshot;
+        try {
+            snapshot = store.load(key).block();
+        } catch (Exception e) {
+            writer.println("Failed to load snapshot: " + e.getMessage());
+            writer.flush();
+            return;
+        }
+        if (snapshot == null) {
+            writer.println("Snapshot '" + key + "' not found.");
+            writer.flush();
+            return;
+        }
+
+        try {
+            context.restoreFromSnapshot(snapshot);
+            writer.printf(
+                    "✓ Snapshot '%s' loaded (%d messages, %d tokens).%n",
+                    key, snapshot.conversationHistory().size(), snapshot.totalTokensUsed());
+        } catch (Exception e) {
+            writer.println("Failed to restore snapshot: " + e.getMessage());
+        }
+        writer.flush();
+    }
+
     private void handleList(SnapshotStore store, PrintWriter writer) {
         try {
             List<String> keys = store.listKeys(null).collectList().block();
@@ -103,7 +138,7 @@ public class SnapshotCommand implements SlashCommand {
                     writer.println("  " + key);
                 }
                 writer.println();
-                writer.println("Use :resume <key> to restore.");
+                writer.println("Use :snapshot load <key> or :resume <key> to restore.");
             }
         } catch (Exception e) {
             writer.println("Failed to list snapshots: " + e.getMessage());
@@ -127,7 +162,7 @@ public class SnapshotCommand implements SlashCommand {
     }
 
     private void printUsage(PrintWriter writer) {
-        writer.println("Usage: :snapshot <save <key>|list|delete <key>>");
+        writer.println("Usage: :snapshot <save <key>|load <key>|list|delete <key>>");
         writer.flush();
     }
 }
