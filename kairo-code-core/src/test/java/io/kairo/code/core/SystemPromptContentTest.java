@@ -10,10 +10,15 @@ import org.junit.jupiter.api.Test;
 /**
  * Verifies that the system prompt contains the execution discipline constraints
  * borrowed from Claude Code to prevent "plan but not execute" behavior.
+ *
+ * <p>Also covers the provider-specific variants {@code system-prompt-claude.md}
+ * and {@code system-prompt-glm.md}.
  */
 class SystemPromptContentTest {
 
-    private static final String SYSTEM_PROMPT = loadSystemPrompt();
+    private static final String SYSTEM_PROMPT = loadResource("system-prompt.md");
+    private static final String CLAUDE_PROMPT = loadResource("system-prompt-claude.md");
+    private static final String GLM_PROMPT = loadResource("system-prompt-glm.md");
 
     @Test
     void executionDisciplineSection_exists() {
@@ -136,14 +141,68 @@ class SystemPromptContentTest {
                 .contains("Exact match required");
     }
 
-    private static String loadSystemPrompt() {
+    @Test
+    void claudePrompt_existsAndIsNonEmpty() {
+        assertThat(CLAUDE_PROMPT).isNotBlank();
+    }
+
+    @Test
+    void claudePrompt_emphasizesParallelToolCalls() {
+        assertThat(CLAUDE_PROMPT)
+                .contains("parallel")
+                .contains("tool_use");
+    }
+
+    @Test
+    void claudePrompt_hasExplorationSection() {
+        assertThat(CLAUDE_PROMPT).contains("## Exploration");
+    }
+
+    @Test
+    void claudePrompt_hasImplementationSection() {
+        assertThat(CLAUDE_PROMPT).contains("## Implementation");
+    }
+
+    @Test
+    void claudePrompt_hasVerificationSection() {
+        assertThat(CLAUDE_PROMPT).contains("## Verification");
+    }
+
+    @Test
+    void claudePrompt_recommendsMvnTestForIteration() {
+        assertThat(CLAUDE_PROMPT).contains("mvn test");
+    }
+
+    @Test
+    void claudePrompt_dropsBashWriteWarning() {
+        // GLM-specific corrective rule that should not appear in the Claude variant.
+        assertThat(CLAUDE_PROMPT)
+                .doesNotContain("You MUST use `write` or `edit` tools to create and modify files");
+        assertThat(CLAUDE_PROMPT)
+                .doesNotContain("Never use `bash` with `echo >`");
+    }
+
+    @Test
+    void glmPrompt_existsAndKeepsBashWriteWarning() {
+        assertThat(GLM_PROMPT).isNotBlank();
+        assertThat(GLM_PROMPT)
+                .contains("You MUST use `write` or `edit` tools to create and modify files");
+        assertThat(GLM_PROMPT).contains("Never use `bash` with `echo >`");
+    }
+
+    @Test
+    void glmPrompt_hasExecutionDisciplineSection() {
+        assertThat(GLM_PROMPT).contains("Execution Discipline");
+    }
+
+    private static String loadResource(String name) {
         try (InputStream is = CodeAgentFactory.class
                 .getClassLoader()
-                .getResourceAsStream("system-prompt.md")) {
-            assertThat(is).as("system-prompt.md must exist on classpath").isNotNull();
+                .getResourceAsStream(name)) {
+            assertThat(is).as("%s must exist on classpath", name).isNotNull();
             return new String(is.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new AssertionError("Failed to load system-prompt.md", e);
+            throw new AssertionError("Failed to load " + name, e);
         }
     }
 }
