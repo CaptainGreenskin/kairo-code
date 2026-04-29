@@ -19,9 +19,9 @@ import io.kairo.api.hook.HookHandler;
 import io.kairo.api.hook.HookPhase;
 import io.kairo.api.hook.HookResult;
 import io.kairo.api.hook.PreReasoningEvent;
-import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.code.core.stats.TokenEstimator;
 import java.util.List;
 
 /**
@@ -119,23 +119,9 @@ public final class ContextCompactionHook {
         return compactionCount;
     }
 
-    /** Estimates tokens as total character count across all message content, divided by 4. */
+    /** Estimates tokens using content-type-aware coefficients via {@link TokenEstimator}. */
     int estimateTokens(List<Msg> messages) {
-        int totalChars = 0;
-        for (Msg msg : messages) {
-            for (Content c : msg.contents()) {
-                if (c instanceof Content.TextContent text) {
-                    totalChars += text.text().length();
-                } else if (c instanceof Content.ToolUseContent toolUse) {
-                    totalChars += toolUse.input().toString().length();
-                } else if (c instanceof Content.ToolResultContent toolResult) {
-                    totalChars += toolResult.content().length();
-                } else if (c instanceof Content.ThinkingContent thinking) {
-                    totalChars += thinking.thinking().length();
-                }
-            }
-        }
-        return totalChars / 4;
+        return TokenEstimator.estimate(messages);
     }
 
     private static int readMaxContextTokens() {

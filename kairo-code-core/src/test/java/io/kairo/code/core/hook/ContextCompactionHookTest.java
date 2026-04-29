@@ -48,8 +48,8 @@ class ContextCompactionHookTest {
     @Test
     void belowThreshold_doesNotTrigger() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false);
-        // 80% of 100k = 80k tokens -> 320k chars (well below 85k trigger)
-        PreReasoningEvent event = eventWithCharCount(320_000);
+        // 85% of 100k = 85k tokens trigger. chars/3.5: 294000 chars → 84000 tokens (below threshold)
+        PreReasoningEvent event = eventWithCharCount(294_000);
         HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
@@ -57,8 +57,8 @@ class ContextCompactionHookTest {
     @Test
     void atThreshold_triggersInjection() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false);
-        // 85% of 100k = 85k tokens -> 340k chars
-        PreReasoningEvent event = eventWithCharCount(340_000);
+        // 85% of 100k = 85k tokens. chars/3.5: 297500 chars → 85000 tokens
+        PreReasoningEvent event = eventWithCharCount(297_500);
         HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(result.injectedMessage()).isNotNull();
@@ -68,8 +68,8 @@ class ContextCompactionHookTest {
     @Test
     void aboveThreshold_triggersInjection() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false);
-        // 95% of 100k = 95k tokens -> 380k chars
-        PreReasoningEvent event = eventWithCharCount(380_000);
+        // 90% of 100k = 90k tokens. chars/3.5: 315000 chars → 90000 tokens
+        PreReasoningEvent event = eventWithCharCount(315_000);
         HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
     }
@@ -78,13 +78,13 @@ class ContextCompactionHookTest {
     void secondCall_suppressedDuringCooling() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false);
         // First call: triggers, compactionCount = 1
-        PreReasoningEvent event1 = eventWithCharCount(340_000);
+        PreReasoningEvent event1 = eventWithCharCount(297_500);
         HookResult<PreReasoningEvent> r1 = hook.onPreReasoning(event1);
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(hook.getCompactionCount()).isEqualTo(1);
 
         // Second call immediately after: cooling period suppresses trigger
-        PreReasoningEvent event2 = eventWithCharCount(340_000);
+        PreReasoningEvent event2 = eventWithCharCount(297_500);
         HookResult<PreReasoningEvent> r2 = hook.onPreReasoning(event2);
         assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
@@ -93,7 +93,7 @@ class ContextCompactionHookTest {
     void multiRound_triggersAgainAfterCooling() {
         // Use coolingTurns=2 for fast test
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD_80, false, 2);
-        PreReasoningEvent overThreshold = eventWithCharCount(320_000); // 80k tokens = exactly 80%
+        PreReasoningEvent overThreshold = eventWithCharCount(280_000); // 80k tokens = exactly 80%
 
         // First compaction
         assertThat(hook.onPreReasoning(overThreshold).decision()).isEqualTo(HookResult.Decision.INJECT);
@@ -111,7 +111,7 @@ class ContextCompactionHookTest {
     @Test
     void multiRound_threeCompactions() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD_80, false, 2);
-        PreReasoningEvent overThreshold = eventWithCharCount(320_000);
+        PreReasoningEvent overThreshold = eventWithCharCount(280_000);
 
         // Compaction 1
         hook.onPreReasoning(overThreshold);
@@ -132,23 +132,23 @@ class ContextCompactionHookTest {
     void initialState_allowsImmediateCompaction() {
         // turnsSinceLastCompaction starts at coolingTurns, so first call fires immediately
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false, 5);
-        PreReasoningEvent overThreshold = eventWithCharCount(340_000);
+        PreReasoningEvent overThreshold = eventWithCharCount(297_500);
         assertThat(hook.onPreReasoning(overThreshold).decision()).isEqualTo(HookResult.Decision.INJECT);
     }
 
     @Test
     void replMode_doesNotTrigger() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, true);
-        PreReasoningEvent event = eventWithCharCount(380_000);
+        PreReasoningEvent event = eventWithCharCount(315_000);
         HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
 
     @Test
     void customThreshold_respected() {
-        // Set threshold to 0.50 -> trigger at 50k tokens = 200k chars
+        // Set threshold to 0.50 -> trigger at 50k tokens = 175k chars (chars/3.5)
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, 0.50, false);
-        PreReasoningEvent event = eventWithCharCount(200_000);
+        PreReasoningEvent event = eventWithCharCount(175_000);
         HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
     }
@@ -167,8 +167,8 @@ class ContextCompactionHookTest {
     @Test
     void estimateTokens_matchesContextWindowGuardLogic() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false);
-        // 400 chars / 4 = 100 tokens
-        String text = "a".repeat(400);
+        // 350 chars * 2/7 = 100 tokens (chars/3.5 coefficient for TextContent)
+        String text = "a".repeat(350);
         List<Msg> messages = List.of(Msg.of(MsgRole.USER, text));
         assertThat(hook.estimateTokens(messages)).isEqualTo(100);
     }
