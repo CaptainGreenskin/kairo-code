@@ -5,6 +5,7 @@ import io.kairo.api.hook.HookPhase;
 import io.kairo.api.hook.PostActingEvent;
 import io.kairo.api.hook.PostReasoningEvent;
 import io.kairo.api.hook.PreActingEvent;
+import io.kairo.api.hook.PreReasoningEvent;
 import io.kairo.api.message.Content;
 import io.kairo.api.model.ModelResponse;
 import java.io.PrintWriter;
@@ -48,9 +49,11 @@ public class AgentEventPrinter {
     private final PrintWriter writer;
     private final String prefix;
     private final boolean streamingText;
+    private final ModelCallSpinner spinner;
+    private final boolean verboseThinking;
 
     public AgentEventPrinter(PrintWriter writer) {
-        this(writer, "", false);
+        this(writer, "", false, null, false);
     }
 
     /**
@@ -59,7 +62,7 @@ public class AgentEventPrinter {
      * parent's. Pass an empty string for the parent.
      */
     public AgentEventPrinter(PrintWriter writer, String prefix) {
-        this(writer, prefix, false);
+        this(writer, prefix, false, null, false);
     }
 
     /**
@@ -67,13 +70,30 @@ public class AgentEventPrinter {
      * separate consumer; {@link #onPostReasoning} skips printing the text body to avoid duplication.
      */
     public AgentEventPrinter(PrintWriter writer, String prefix, boolean streamingText) {
+        this(writer, prefix, streamingText, null, false);
+    }
+
+    /**
+     * Complete constructor with optional model call spinner and thinking display control.
+     */
+    public AgentEventPrinter(PrintWriter writer, String prefix, boolean streamingText,
+                              ModelCallSpinner spinner, boolean verboseThinking) {
         this.writer = writer;
         this.prefix = prefix == null ? "" : prefix;
         this.streamingText = streamingText;
+        this.spinner = spinner;
+        this.verboseThinking = verboseThinking;
     }
 
     private String linePrefix() {
         return prefix.isEmpty() ? "" : DIM + prefix + RESET;
+    }
+
+    @HookHandler(HookPhase.PRE_REASONING)
+    public synchronized void onPreReasoning(PreReasoningEvent event) {
+        if (spinner != null) {
+            spinner.start();
+        }
     }
 
     @HookHandler(HookPhase.PRE_ACTING)
@@ -116,9 +136,35 @@ public class AgentEventPrinter {
 
     @HookHandler(HookPhase.POST_REASONING)
     public synchronized void onPostReasoning(PostReasoningEvent event) {
+        if (spinner != null) {
+            spinner.stop();
+        }
         if (event.response() == null || event.response().contents() == null) {
             return;
         }
+
+        // Display ThinkingContent blocks
+        boolean hasThinking = event.response().contents().stream()
+                .anyMatch(Content.ThinkingContent.class::isInstance);
+
+        if (hasThinking) {
+            long thinkingChars = event.response().contents().stream()
+                    .filter(Content.ThinkingContent.class::isInstance)
+                    .mapToLong(c -> ((Content.ThinkingContent) c).thinking().length())
+                    .sum();
+            writer.println(linePrefix() + DIM + "  ✦ thinking (" + thinkingChars + " chars)" + RESET);
+
+            if (verboseThinking) {
+                event.response().contents().stream()
+                        .filter(Content.ThinkingContent.class::isInstance)
+                        .map(c -> ((Content.ThinkingContent) c).thinking())
+                        .forEach(t -> {
+                            writer.println(linePrefix() + DIM + "  │ " + RESET
+                                    + DIM + t.replace("\n", "\n" + linePrefix() + DIM + "  │ " + RESET));
+                        });
+            }
+        }
+
         if (!streamingText) {
             // Block-output path: print full text here (no per-token consumer).
             String text = event.response().contents().stream()
@@ -182,7 +228,7 @@ public class AgentEventPrinter {
         return sb.toString();
     }
 
-    private static boolean supportsColor() {
+    static boolean supportsColor() {
         String term = System.getenv("TERM");
         if (term == null || term.equals("dumb")) {
             return false;
