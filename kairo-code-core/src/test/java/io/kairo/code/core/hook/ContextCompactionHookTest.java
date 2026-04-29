@@ -152,7 +152,7 @@ class ContextCompactionHookTest {
     void estimateTokens_withThinkingContent() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false);
         String thinking = "Let me think about this carefully...";
-        Content.ThinkingContent tc = new Content.ThinkingContent(thinking, 0);
+        Content.ThinkingContent tc = new Content.ThinkingContent(thinking, 0, "");
         Msg msg = Msg.builder().role(MsgRole.ASSISTANT).addContent(tc).build();
         List<Msg> messages = List.of(msg);
         int estimated = hook.estimateTokens(messages);
