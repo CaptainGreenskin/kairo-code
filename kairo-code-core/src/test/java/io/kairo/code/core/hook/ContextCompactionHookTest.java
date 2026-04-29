@@ -31,6 +31,7 @@ class ContextCompactionHookTest {
 
     private static final int MAX_TOKENS = 100_000;
     private static final double THRESHOLD = 0.85;
+    private static final double THRESHOLD_80 = 0.80;
 
     private static PreReasoningEvent eventWithMessages(List<Msg> messages) {
         ModelConfig config = ModelConfig.builder().model("gpt-4o").build();
@@ -74,17 +75,65 @@ class ContextCompactionHookTest {
     }
 
     @Test
-    void secondCall_suppressedAfterFire() {
+    void secondCall_suppressedDuringCooling() {
         ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false);
-        // First call: triggers
+        // First call: triggers, compactionCount = 1
         PreReasoningEvent event1 = eventWithCharCount(340_000);
         HookResult<PreReasoningEvent> r1 = hook.onPreReasoning(event1);
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(hook.getCompactionCount()).isEqualTo(1);
 
-        // Second call: should not trigger again
+        // Second call immediately after: cooling period suppresses trigger
         PreReasoningEvent event2 = eventWithCharCount(340_000);
         HookResult<PreReasoningEvent> r2 = hook.onPreReasoning(event2);
         assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+    }
+
+    @Test
+    void multiRound_triggersAgainAfterCooling() {
+        // Use coolingTurns=2 for fast test
+        ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD_80, false, 2);
+        PreReasoningEvent overThreshold = eventWithCharCount(320_000); // 80k tokens = exactly 80%
+
+        // First compaction
+        assertThat(hook.onPreReasoning(overThreshold).decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(hook.getCompactionCount()).isEqualTo(1);
+
+        // Cooling turn 1: suppressed
+        assertThat(hook.onPreReasoning(overThreshold).decision()).isEqualTo(HookResult.Decision.CONTINUE);
+        // Cooling turn 2: suppressed (turnsSinceLastCompaction = 2 is NOT >= coolingTurns=2 because
+        // we need strictly >= coolingTurns; but with coolingTurns=2, turn 2 means 2 >= 2 → triggers)
+        // Actually: reset to 0, then +1 each call. So call1→1 (1<2 → skip), call2→2 (2>=2 → trigger)
+        assertThat(hook.onPreReasoning(overThreshold).decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(hook.getCompactionCount()).isEqualTo(2);
+    }
+
+    @Test
+    void multiRound_threeCompactions() {
+        ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD_80, false, 2);
+        PreReasoningEvent overThreshold = eventWithCharCount(320_000);
+
+        // Compaction 1
+        hook.onPreReasoning(overThreshold);
+        assertThat(hook.getCompactionCount()).isEqualTo(1);
+
+        // 2 cooling turns → compaction 2
+        hook.onPreReasoning(overThreshold);
+        hook.onPreReasoning(overThreshold);
+        assertThat(hook.getCompactionCount()).isEqualTo(2);
+
+        // 2 cooling turns → compaction 3
+        hook.onPreReasoning(overThreshold);
+        hook.onPreReasoning(overThreshold);
+        assertThat(hook.getCompactionCount()).isEqualTo(3);
+    }
+
+    @Test
+    void initialState_allowsImmediateCompaction() {
+        // turnsSinceLastCompaction starts at coolingTurns, so first call fires immediately
+        ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false, 5);
+        PreReasoningEvent overThreshold = eventWithCharCount(340_000);
+        assertThat(hook.onPreReasoning(overThreshold).decision()).isEqualTo(HookResult.Decision.INJECT);
     }
 
     @Test

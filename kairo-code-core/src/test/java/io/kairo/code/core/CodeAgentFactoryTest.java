@@ -13,11 +13,15 @@ import io.kairo.api.model.ModelProvider;
 import io.kairo.api.model.ModelResponse;
 import io.kairo.api.tool.ToolResult;
 import io.kairo.code.core.stats.ToolUsageTracker;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -194,5 +198,58 @@ class CodeAgentFactoryTest {
 
         assertThat(session).isNotNull();
         assertThat(session.mcpRegistry()).isNull();
+    }
+
+    @Test
+    void systemPromptContainsSessionContextWithDate() {
+        CodeAgentConfig config = new CodeAgentConfig(
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50,
+                "/tmp", null, 0, 0);
+
+        CapturingModelProvider model = new CapturingModelProvider();
+        var session = CodeAgentFactory.createSession(
+                config,
+                CodeAgentFactory.SessionOptions.empty().withModelProvider(model));
+
+        session.agent().call(Msg.of(MsgRole.USER, "ping")).block();
+
+        String prompt = model.capturedSystemPrompt.get();
+        assertThat(prompt).isNotNull();
+        assertThat(prompt).contains("## Session Context");
+        assertThat(prompt).contains("Date:");
+    }
+
+    @Test
+    void systemPromptContainsGitStatusInGitRepo(@TempDir Path tempDir) throws IOException, InterruptedException {
+        // Initialize a git repo and create an untracked file.
+        Files.createFile(tempDir.resolve("README.md"));
+        runGit(tempDir, "init");
+        runGit(tempDir, "config", "user.email", "test@test.com");
+        runGit(tempDir, "config", "user.name", "Test");
+
+        CodeAgentConfig config = new CodeAgentConfig(
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50,
+                tempDir.toString(), null, 0, 0);
+
+        CapturingModelProvider model = new CapturingModelProvider();
+        var session = CodeAgentFactory.createSession(
+                config,
+                CodeAgentFactory.SessionOptions.empty().withModelProvider(model));
+
+        session.agent().call(Msg.of(MsgRole.USER, "ping")).block();
+
+        String prompt = model.capturedSystemPrompt.get();
+        assertThat(prompt).isNotNull();
+        assertThat(prompt).contains("## Session Context");
+        assertThat(prompt).contains("Working Tree Status");
+        assertThat(prompt).contains("README.md");
+    }
+
+    private static void runGit(Path dir, String... args) throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder("git");
+        for (String arg : args) pb.command().add(arg);
+        pb.directory(dir.toFile());
+        Process p = pb.start();
+        p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
     }
 }
