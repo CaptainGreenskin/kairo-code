@@ -2,6 +2,7 @@ package io.kairo.code.core;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentSnapshot;
+import io.kairo.api.message.Msg;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.api.skill.SkillDefinition;
 import io.kairo.api.skill.SkillRegistry;
@@ -31,11 +32,13 @@ import io.kairo.code.core.hook.SessionMetricsCollector;
 import io.kairo.code.core.hook.SessionMetricsHook;
 import io.kairo.code.core.hook.SessionResultWriterHook;
 import io.kairo.code.core.hook.StaleReadDetectorHook;
+import io.kairo.code.core.hook.CheckpointWriterHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
 import io.kairo.code.core.hook.ToolBudgetHook;
 import io.kairo.code.core.hook.UnfulfilledInstructionHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.TaskTool;
 import io.kairo.code.core.task.TaskToolDependencies;
@@ -289,6 +292,13 @@ public final class CodeAgentFactory {
             if (wd != null && !wd.isBlank()) {
                 builder.hook(new SessionResultWriterHook(Path.of(wd), metricsCollector));
             }
+
+            // Auto-register CheckpointWriterHook: persists conversation history to
+            // .kairo-session/checkpoint.json after each reasoning step for resume support.
+            if (wd != null && !wd.isBlank()) {
+                builder.hook(new CheckpointWriterHook(
+                        Path.of(wd), new ObjectMapper(), options.checkpointInitialMessage()));
+            }
         }
 
         if (options.textDeltaConsumer() != null) {
@@ -490,7 +500,8 @@ public final class CodeAgentFactory {
             java.util.function.Consumer<String> textDeltaConsumer,
             ToolUsageTracker toolUsageTracker,
             TurnMetricsCollector turnMetricsCollector,
-            boolean isRepl) {
+            boolean isRepl,
+            Msg checkpointInitialMessage) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -499,21 +510,21 @@ public final class CodeAgentFactory {
 
         public static SessionOptions empty() {
             return new SessionOptions(
-                    null, null, List.of(), null, Set.of(), null, null, false, null, null, null, false);
+                    null, null, List.of(), null, Set.of(), null, null, false, null, null, null, false, null);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
             return new SessionOptions(
                     provider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, turnMetricsCollector, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
             return new SessionOptions(
                     modelProvider, handler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, turnMetricsCollector, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -522,7 +533,7 @@ public final class CodeAgentFactory {
                     hookList == null ? List.of() : List.copyOf(hookList),
                     skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
                     childSession, textDeltaConsumer, toolUsageTracker, turnMetricsCollector,
-                    isRepl);
+                    isRepl, checkpointInitialMessage);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
@@ -530,86 +541,69 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, registry,
                     active == null ? Set.of() : Set.copyOf(active),
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, turnMetricsCollector, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     snapshot, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, turnMetricsCollector, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage);
         }
 
-        /**
-         * Wire TaskTool dependencies. The {@code task} tool is registered only when this is
-         * non-null AND {@link #childSession()} is false.
-         */
         public SessionOptions withTaskTool(TaskToolDependencies deps) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker,
-                    turnMetricsCollector, isRepl);
+                    turnMetricsCollector, isRepl, checkpointInitialMessage);
         }
 
-        /**
-         * Register a per-token text output consumer fired during streaming model calls.
-         * Set to null to disable (default). Child sessions inherit this from the parent.
-         */
         public SessionOptions withTextDeltaConsumer(
                 java.util.function.Consumer<String> consumer) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, consumer,
-                    toolUsageTracker, turnMetricsCollector, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage);
         }
 
-        /**
-         * Mark this as a child session — TaskTool will not be registered (no recursion). Child
-         * sessions are spawned by the parent's {@code task} tool via {@link
-         * io.kairo.code.core.task.ChildSessionSpawner}.
-         */
         public SessionOptions asChildSession() {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, true, textDeltaConsumer,
-                    toolUsageTracker, turnMetricsCollector, isRepl);
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage);
         }
 
-        /**
-         * Wire a {@link ToolUsageTracker} so its current snapshot is rendered into the system
-         * prompt's "Tool Insights" section at agent build time. The same tracker should also be
-         * registered as a hook (via {@link #withHooks(List)}) so it keeps accumulating across
-         * session rebuilds (e.g. {@code :clear}).
-         */
         public SessionOptions withToolUsageTracker(ToolUsageTracker tracker) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    tracker, turnMetricsCollector, isRepl);
+                    tracker, turnMetricsCollector, isRepl, checkpointInitialMessage);
         }
 
-        /**
-         * Wire a {@link TurnMetricsCollector} so it is exposed via CodeAgentSession for the
-         * /metrics command. The collector should also be registered as a hook (via
-         * {@link #withHooks(List)}) so it keeps accumulating across session rebuilds.
-         */
         public SessionOptions withTurnMetricsCollector(TurnMetricsCollector collector) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, collector, isRepl);
+                    toolUsageTracker, collector, isRepl, checkpointInitialMessage);
         }
 
-        /**
-         * Mark this session as running in REPL/interactive mode. When true,
-         * {@link io.kairo.code.core.hook.PlanWithoutActionHook} will not inject corrective
-         * messages.
-         */
         public SessionOptions asReplSession() {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
-                    toolUsageTracker, turnMetricsCollector, true);
+                    toolUsageTracker, turnMetricsCollector, true, checkpointInitialMessage);
+        }
+
+        /**
+         * Set the initial user message for checkpoint persistence.
+         * When {@link CheckpointWriterHook} is auto-registered, it uses this message
+         * as the first entry in the checkpoint conversation history.
+         */
+        public SessionOptions withCheckpointInitialMessage(Msg msg) {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker, turnMetricsCollector, isRepl, msg);
         }
     }
 }
