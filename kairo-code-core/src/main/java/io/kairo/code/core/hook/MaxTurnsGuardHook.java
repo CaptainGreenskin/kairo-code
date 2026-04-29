@@ -29,8 +29,8 @@ import io.kairo.code.core.stats.TurnMetricsCollector;
  *
  * <p>Two thresholds:
  * <ul>
- *   <li><b>warn</b> (default 15 turns): injects a soft wrap-up hint</li>
- *   <li><b>force</b> (default 20 turns): injects a hard stop with commit instruction</li>
+ *   <li><b>warn</b> (default 20 turns): injects a soft wrap-up hint</li>
+ *   <li><b>force</b> (default 30 turns): injects a hard stop with commit instruction</li>
  * </ul>
  *
  * <p>Each threshold fires exactly once. REPL mode is excluded.
@@ -52,7 +52,7 @@ public final class MaxTurnsGuardHook {
     private boolean forceFired;
 
     public MaxTurnsGuardHook(TurnMetricsCollector metrics) {
-        this(metrics, 15, 20);
+        this(metrics, 20, 30);
     }
 
     public MaxTurnsGuardHook(TurnMetricsCollector metrics, int warnAt, int forceAt) {

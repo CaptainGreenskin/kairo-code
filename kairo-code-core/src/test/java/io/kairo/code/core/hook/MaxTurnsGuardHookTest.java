@@ -203,18 +203,18 @@ class MaxTurnsGuardHookTest {
     }
 
     @Test
-    void defaultConstructor_uses15and20() {
+    void defaultConstructor_uses20and30() {
         TurnMetricsCollector metrics = new TurnMetricsCollector();
         MaxTurnsGuardHook hook = new MaxTurnsGuardHook(metrics);
 
-        // At 14 turns: no injection
-        for (int i = 0; i < 14; i++) {
+        // At 19 turns: no injection
+        for (int i = 0; i < 19; i++) {
             advanceTurn(metrics);
         }
         assertThat(hook.onPostReasoning(eventWithToolCalls()).decision())
                 .isEqualTo(HookResult.Decision.CONTINUE);
 
-        // At 15 turns: warn fires
+        // At 20 turns: warn fires
         advanceTurn(metrics);
         assertThat(hook.onPostReasoning(eventWithToolCalls()).decision())
                 .isEqualTo(HookResult.Decision.INJECT);
