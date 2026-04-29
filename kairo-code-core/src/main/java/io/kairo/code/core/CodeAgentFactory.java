@@ -18,6 +18,7 @@ import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
 import io.kairo.code.core.hook.CompileErrorFeedbackHook;
 import io.kairo.code.core.hook.ContextCompactionHook;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
+import io.kairo.code.core.hook.ExecutionTraceHook;
 import io.kairo.code.core.hook.FullTestSuiteHook;
 import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.MissingTestHintHook;
@@ -276,6 +277,12 @@ public final class CodeAgentFactory {
             // Non-REPL only.
             SessionMetricsCollector metricsCollector = new SessionMetricsCollector();
             builder.hook(new SessionMetricsHook(metricsCollector));
+
+            // Auto-register ExecutionTraceHook: writes per-phase JSONL events to
+            // .kairo-trace/session-{ts}.jsonl for agent self-reflection. Non-REPL only.
+            if (wd != null && !wd.isBlank()) {
+                builder.hook(new ExecutionTraceHook(Path.of(wd)));
+            }
 
             // Auto-register SessionResultWriterHook: writes KAIRO_SESSION_RESULT.json on session
             // end so the dispatcher can machine-read the outcome. Enriched with metrics.
