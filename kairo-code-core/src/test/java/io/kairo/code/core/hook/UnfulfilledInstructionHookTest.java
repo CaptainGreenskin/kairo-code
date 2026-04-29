@@ -228,6 +228,14 @@ class UnfulfilledInstructionHookTest {
         assertThat(paths).isEmpty();
     }
 
+    @Test
+    void extractCreatePaths_matchesBacktickWrappedPath() {
+        String text = "Create `src/test/java/io/RateLimiterTest.java` with tests.";
+        List<Msg> messages = List.of(Msg.of(MsgRole.USER, text));
+        List<String> paths = UnfulfilledInstructionHook.extractCreatePaths(messages);
+        assertThat(paths).containsExactly("src/test/java/io/RateLimiterTest.java");
+    }
+
     // --- 10. File created between calls: second scan finds it exists ---
 
     @Test

@@ -54,7 +54,7 @@ public final class UnfulfilledInstructionHook {
                     + " finishing.";
 
     private static final Pattern CREATE_JAVA_PATTERN =
-            Pattern.compile("Create\\s+(src/test/[^\\s]+\\.java)");
+            Pattern.compile("Create\\s+[`']?(src/test/[^\\s`']+\\.java)");
 
     private final String workingDir;
     private final boolean isRepl;
