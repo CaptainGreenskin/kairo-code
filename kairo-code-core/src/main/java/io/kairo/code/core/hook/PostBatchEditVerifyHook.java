@@ -76,9 +76,11 @@ public final class PostBatchEditVerifyHook {
         boolean hasBash = false;
         boolean hasJavaEdit = false;
 
+        boolean hasAnyToolCall = false;
         if (response != null && response.contents() != null) {
             for (Content content : response.contents()) {
                 if (content instanceof Content.ToolUseContent toolUse) {
+                    hasAnyToolCall = true;
                     String toolName = toolUse.toolName();
                     if ("bash".equals(toolName)) {
                         hasBash = true;
@@ -105,8 +107,9 @@ public final class PostBatchEditVerifyHook {
             return HookResult.proceed(event);
         }
 
-        // No bash and no edit this turn — increment counter if we have pending edits.
-        if (turnsSinceEdit > 0) {
+        // Only count truly idle turns (no tool calls at all) — read/grep between edits is
+        // normal analysis, not a reason to force verification yet.
+        if (turnsSinceEdit > 0 && !hasAnyToolCall) {
             turnsSinceEdit++;
         }
 

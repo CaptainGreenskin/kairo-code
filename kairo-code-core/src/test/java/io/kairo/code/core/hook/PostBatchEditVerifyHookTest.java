@@ -63,6 +63,10 @@ class PostBatchEditVerifyHookTest {
         return new Content.ToolUseContent("tool-2", "bash", Map.of("command", command));
     }
 
+    private static Content.ToolUseContent readFile(String path) {
+        return new Content.ToolUseContent("tool-3", "read", Map.of("path", path));
+    }
+
     @Test
     void consecutiveJavaEditsWithoutBash_injectsOnSecondIdleTurn() {
         PostBatchEditVerifyHook hook = new PostBatchEditVerifyHook(false);
@@ -155,5 +159,39 @@ class PostBatchEditVerifyHookTest {
 
         HookResult<PostReasoningEvent> r2 = hook.onPostReasoning(emptyTurnEvent());
         assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+    }
+
+    @Test
+    void readFileBetweenEdits_doesNotCountAsIdle() {
+        PostBatchEditVerifyHook hook = new PostBatchEditVerifyHook(false);
+
+        // Turn 1: edit Java file → turnsSinceEdit = 1
+        hook.onPostReasoning(eventWithToolCalls(editFile("src/main/java/Cache.java")));
+
+        // Turn 2: read another file for analysis — should NOT increment idle counter
+        HookResult<PostReasoningEvent> r2 =
+                hook.onPostReasoning(eventWithToolCalls(readFile("src/main/java/Service.java")));
+        assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+
+        // Turn 3: read another file — still should NOT inject
+        HookResult<PostReasoningEvent> r3 =
+                hook.onPostReasoning(eventWithToolCalls(readFile("src/main/java/Util.java")));
+        assertThat(r3.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+    }
+
+    @Test
+    void readFileThenIdleTurn_injectsAfterIdleTurn() {
+        PostBatchEditVerifyHook hook = new PostBatchEditVerifyHook(false);
+
+        // Turn 1: edit Java file → turnsSinceEdit = 1
+        hook.onPostReasoning(eventWithToolCalls(editFile("src/main/java/Cache.java")));
+
+        // Turn 2: read (not idle — no increment)
+        hook.onPostReasoning(eventWithToolCalls(readFile("src/main/java/Service.java")));
+
+        // Turn 3: truly idle (no tool calls) → turnsSinceEdit = 2 → inject
+        HookResult<PostReasoningEvent> r3 = hook.onPostReasoning(emptyTurnEvent());
+        assertThat(r3.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(r3.injectedMessage().text()).contains("mvn test");
     }
 }
