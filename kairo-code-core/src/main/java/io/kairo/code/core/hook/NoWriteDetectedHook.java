@@ -38,14 +38,14 @@ public final class NoWriteDetectedHook {
 
     private static final int DEFAULT_THRESHOLD = 4;
 
-    private static final Set<String> FILE_WRITE_TOOLS = Set.of("write_file", "edit_file");
+    private static final Set<String> FILE_WRITE_TOOLS = Set.of("write", "edit");
 
     private static final String INJECT_MESSAGE =
             "CRITICAL: You have not used the write or edit tools to modify any files after "
                     + "multiple turns. The task requires you to create or modify files.\n"
-                    + "You MUST call write_file or edit_file to make changes. "
+                    + "You MUST call write or edit to make changes. "
                     + "Do NOT use bash echo/cat/heredoc to write files. "
-                    + "Immediately read the target file, then use edit_file (or write_file for new files) "
+                    + "Immediately read the target file, then use edit (or write for new files) "
                     + "to implement the required changes.";
 
     private final int threshold;
@@ -85,10 +85,6 @@ public final class NoWriteDetectedHook {
                         .map(c -> (Content.ToolUseContent) c)
                         .toList();
 
-        if (toolCalls.isEmpty()) {
-            return HookResult.proceed(event);
-        }
-
         boolean hasWriteTool = toolCalls.stream()
                 .anyMatch(call -> FILE_WRITE_TOOLS.contains(call.toolName()));
 
@@ -97,6 +93,7 @@ public final class NoWriteDetectedHook {
             return HookResult.proceed(event);
         }
 
+        // Count text-only turns (no tool calls) toward the counter as well.
         turnsWithoutWrite++;
         if (turnsWithoutWrite >= threshold) {
             injected = true;
