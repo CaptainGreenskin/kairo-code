@@ -24,9 +24,7 @@ import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -58,7 +56,6 @@ public final class UnfulfilledInstructionHook {
 
     private final String workingDir;
     private final boolean isRepl;
-    private final Set<String> injectedFiles = new HashSet<>();
     private int injectionCount;
 
     public UnfulfilledInstructionHook(String workingDir) {
@@ -81,17 +78,14 @@ public final class UnfulfilledInstructionHook {
 
         List<String> paths = extractCreatePaths(event.conversationHistory());
         for (String path : paths) {
-            if (injectedFiles.contains(path)) {
-                continue;
-            }
             Path fullPath = Path.of(workingDir, path);
-            if (!Files.exists(fullPath)) {
-                injectedFiles.add(path);
-                injectionCount++;
-                String message = INJECT_TEMPLATE.replace("{0}", path);
-                return HookResult.inject(
-                        event, Msg.of(MsgRole.USER, message), "UnfulfilledInstructionHook");
+            if (Files.exists(fullPath)) {
+                continue; // already created
             }
+            injectionCount++;
+            String message = INJECT_TEMPLATE.replace("{0}", path);
+            return HookResult.inject(
+                    event, Msg.of(MsgRole.USER, message), "UnfulfilledInstructionHook");
         }
 
         return HookResult.proceed(event);

@@ -91,23 +91,26 @@ class UnfulfilledInstructionHookTest {
         assertThat(result.hookSource()).isEqualTo("UnfulfilledInstructionHook");
     }
 
-    // --- 4. Same file does not re-inject (dedup via injectedFiles) ---
+    // --- 4. Same missing file re-injects up to MAX_INJECTIONS ---
 
     @Test
-    void sameFile_doesNotReinject(@TempDir Path tempDir) {
+    void sameFileMissing_reinjectsUpToMax(@TempDir Path tempDir) {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString());
 
         String task = "Create src/test/java/io/RateLimiterTest.java with tests.";
-        PreCompleteEvent event = eventWithUserText(task);
 
-        HookResult<PreCompleteEvent> r1 = hook.onPreComplete(event);
-        assertThat(r1.decision()).isEqualTo(HookResult.Decision.INJECT);
+        // Calls 1-3: file still missing → inject each time
+        for (int i = 1; i <= 3; i++) {
+            HookResult<PreCompleteEvent> r = hook.onPreComplete(eventWithUserText(task));
+            assertThat(r.decision())
+                    .as("call %d should inject", i)
+                    .isEqualTo(HookResult.Decision.INJECT);
+        }
 
-        // Second call — same file already in injectedFiles, should not re-inject
-        PreCompleteEvent event2 = eventWithUserText(task);
-        HookResult<PreCompleteEvent> r2 = hook.onPreComplete(event2);
-        assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
-        assertThat(r2.injectedMessage()).isNull();
+        // Call 4: MAX_INJECTIONS (3) exhausted → CONTINUE
+        HookResult<PreCompleteEvent> r4 = hook.onPreComplete(eventWithUserText(task));
+        assertThat(r4.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+        assertThat(r4.injectedMessage()).isNull();
     }
 
     // --- 5. MAX_INJECTIONS cap (3) ---
@@ -152,10 +155,10 @@ class UnfulfilledInstructionHookTest {
         assertThat(result.injectedMessage()).isNull();
     }
 
-    // --- 7. Multiple missing files: injects first missing, then second on next call ---
+    // --- 7. Multiple missing files: injects first missing until it's created, then second ---
 
     @Test
-    void multipleMissingFiles_injectsFirstThenSecond(@TempDir Path tempDir) {
+    void multipleMissingFiles_injectsFirstUntilCreated(@TempDir Path tempDir) throws IOException {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString());
 
         String task =
@@ -164,17 +167,26 @@ class UnfulfilledInstructionHookTest {
                 Create src/test/java/io/ValidatorTest.java
                 """;
 
-        // First call: injects the first missing file (RateLimiterTest.java)
+        // First call: both missing → injects the first file (RateLimiterTest.java)
         HookResult<PreCompleteEvent> r1 = hook.onPreComplete(eventWithUserText(task));
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(r1.injectedMessage().text()).contains("RateLimiterTest.java");
 
-        // Second call: RateLimiterTest.java already in injectedFiles, injects ValidatorTest.java
+        // Agent creates RateLimiterTest.java
+        Path rateFile = tempDir.resolve("src/test/java/io/RateLimiterTest.java");
+        Files.createDirectories(rateFile.getParent());
+        Files.writeString(rateFile, "// test");
+
+        // Second call: RateLimiterTest.java now exists → injects ValidatorTest.java
         HookResult<PreCompleteEvent> r2 = hook.onPreComplete(eventWithUserText(task));
         assertThat(r2.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(r2.injectedMessage().text()).contains("ValidatorTest.java");
 
-        // Third call: both files in injectedFiles → CONTINUE
+        // Agent creates ValidatorTest.java
+        Path valFile = tempDir.resolve("src/test/java/io/ValidatorTest.java");
+        Files.writeString(valFile, "// test");
+
+        // Third call: both files exist → CONTINUE
         HookResult<PreCompleteEvent> r3 = hook.onPreComplete(eventWithUserText(task));
         assertThat(r3.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
@@ -253,7 +265,7 @@ class UnfulfilledInstructionHookTest {
         Files.createDirectories(testFile.getParent());
         Files.writeString(testFile, "// test");
 
-        // Second call: file now exists, already in injectedFiles → CONTINUE
+        // Second call: file now exists → CONTINUE
         HookResult<PreCompleteEvent> r2 = hook.onPreComplete(eventWithUserText(task));
         assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
