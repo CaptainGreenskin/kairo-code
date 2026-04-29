@@ -99,11 +99,16 @@ public class ReplLoop {
     private final List<Object> hooks;
     private final HooksConfig hooksConfig;
     private final boolean notificationsEnabled;
+    private final AgentEventPrinter eventPrinter;
     private SkillHotReloadWatcher hotReloadWatcher;
     private final Map<String, String> skillSources = new ConcurrentHashMap<>();
 
     public ReplLoop(CodeAgentConfig config, List<Object> hooks) {
         this(config, hooks, null, true);
+    }
+
+    public ReplLoop(CodeAgentConfig config, List<Object> hooks, AgentEventPrinter eventPrinter) {
+        this(config, hooks, null, true, eventPrinter);
     }
 
     /**
@@ -118,10 +123,20 @@ public class ReplLoop {
             List<Object> hooks,
             HooksConfig hooksConfig,
             boolean notificationsEnabled) {
+        this(config, hooks, hooksConfig, notificationsEnabled, null);
+    }
+
+    public ReplLoop(
+            CodeAgentConfig config,
+            List<Object> hooks,
+            HooksConfig hooksConfig,
+            boolean notificationsEnabled,
+            AgentEventPrinter eventPrinter) {
         this.config = config;
         this.hooks = hooks != null ? hooks : List.of();
         this.hooksConfig = hooksConfig != null ? hooksConfig : HooksConfig.loadDefault();
         this.notificationsEnabled = notificationsEnabled;
+        this.eventPrinter = eventPrinter;
     }
 
     /** Run the interactive REPL. Blocks until the user exits. */
@@ -279,6 +294,11 @@ public class ReplLoop {
                 } catch (EndOfFileException e) {
                     // Ctrl+D — exit
                     writer.println("Goodbye!");
+                    long elapsedMs = java.time.Duration.between(
+                            context.sessionStartTime(), java.time.Instant.now()).toMillis();
+                    if (eventPrinter != null) {
+                        eventPrinter.printSessionSummary(elapsedMs);
+                    }
                     break;
                 }
 
@@ -303,6 +323,13 @@ public class ReplLoop {
 
                 // Regular input — send to agent via StreamingAgentRunner
                 executeAgentCall(trimmed, context, runner, writer);
+            }
+
+            // Print session summary on normal exit (e.g., :exit command)
+            long elapsedMs = java.time.Duration.between(
+                    context.sessionStartTime(), java.time.Instant.now()).toMillis();
+            if (eventPrinter != null) {
+                eventPrinter.printSessionSummary(elapsedMs);
             }
         } catch (IOException e) {
             log.error("Failed to create terminal", e);
