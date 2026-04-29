@@ -43,7 +43,17 @@ import java.util.List;
  */
 public final class ContextCompactionHook {
 
-    private static final String COMPACT_MESSAGE =
+    private static final String COMPACT_MESSAGE_LIGHT =
+            "The conversation context is getting large. Please briefly summarize "
+                    + "what you've done so far in 2-3 sentences, then continue working.";
+
+    private static final String COMPACT_MESSAGE_STANDARD =
+            "The conversation context is getting large. "
+                    + "Please summarize all work done so far — including what has been tried, "
+                    + "what succeeded, what failed, and the current state of the task — in a "
+                    + "concise summary (around 200 words). Then continue working.";
+
+    private static final String COMPACT_MESSAGE_FULL =
             "The conversation context is getting large. "
                     + "Please summarize all work done so far — including what has been tried, "
                     + "what succeeded, what failed, and the current state of the task — in a "
@@ -108,7 +118,7 @@ public final class ContextCompactionHook {
             turnsSinceLastCompaction = 0;
             compactionCount++;
             return HookResult.inject(
-                    event, Msg.of(MsgRole.USER, COMPACT_MESSAGE), "ContextCompactionHook");
+                    event, Msg.of(MsgRole.USER, selectCompactionPrompt()), "ContextCompactionHook");
         }
 
         return HookResult.proceed(event);
@@ -117,6 +127,24 @@ public final class ContextCompactionHook {
     /** Returns the number of times compaction has been triggered in this session. */
     public int getCompactionCount() {
         return compactionCount;
+    }
+
+    /**
+     * Returns the compaction level for the next injection:
+     * 0 = light (first compaction), 1 = standard (second), 2 = full (third and beyond).
+     */
+    public int getCompactionLevel() {
+        // compactionCount is 1-based (incremented before use), so subtract 1 for level
+        return Math.max(0, Math.min(compactionCount - 1, 2));
+    }
+
+    /** Selects a compaction prompt based on how many times compaction has fired. */
+    private String selectCompactionPrompt() {
+        return switch (getCompactionLevel()) {
+            case 0 -> COMPACT_MESSAGE_LIGHT;     // first: 2-3 sentences
+            case 1 -> COMPACT_MESSAGE_STANDARD;  // second: 200 words
+            default -> COMPACT_MESSAGE_FULL;     // third+: 500 words
+        };
     }
 
     /** Estimates tokens using content-type-aware coefficients via {@link TokenEstimator}. */

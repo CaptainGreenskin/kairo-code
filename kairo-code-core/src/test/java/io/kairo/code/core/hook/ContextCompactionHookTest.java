@@ -62,7 +62,7 @@ class ContextCompactionHookTest {
         HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(result.injectedMessage()).isNotNull();
-        assertThat(result.injectedMessage().text()).contains("summarize");
+        assertThat(result.injectedMessage().text()).contains("2-3 sentences");
     }
 
     @Test
@@ -72,6 +72,58 @@ class ContextCompactionHookTest {
         PreReasoningEvent event = eventWithCharCount(315_000);
         HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
+    }
+
+    @Test
+    void firstCompaction_usesLightPrompt() {
+        ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD, false, 1);
+        PreReasoningEvent event = eventWithCharCount(297_500);
+
+        HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
+        assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(result.injectedMessage().text()).contains("briefly");
+        assertThat(result.injectedMessage().text()).contains("2-3 sentences");
+        assertThat(hook.getCompactionLevel()).isEqualTo(0);
+        assertThat(hook.getCompactionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void secondCompaction_usesStandardPrompt() {
+        ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD_80, false, 1);
+        PreReasoningEvent event = eventWithCharCount(280_000);
+
+        // First compaction (light)
+        hook.onPreReasoning(event);
+        assertThat(hook.getCompactionLevel()).isEqualTo(0);
+
+        // Second compaction (standard)
+        HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
+        assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(result.injectedMessage().text()).contains("200 words");
+        assertThat(hook.getCompactionLevel()).isEqualTo(1);
+        assertThat(hook.getCompactionCount()).isEqualTo(2);
+    }
+
+    @Test
+    void thirdCompaction_usesFullPrompt() {
+        ContextCompactionHook hook = new ContextCompactionHook(MAX_TOKENS, THRESHOLD_80, false, 1);
+        PreReasoningEvent event = eventWithCharCount(280_000);
+
+        // First compaction (light)
+        hook.onPreReasoning(event);
+        // Second compaction (standard)
+        hook.onPreReasoning(event);
+        // Third compaction (full)
+        HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
+        assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(result.injectedMessage().text()).contains("500 words");
+        assertThat(hook.getCompactionLevel()).isEqualTo(2);
+        assertThat(hook.getCompactionCount()).isEqualTo(3);
+
+        // Fourth compaction should still be full (capped at level 2)
+        hook.onPreReasoning(event);
+        assertThat(hook.getCompactionLevel()).isEqualTo(2);
+        assertThat(hook.getCompactionCount()).isEqualTo(4);
     }
 
     @Test
