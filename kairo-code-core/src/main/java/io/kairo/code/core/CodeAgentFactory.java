@@ -72,6 +72,9 @@ public final class CodeAgentFactory {
 
     private static final Logger log = LoggerFactory.getLogger(CodeAgentFactory.class);
     private static final String SYSTEM_PROMPT_RESOURCE = "system-prompt.md";
+    static final String SYSTEM_PROMPT_CLAUDE_RESOURCE = "system-prompt-claude.md";
+    static final String SYSTEM_PROMPT_GLM_RESOURCE = "system-prompt-glm.md";
+    static final String SYSTEM_PROMPT_ENV = "KAIRO_CODE_SYSTEM_PROMPT";
 
     private CodeAgentFactory() {}
 
@@ -161,6 +164,7 @@ public final class CodeAgentFactory {
         String systemPrompt =
                 resolveSystemPrompt(
                         config,
+                        modelProvider,
                         options.skillRegistry(),
                         activeSkills,
                         options.toolUsageTracker());
@@ -308,10 +312,12 @@ public final class CodeAgentFactory {
 
     private static String resolveSystemPrompt(
             CodeAgentConfig config,
+            ModelProvider modelProvider,
             SkillRegistry skillRegistry,
             Set<String> activeSkills,
             ToolUsageTracker toolUsageTracker) {
-        StringBuilder prompt = new StringBuilder(loadSystemPrompt());
+        String resourceName = selectSystemPromptResource(modelProvider, config);
+        StringBuilder prompt = new StringBuilder(loadSystemPrompt(resourceName));
         if (skillRegistry != null && !activeSkills.isEmpty()) {
             String skillSection = renderSkillSection(skillRegistry, activeSkills);
             if (!skillSection.isBlank()) {
@@ -349,22 +355,68 @@ public final class CodeAgentFactory {
         return any ? sb.toString() : "";
     }
 
-    private static String loadSystemPrompt() {
+    /**
+     * Choose a system-prompt resource name based on (in order):
+     * <ol>
+     *   <li>{@code KAIRO_CODE_SYSTEM_PROMPT} environment variable — explicit override.</li>
+     *   <li>The {@link ModelProvider} type — Anthropic providers get the Claude variant.</li>
+     *   <li>The configured model name — names containing {@code "glm"} get the GLM variant.</li>
+     *   <li>Otherwise the generic default.</li>
+     * </ol>
+     *
+     * <p>Visible for testing.
+     */
+    static String selectSystemPromptResource(ModelProvider modelProvider, CodeAgentConfig config) {
+        String envOverride = System.getenv(SYSTEM_PROMPT_ENV);
+        if (envOverride != null && !envOverride.isBlank()) {
+            return envOverride.trim();
+        }
+        if (modelProvider != null) {
+            String providerClass = modelProvider.getClass().getName().toLowerCase();
+            if (providerClass.contains("anthropic")) {
+                return SYSTEM_PROMPT_CLAUDE_RESOURCE;
+            }
+        }
+        if (config != null && config.modelName() != null) {
+            String model = config.modelName().toLowerCase();
+            if (model.contains("claude")) {
+                return SYSTEM_PROMPT_CLAUDE_RESOURCE;
+            }
+            if (model.contains("glm")) {
+                return SYSTEM_PROMPT_GLM_RESOURCE;
+            }
+        }
+        return SYSTEM_PROMPT_RESOURCE;
+    }
+
+    private static String loadSystemPrompt(String resourceName) {
         try (InputStream is =
                 CodeAgentFactory.class
                         .getClassLoader()
-                        .getResourceAsStream(SYSTEM_PROMPT_RESOURCE)) {
-            if (is == null) {
-                log.warn(
-                        "System prompt resource '{}' not found on classpath, using fallback",
-                        SYSTEM_PROMPT_RESOURCE);
-                return "You are Kairo Code, an expert software engineer AI assistant.";
+                        .getResourceAsStream(resourceName)) {
+            if (is != null) {
+                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
             }
-            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            log.warn(
+                    "System prompt resource '{}' not found on classpath, falling back to '{}'",
+                    resourceName,
+                    SYSTEM_PROMPT_RESOURCE);
         } catch (IOException e) {
-            log.error("Failed to load system prompt from classpath", e);
-            return "You are Kairo Code, an expert software engineer AI assistant.";
+            log.error("Failed to load system prompt resource '{}'", resourceName, e);
         }
+        if (!SYSTEM_PROMPT_RESOURCE.equals(resourceName)) {
+            try (InputStream is =
+                    CodeAgentFactory.class
+                            .getClassLoader()
+                            .getResourceAsStream(SYSTEM_PROMPT_RESOURCE)) {
+                if (is != null) {
+                    return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            } catch (IOException e) {
+                log.error("Failed to load default system prompt", e);
+            }
+        }
+        return "You are Kairo Code, an expert software engineer AI assistant.";
     }
 
     /**
