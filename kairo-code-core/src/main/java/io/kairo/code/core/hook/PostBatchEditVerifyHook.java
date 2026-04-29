@@ -39,7 +39,7 @@ public final class PostBatchEditVerifyHook {
 
     private static final int MAX_INJECTIONS = 3;
 
-    private static final Set<String> EDIT_TOOLS = Set.of("write_file", "edit_file");
+    private static final Set<String> EDIT_TOOLS = Set.of("write", "edit");
 
     private static final String INJECT_MESSAGE =
             "You have made edits to Java files but have not run any verification command. "

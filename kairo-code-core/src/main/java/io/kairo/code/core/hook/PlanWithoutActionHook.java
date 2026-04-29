@@ -39,7 +39,7 @@ public final class PlanWithoutActionHook {
     private static final int MAX_INJECTIONS = 2;
 
     private static final Set<String> IMPLEMENTATION_TOOLS =
-            Set.of("bash", "read_file", "write_file", "edit_file", "search_files", "glob");
+            Set.of("bash", "read", "write", "edit", "grep", "glob", "git", "tree");
 
     private static final Set<String> PLAN_TOOLS = Set.of("todo_write", "todo_read");
 
