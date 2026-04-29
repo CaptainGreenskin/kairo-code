@@ -1,0 +1,21 @@
+{
+  "$schema": "https://github.com/liulihan/cli-dispatcher/schema/v0/dispatcher-config.json",
+  "worktreeBase": ".dispatcher/worktrees",
+  "branchPrefix": "feature",
+  "verifyScript": ".dispatcher/verify.sh",
+  "briefPrefixFile": ".dispatcher/brief-prefix.md",
+  "logsDir": ".dispatcher/logs",
+  "evalDir": ".dispatcher/eval",
+  "queueDir": ".dispatcher/queue",
+  "archiveDir": ".dispatcher/_archive",
+  "mergePushPolicy": "never",
+  "executors": {
+    "qodercli": {
+      "modelLevel": "qwork-ultimate"
+    },
+    "opencode": {},
+    "cursor": {
+      "model": "claude-opus-4-7-high"
+    }
+  }
+}

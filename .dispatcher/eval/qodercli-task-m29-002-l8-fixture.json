@@ -1,0 +1,19 @@
+{
+  "executor": "qodercli",
+  "task_id": "task-m29-002-l8-fixture",
+  "date": "2026-04-29T05:51:17",
+  "branch": "feature/qodercli-task-m29-002-l8-fixture",
+  "sha": "3c6cfd4",
+  "diffstat": " 10 files changed, 882 insertions(+), 184 deletions(-)",
+  "scores": {
+    "completion": 28,
+    "verify": 25,
+    "quality": 14,
+    "tests": 14,
+    "efficiency": 9,
+    "description": 5,
+    "bonus": 0
+  },
+  "total": 95,
+  "note": ""
+}
