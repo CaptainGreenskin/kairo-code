@@ -276,7 +276,9 @@ public class KairoCodeMain implements Callable<Integer> {
     private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider,
             boolean planMode) {
         PlanModeHook planHook = planMode ? new PlanModeHook(true) : null;
-        List<Object> baseHooks = noHooks ? List.of() : List.of(new ProgressPrinter());
+        PrintWriter sysErr = new PrintWriter(System.err, true);
+        AgentEventPrinter eventPrinter = new AgentEventPrinter(sysErr, "", false, null, false);
+        List<Object> baseHooks = noHooks ? List.of() : List.of(new ProgressPrinter(), eventPrinter);
         List<Object> hooks;
         if (planHook != null) {
             List<Object> merged = new java.util.ArrayList<>();
@@ -322,6 +324,11 @@ public class KairoCodeMain implements Callable<Integer> {
         }
         Msg response = mono.block();
         long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
+
+        // Print session summary for one-shot mode
+        if (!noHooks) {
+            eventPrinter.printSessionSummary(elapsedMs);
+        }
 
         // Handle plan rejection: exit code 3.
         if (planHook != null && planHook.wasRejected()) {
@@ -475,7 +482,7 @@ public class KairoCodeMain implements Callable<Integer> {
 
         // ReplLoop owns the ConsoleApprovalHandler lifecycle —
         // it creates the handler wired to JLine's terminal I/O.
-        new ReplLoop(config, List.of(eventPrinter), null, notificationsEnabled).run();
+        new ReplLoop(config, List.of(eventPrinter), null, notificationsEnabled, eventPrinter).run();
         spinner.shutdown();
         return 0;
     }

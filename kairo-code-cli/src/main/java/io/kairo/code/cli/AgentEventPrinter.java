@@ -10,6 +10,7 @@ import io.kairo.api.message.Content;
 import io.kairo.api.model.ModelResponse;
 import java.io.PrintWriter;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
@@ -51,6 +52,11 @@ public class AgentEventPrinter {
     private final boolean streamingText;
     private final ModelCallSpinner spinner;
     private final boolean verboseThinking;
+    private final int maxContextTokens;
+
+    private final AtomicLong totalInputTokens = new AtomicLong(0);
+    private final AtomicLong totalOutputTokens = new AtomicLong(0);
+    private final AtomicLong turnCount = new AtomicLong(0);
 
     public AgentEventPrinter(PrintWriter writer) {
         this(writer, "", false, null, false);
@@ -83,6 +89,21 @@ public class AgentEventPrinter {
         this.streamingText = streamingText;
         this.spinner = spinner;
         this.verboseThinking = verboseThinking;
+        this.maxContextTokens = readMaxContextTokens();
+    }
+
+    /**
+     * Constructor that explicitly specifies maxContextTokens (useful for testing).
+     */
+    public AgentEventPrinter(PrintWriter writer, String prefix, boolean streamingText,
+                              ModelCallSpinner spinner, boolean verboseThinking,
+                              int maxContextTokens) {
+        this.writer = writer;
+        this.prefix = prefix == null ? "" : prefix;
+        this.streamingText = streamingText;
+        this.spinner = spinner;
+        this.verboseThinking = verboseThinking;
+        this.maxContextTokens = maxContextTokens;
     }
 
     private String linePrefix() {
@@ -190,10 +211,71 @@ public class AgentEventPrinter {
         }
         ModelResponse.Usage usage = event.response().usage();
         if (usage != null) {
-            writer.printf(linePrefix() + DIM + "[model] in=%d out=%d cache_read=%d" + RESET + "%n",
-                    usage.inputTokens(), usage.outputTokens(), usage.cacheReadTokens());
+            long cumInput = totalInputTokens.addAndGet(usage.inputTokens());
+            long cumOutput = totalOutputTokens.addAndGet(usage.outputTokens());
+            turnCount.incrementAndGet();
+
+            int pct = (int) (cumInput * 100L / maxContextTokens);
+            String fillBar = buildFillBar(pct, 20);
+            String barColor = barColorForPct(pct);
+            writer.printf(linePrefix() + DIM + "[model] in=%d out=%d cache_read=%d" + RESET
+                    + "  " + barColor + "context: %s %d%%" + RESET + "%n",
+                    usage.inputTokens(), usage.outputTokens(), usage.cacheReadTokens(),
+                    fillBar, pct);
         }
         writer.flush();
+    }
+
+    /**
+     * Build a context fill bar like [████░░░░░░░░░░░░░░░░] based on percentage and width.
+     */
+    static String buildFillBar(int pct, int width) {
+        int filled = Math.max(0, Math.min(width, (int) Math.round(pct / 100.0 * width)));
+        int empty = width - filled;
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < filled; i++) sb.append('\u2588');
+        for (int i = 0; i < empty; i++) sb.append('\u2591');
+        sb.append(']');
+        return sb.toString();
+    }
+
+    private static String barColorForPct(int pct) {
+        if (pct >= 85) return RED;
+        if (pct >= 70) return YELLOW;
+        return DIM;
+    }
+
+    /**
+     * Print a session summary with cumulative token counts and elapsed time.
+     * Called when the REPL exits (via :exit, Ctrl+D, or --print mode completion).
+     */
+    public synchronized void printSessionSummary(long elapsedMs) {
+        long totalIn = totalInputTokens.get();
+        long totalOut = totalOutputTokens.get();
+        long totalTurns = turnCount.get();
+
+        writer.println();
+        writer.println(linePrefix() + DIM + "\u2500".repeat(40) + RESET);
+        writer.printf(linePrefix() + "Session complete  " + DIM
+                + "turns=%d  tokens in=%,d out=%,d  elapsed=%s" + RESET + "%n",
+                totalTurns, totalIn, totalOut, formatDuration(elapsedMs));
+        writer.println(linePrefix() + DIM + "\u2500".repeat(40) + RESET);
+        writer.flush();
+    }
+
+    private static String formatDuration(long ms) {
+        if (ms < 60_000) return (ms / 1000) + "s";
+        long minutes = ms / 60_000;
+        long seconds = (ms % 60_000) / 1000;
+        return minutes + "m" + seconds + "s";
+    }
+
+    private static int readMaxContextTokens() {
+        String env = System.getenv("KAIRO_CODE_MAX_CONTEXT_TOKENS");
+        if (env != null && !env.isBlank()) {
+            try { return Integer.parseInt(env.trim()); } catch (NumberFormatException ignored) {}
+        }
+        return 100_000;
     }
 
     private static String summarizeArgs(Map<String, Object> input) {

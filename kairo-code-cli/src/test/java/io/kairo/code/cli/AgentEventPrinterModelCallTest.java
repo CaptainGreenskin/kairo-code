@@ -117,6 +117,100 @@ class AgentEventPrinterModelCallTest {
         spinner.shutdown();
     }
 
+    // --- Context window usage tests ---
+
+    @Test
+    void postReasoningShowsContextFillBar() {
+        // Use a small maxContextTokens so we can easily trigger percentage thresholds
+        StringWriter sw = new StringWriter();
+        AgentEventPrinter p = new AgentEventPrinter(
+                new PrintWriter(sw, true), "", false, null, false, 10_000);
+
+        // First call: 3000 input tokens → 30%
+        p.onPostReasoning(eventWithUsage(3000, 500, 0));
+        String output = sw.toString();
+        assertThat(output).contains("context:");
+        assertThat(output).contains("30%");
+        assertThat(output).contains("[");
+        assertThat(output).contains("]");
+    }
+
+    @Test
+    void postReasoningCumulativeTokensAcrossCalls() {
+        StringWriter sw = new StringWriter();
+        AgentEventPrinter p = new AgentEventPrinter(
+                new PrintWriter(sw, true), "", false, null, false, 10_000);
+
+        p.onPostReasoning(eventWithUsage(2000, 300, 0));
+        p.onPostReasoning(eventWithUsage(3000, 400, 0));
+
+        String output = sw.toString();
+        // Second call should show cumulative input = 5000 → 50%
+        assertThat(output).contains("50%");
+    }
+
+    @Test
+    void fillBarColorChangesAtThresholds() {
+        // Low usage: < 70% → no RED
+        StringWriter swLow = new StringWriter();
+        AgentEventPrinter pLow = new AgentEventPrinter(
+                new PrintWriter(swLow, true), "", false, null, false, 10_000);
+        pLow.onPostReasoning(eventWithUsage(5000, 200, 0)); // 50%
+        assertThat(swLow.toString()).doesNotContain("\u001B[31m"); // RED
+
+        // High usage: >= 85% → RED
+        StringWriter swHigh = new StringWriter();
+        AgentEventPrinter pHigh = new AgentEventPrinter(
+                new PrintWriter(swHigh, true), "", false, null, false, 10_000);
+        pHigh.onPostReasoning(eventWithUsage(9000, 200, 0)); // 90%
+        assertThat(swHigh.toString()).contains("\u001B[31m"); // RED
+    }
+
+    @Test
+    void buildFillBarProducesCorrectShape() {
+        String bar0 = AgentEventPrinter.buildFillBar(0, 20);
+        assertThat(bar0).isEqualTo("[\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591]");
+
+        String bar50 = AgentEventPrinter.buildFillBar(50, 20);
+        assertThat(bar50).isEqualTo("[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591]");
+
+        String bar100 = AgentEventPrinter.buildFillBar(100, 20);
+        assertThat(bar100).isEqualTo("[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588]");
+    }
+
+    @Test
+    void printSessionSummaryContainsExpectedFields() {
+        StringWriter sw = new StringWriter();
+        AgentEventPrinter p = new AgentEventPrinter(
+                new PrintWriter(sw, true), "", false, null, false, 10_000);
+
+        p.onPostReasoning(eventWithUsage(1500, 300, 0));
+        p.onPostReasoning(eventWithUsage(2000, 400, 0));
+        p.printSessionSummary(125_000); // 2m5s
+
+        String output = sw.toString();
+        assertThat(output).contains("turns=2");
+        assertThat(output).contains("tokens in=3,500");
+        assertThat(output).contains("out=700");
+        assertThat(output).contains("elapsed=2m5s");
+        assertThat(output).contains("Session complete");
+    }
+
+    @Test
+    void printSessionSummaryShowsZeroWhenNoCalls() {
+        StringWriter sw = new StringWriter();
+        AgentEventPrinter p = new AgentEventPrinter(
+                new PrintWriter(sw, true), "", false, null, false, 10_000);
+
+        p.printSessionSummary(30_000);
+
+        String output = sw.toString();
+        assertThat(output).contains("turns=0");
+        assertThat(output).contains("tokens in=0");
+        assertThat(output).contains("out=0");
+        assertThat(output).contains("elapsed=30s");
+    }
+
     private static PostReasoningEvent eventWithUsage(
             int inputTokens, int outputTokens, int cacheReadTokens) {
         ModelResponse.Usage usage =
