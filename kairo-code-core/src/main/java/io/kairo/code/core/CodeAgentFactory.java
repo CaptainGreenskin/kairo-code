@@ -401,6 +401,16 @@ public final class CodeAgentFactory {
                     KairoMdLoader.findAndLoad(Path.of(config.workingDir()));
             kairoMd.ifPresent(content ->
                     prompt.append("\n\n## Project Instructions (KAIRO.md)\n").append(content));
+
+            // Append dynamic Session Context: date + git status.
+            prompt.append("\n\n## Session Context");
+            prompt.append("\nDate: ").append(java.time.LocalDate.now().toString());
+            String gitStatus = readGitStatus(config.workingDir());
+            if (gitStatus != null && !gitStatus.isBlank()) {
+                prompt.append("\n\n### Working Tree Status\n```\n")
+                        .append(gitStatus)
+                        .append("\n```");
+            }
         }
         Path globalKairoDir = Path.of(System.getProperty("user.home"), ".kairo-code");
         LearnedLessonStore lessonStore = LearnedLessonStore.fromKairoDir(globalKairoDir);
@@ -484,6 +494,34 @@ public final class CodeAgentFactory {
             }
         }
         return "You are Kairo Code, an expert software engineer AI assistant.";
+    }
+
+    /**
+     * Run {@code git status --short} in the given working directory.
+     *
+     * <p>Returns null on any failure (no git, not a repo, timeout, etc.) so the system prompt
+     * degrades gracefully. Output is capped at 30 lines.
+     */
+    private static String readGitStatus(String workingDir) {
+        if (workingDir == null || workingDir.isBlank()) return null;
+        try {
+            ProcessBuilder pb = new ProcessBuilder("git", "status", "--short")
+                    .directory(new java.io.File(workingDir))
+                    .redirectErrorStream(true);
+            Process p = pb.start();
+            String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            boolean ok = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!ok || p.exitValue() != 0) return null;
+            String[] lines = output.split("\n");
+            if (lines.length > 30) {
+                output = String.join("\n", java.util.Arrays.copyOf(lines, 30))
+                        + "\n... (" + (lines.length - 30) + " more files)";
+            }
+            return output.isBlank() ? null : output;
+        } catch (Exception e) {
+            log.debug("Failed to read git status: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

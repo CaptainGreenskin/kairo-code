@@ -78,4 +78,44 @@ class KairoMdLoaderTest {
         assertThat(result).isPresent();
         assertThat(result.get()).isEqualTo("Child rules.");
     }
+
+    @Test
+    void prefersKairoMdOverClaudeMd() throws IOException {
+        Files.writeString(tempDir.resolve("KAIRO.md"), "Kairo rules.");
+        Files.writeString(tempDir.resolve("CLAUDE.md"), "Claude rules.");
+
+        Optional<String> result = KairoMdLoader.findAndLoad(tempDir);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).isEqualTo("Kairo rules.");
+    }
+
+    @Test
+    void fallsBackToClaudeMdWhenNoKairoMd() throws IOException {
+        Files.writeString(tempDir.resolve("CLAUDE.md"), "Claude rules.");
+
+        Optional<String> result = KairoMdLoader.findAndLoad(tempDir);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).isEqualTo("Claude rules.");
+    }
+
+    @Test
+    void findsClaudeMdInParentDir() throws IOException {
+        Path childDir = tempDir.resolve("sub/deep");
+        Files.createDirectories(childDir);
+        Files.writeString(tempDir.resolve("CLAUDE.md"), "Parent Claude rules.");
+
+        Optional<String> result = KairoMdLoader.findAndLoad(childDir);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).isEqualTo("Parent Claude rules.");
+    }
+
+    @Test
+    void returnsEmptyWhenNeitherFileExists() {
+        Optional<String> result = KairoMdLoader.findAndLoad(tempDir);
+
+        assertThat(result).isEmpty();
+    }
 }
