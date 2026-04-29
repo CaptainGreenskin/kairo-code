@@ -207,7 +207,9 @@ public class ReplContext {
                         newModelName,
                         config.maxIterations(),
                         config.workingDir(),
-                        config.mcpConfig());
+                        config.mcpConfig(),
+                        config.toolBudgetForce(),
+                        config.repetitiveToolThreshold());
         rebuildSession(null);
     }
 

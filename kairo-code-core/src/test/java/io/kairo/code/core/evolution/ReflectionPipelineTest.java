@@ -127,7 +127,7 @@ class ReflectionPipelineTest {
         ToolStrikeEvent event = new ToolStrikeEvent("bash", List.of("err1", "err2", "err3"));
 
         CodeAgentConfig config = new CodeAgentConfig(
-                "fake-key", "https://invalid.localhost:99999", "gpt-4o", 1, null, null);
+                "fake-key", "https://invalid.localhost:99999", "gpt-4o", 1, null, null, 0, 0);
 
         CompletableFuture<Void> future =
                 ReflectionPipeline.generateAndSave(event, config, store);

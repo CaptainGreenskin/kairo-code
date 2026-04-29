@@ -48,7 +48,7 @@ class MetricsCommandTest {
         registry.register(new MetricsCommand());
         outputCapture = new StringWriter();
         writer = new PrintWriter(outputCapture, true);
-        config = new CodeAgentConfig("test-key", "https://api.test.com", "gpt-4o", 50, "/tmp", null);
+        config = new CodeAgentConfig("test-key", "https://api.test.com", "gpt-4o", 50, "/tmp", null, 0, 0);
     }
 
     @Test

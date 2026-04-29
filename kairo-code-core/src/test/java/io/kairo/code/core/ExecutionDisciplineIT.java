@@ -96,7 +96,7 @@ class ExecutionDisciplineIT {
                         """);
 
         CodeAgentConfig config = new CodeAgentConfig(
-                API_KEY, BASE_URL, MODEL, 30, repo.toString(), null);
+                API_KEY, BASE_URL, MODEL, 30, repo.toString(), null, 0, 0);
 
         // Wire task tool with a spawner that uses the real factory for child sessions
         WorktreeLifecycle lifecycle = new WorktreeLifecycle(tmp.resolve("worktrees"), "git");
