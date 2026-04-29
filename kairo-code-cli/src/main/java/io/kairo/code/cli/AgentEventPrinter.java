@@ -10,6 +10,7 @@ import io.kairo.api.message.Content;
 import io.kairo.api.model.ModelResponse;
 import java.io.PrintWriter;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -24,7 +25,8 @@ import java.util.stream.Collectors;
 public class AgentEventPrinter {
 
     private static final int MAX_ARGS_LENGTH = 100;
-    private static final int MAX_RESULT_LENGTH = 200;
+    private static final int MAX_SUCCESS_RESULT_LENGTH = 200;
+    private static final int MAX_ERROR_RESULT_LENGTH = 500;
     private static final int MAX_RESULT_LINES = 5;
 
     // ANSI color codes
@@ -57,6 +59,8 @@ public class AgentEventPrinter {
     private final AtomicLong totalInputTokens = new AtomicLong(0);
     private final AtomicLong totalOutputTokens = new AtomicLong(0);
     private final AtomicLong turnCount = new AtomicLong(0);
+
+    private final Map<String, Long> toolStartTimes = new ConcurrentHashMap<>();
 
     public AgentEventPrinter(PrintWriter writer) {
         this(writer, "", false, null, false);
@@ -119,6 +123,7 @@ public class AgentEventPrinter {
 
     @HookHandler(HookPhase.PRE_ACTING)
     public synchronized void onPreActing(PreActingEvent event) {
+        toolStartTimes.put(event.toolName(), System.currentTimeMillis());
         String argsSummary = summarizeArgs(event.input());
         if (argsSummary.isEmpty()) {
             writer.println(linePrefix() + YELLOW + "⚡ Running " + BOLD + event.toolName() + RESET + YELLOW + "..." + RESET);
@@ -131,15 +136,25 @@ public class AgentEventPrinter {
 
     @HookHandler(HookPhase.POST_ACTING)
     public synchronized void onPostActing(PostActingEvent event) {
+        Long startMs = toolStartTimes.remove(event.toolName());
+        long elapsedMs = startMs != null ? System.currentTimeMillis() - startMs : 0;
+        String durationStr = formatDuration(elapsedMs);
+        String durationColor = elapsedMs > 5000 ? YELLOW : DIM;
+
         String content = event.result().content();
         if (content != null && !content.isBlank()) {
-            String display = content.length() > MAX_RESULT_LENGTH
-                    ? content.substring(0, MAX_RESULT_LENGTH) + "... [truncated]"
+            int maxLen = event.result().isError() ? MAX_ERROR_RESULT_LENGTH : MAX_SUCCESS_RESULT_LENGTH;
+            String display = content.length() > maxLen
+                    ? content.substring(0, maxLen) + "... [truncated]"
                     : content;
             if (event.result().isError()) {
-                writer.println(linePrefix() + RED + "  ✗ " + event.toolName() + " failed: " + RESET + truncateLines(display, MAX_RESULT_LINES));
+                String errorClass = classifyError(content);
+                writer.println(linePrefix() + RED + "  ✗ " + event.toolName() + " failed"
+                        + errorClass + ": " + RESET + truncateLines(display, MAX_RESULT_LINES)
+                        + durationColor + " (" + durationStr + ")" + RESET);
             } else {
-                writer.println(linePrefix() + GREEN + "  ✓ " + event.toolName() + " completed" + RESET);
+                writer.println(linePrefix() + GREEN + "  ✓ " + event.toolName() + " completed"
+                        + durationColor + " (" + durationStr + ")" + RESET);
                 String preview = truncateLines(display, MAX_RESULT_LINES);
                 if (!preview.isBlank()) {
                     writer.println(linePrefix() + DIM + "    " + preview.replace("\n", "\n    ") + RESET);
@@ -147,9 +162,12 @@ public class AgentEventPrinter {
             }
         } else {
             if (event.result().isError()) {
-                writer.println(linePrefix() + RED + "  ✗ " + event.toolName() + " failed" + RESET);
+                String errorClass = classifyError(content);
+                writer.println(linePrefix() + RED + "  ✗ " + event.toolName() + " failed"
+                        + errorClass + durationColor + " (" + durationStr + ")" + RESET);
             } else {
-                writer.println(linePrefix() + GREEN + "  ✓ " + event.toolName() + " completed" + RESET);
+                writer.println(linePrefix() + GREEN + "  ✓ " + event.toolName() + " completed"
+                        + durationColor + " (" + durationStr + ")" + RESET);
             }
         }
         writer.flush();
@@ -264,10 +282,33 @@ public class AgentEventPrinter {
     }
 
     private static String formatDuration(long ms) {
-        if (ms < 60_000) return (ms / 1000) + "s";
+        if (ms < 1000) return ms + "ms";
+        if (ms < 60_000) {
+            double seconds = ms / 1000.0;
+            if (seconds == (long) seconds) return (long) seconds + "s";
+            return String.format("%.1fs", seconds);
+        }
         long minutes = ms / 60_000;
         long seconds = (ms % 60_000) / 1000;
         return minutes + "m" + seconds + "s";
+    }
+
+    /**
+     * Classify error content into a semantic label for better error visibility.
+     */
+    static String classifyError(String content) {
+        if (content == null) return "";
+        String lower = content.toLowerCase();
+        if (lower.contains("permission denied") || lower.contains("access denied")) {
+            return " [permission]";
+        } else if (lower.contains("not found") || lower.contains("no such file")) {
+            return " [not found]";
+        } else if (lower.contains("timeout") || lower.contains("timed out")) {
+            return " [timeout]";
+        } else if (lower.contains("connection refused") || lower.contains("connect")) {
+            return " [network]";
+        }
+        return "";
     }
 
     private static int readMaxContextTokens() {
