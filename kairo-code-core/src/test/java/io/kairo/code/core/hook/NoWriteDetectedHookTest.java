@@ -92,14 +92,15 @@ class NoWriteDetectedHookTest {
         HookResult<PostReasoningEvent> r3 = hook.onPostReasoning(eventWithToolCalls(writeFile("Foo.java")));
         assertThat(r3.decision()).isEqualTo(HookResult.Decision.CONTINUE);
 
-        // Now need 3 more turns to trigger again
+        // threshold=3: need 3 turns without write to trigger again
         hook.onPostReasoning(eventWithToolCalls(bash("ls")));
         hook.onPostReasoning(eventWithToolCalls(bash("ls")));
         HookResult<PostReasoningEvent> r6 = hook.onPostReasoning(eventWithToolCalls(bash("ls")));
-        assertThat(r6.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+        assertThat(r6.decision()).isEqualTo(HookResult.Decision.INJECT);
 
+        // after injection, suppressed
         HookResult<PostReasoningEvent> r7 = hook.onPostReasoning(eventWithToolCalls(bash("ls")));
-        assertThat(r7.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(r7.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
 
     @Test
