@@ -18,7 +18,7 @@ package io.kairo.code.core.hook;
 import io.kairo.api.hook.HookHandler;
 import io.kairo.api.hook.HookPhase;
 import io.kairo.api.hook.HookResult;
-import io.kairo.api.hook.PreReasoningEvent;
+import io.kairo.api.hook.PreCompleteEvent;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
@@ -31,18 +31,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Scans the original task instructions for "Create ...Test.java" requirements
- * and injects a reminder if any required test files do not yet exist.
+ * Scans the original task instructions for "Create ...Test.java" requirements and injects a
+ * reminder if any required test files do not yet exist.
  *
- * <p>Borrowing from claude-code-best generalPurposeAgent.ts:
- * "Complete the task fully—don't gold-plate, but don't leave it half-done."
+ * <p>Borrowing from claude-code-best generalPurposeAgent.ts: "Complete the task fully—don't
+ * gold-plate, but don't leave it half-done."
  *
- * <p>Detection pattern: lines containing both "Create" and ".java" in the task text.
- * Checks file existence against workingDir.
- * Fires at most once per missing file, up to MAX_INJECTIONS total.
+ * <p>Detection pattern: lines containing both "Create" and ".java" in the task text. Checks file
+ * existence against workingDir. Fires at most once per missing file, up to MAX_INJECTIONS total.
  *
- * <p>Phase: {@link HookPhase#PRE_REASONING} — fires before each reasoning turn.
- * REPL mode: disabled.
+ * <p>Phase: {@link HookPhase#PRE_COMPLETE} — fires when model is about to return a final answer
+ * (no tool calls). Returning INJECT forces another iteration, analogous to claude-code's
+ * preventContinuation. REPL mode: disabled.
  */
 public final class UnfulfilledInstructionHook {
 
@@ -50,7 +50,8 @@ public final class UnfulfilledInstructionHook {
 
     private static final String INJECT_TEMPLATE =
             "Required file not yet created: {0}\n"
-                    + "The task explicitly requires you to create this file. Create it now before finishing.";
+                    + "The task explicitly requires you to create this file. Create it now before"
+                    + " finishing.";
 
     private static final Pattern CREATE_JAVA_PATTERN =
             Pattern.compile("Create\\s+(src/test/[^\\s]+\\.java)");
@@ -59,7 +60,6 @@ public final class UnfulfilledInstructionHook {
     private final boolean isRepl;
     private final Set<String> injectedFiles = new HashSet<>();
     private int injectionCount;
-    private boolean scanned;
 
     public UnfulfilledInstructionHook(String workingDir) {
         this(workingDir, false);
@@ -70,30 +70,27 @@ public final class UnfulfilledInstructionHook {
         this.isRepl = isRepl;
     }
 
-    @HookHandler(HookPhase.PRE_REASONING)
-    public HookResult<PreReasoningEvent> onPreReasoning(PreReasoningEvent event) {
+    @HookHandler(HookPhase.PRE_COMPLETE)
+    public HookResult<PreCompleteEvent> onPreComplete(PreCompleteEvent event) {
         if (isRepl || workingDir == null || workingDir.isBlank()) {
             return HookResult.proceed(event);
         }
+        if (injectionCount >= MAX_INJECTIONS) {
+            return HookResult.proceed(event);
+        }
 
-        if (!scanned) {
-            scanned = true;
-            List<String> paths = extractCreatePaths(event.messages());
-            for (String path : paths) {
-                if (injectionCount >= MAX_INJECTIONS) {
-                    break;
-                }
-                if (injectedFiles.contains(path)) {
-                    continue;
-                }
-                Path fullPath = Path.of(workingDir, path);
-                if (!Files.exists(fullPath)) {
-                    injectedFiles.add(path);
-                    injectionCount++;
-                    String message = INJECT_TEMPLATE.replace("{0}", path);
-                    return HookResult.inject(
-                            event, Msg.of(MsgRole.USER, message), "UnfulfilledInstructionHook");
-                }
+        List<String> paths = extractCreatePaths(event.conversationHistory());
+        for (String path : paths) {
+            if (injectedFiles.contains(path)) {
+                continue;
+            }
+            Path fullPath = Path.of(workingDir, path);
+            if (!Files.exists(fullPath)) {
+                injectedFiles.add(path);
+                injectionCount++;
+                String message = INJECT_TEMPLATE.replace("{0}", path);
+                return HookResult.inject(
+                        event, Msg.of(MsgRole.USER, message), "UnfulfilledInstructionHook");
             }
         }
 
@@ -107,10 +104,11 @@ public final class UnfulfilledInstructionHook {
                 String text = extractText(msg);
                 if (text != null && !text.isBlank()) {
                     return text.lines()
-                            .map(line -> {
-                                Matcher m = CREATE_JAVA_PATTERN.matcher(line);
-                                return m.find() ? m.group(1) : null;
-                            })
+                            .map(
+                                    line -> {
+                                        Matcher m = CREATE_JAVA_PATTERN.matcher(line);
+                                        return m.find() ? m.group(1) : null;
+                                    })
                             .filter(p -> p != null)
                             .toList();
                 }

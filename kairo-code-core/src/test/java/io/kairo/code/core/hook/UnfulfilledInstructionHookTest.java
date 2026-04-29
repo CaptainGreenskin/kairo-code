@@ -18,10 +18,9 @@ package io.kairo.code.core.hook;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.kairo.api.hook.HookResult;
-import io.kairo.api.hook.PreReasoningEvent;
+import io.kairo.api.hook.PreCompleteEvent;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
-import io.kairo.api.model.ModelConfig;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,14 +30,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 class UnfulfilledInstructionHookTest {
 
-    private static PreReasoningEvent eventWithUserText(String text) {
-        ModelConfig config = ModelConfig.builder().model("gpt-4o").build();
-        return new PreReasoningEvent(List.of(Msg.of(MsgRole.USER, text)), config, false);
+    private static PreCompleteEvent eventWithUserText(String text) {
+        Msg assistant = Msg.of(MsgRole.ASSISTANT, "I have completed the task.");
+        return new PreCompleteEvent(assistant, List.of(Msg.of(MsgRole.USER, text)), false);
     }
 
-    private static PreReasoningEvent eventWithMessages(List<Msg> messages) {
-        ModelConfig config = ModelConfig.builder().model("gpt-4o").build();
-        return new PreReasoningEvent(List.copyOf(messages), config, false);
+    private static PreCompleteEvent eventWithMessages(List<Msg> messages) {
+        Msg assistant = Msg.of(MsgRole.ASSISTANT, "I have completed the task.");
+        return new PreCompleteEvent(assistant, List.copyOf(messages), false);
     }
 
     // --- 1. No "Create .java" instruction: CONTINUE ---
@@ -47,9 +46,9 @@ class UnfulfilledInstructionHookTest {
     void noCreateJavaInstruction_continues() {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook("/tmp");
 
-        PreReasoningEvent event = eventWithUserText("Fix the bug in RateLimiter.java");
+        PreCompleteEvent event = eventWithUserText("Fix the bug in RateLimiter.java");
 
-        HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
+        HookResult<PreCompleteEvent> result = hook.onPreComplete(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.CONTINUE);
         assertThat(result.injectedMessage()).isNull();
     }
@@ -64,13 +63,14 @@ class UnfulfilledInstructionHookTest {
 
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString());
 
-        String task = """
+        String task =
+                """
                 Fix the rate limiter.
                 Create src/test/java/io/RateLimiterTest.java with tests.
                 """;
-        PreReasoningEvent event = eventWithUserText(task);
+        PreCompleteEvent event = eventWithUserText(task);
 
-        HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
+        HookResult<PreCompleteEvent> result = hook.onPreComplete(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.CONTINUE);
         assertThat(result.injectedMessage()).isNull();
     }
@@ -82,9 +82,9 @@ class UnfulfilledInstructionHookTest {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString());
 
         String task = "Create src/test/java/io/RateLimiterTest.java with tests.";
-        PreReasoningEvent event = eventWithUserText(task);
+        PreCompleteEvent event = eventWithUserText(task);
 
-        HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
+        HookResult<PreCompleteEvent> result = hook.onPreComplete(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(result.injectedMessage()).isNotNull();
         assertThat(result.injectedMessage().text()).contains("RateLimiterTest.java");
@@ -98,14 +98,14 @@ class UnfulfilledInstructionHookTest {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString());
 
         String task = "Create src/test/java/io/RateLimiterTest.java with tests.";
-        PreReasoningEvent event = eventWithUserText(task);
+        PreCompleteEvent event = eventWithUserText(task);
 
-        HookResult<PreReasoningEvent> r1 = hook.onPreReasoning(event);
+        HookResult<PreCompleteEvent> r1 = hook.onPreComplete(event);
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.INJECT);
 
-        // Second call — already scanned, should continue
-        PreReasoningEvent event2 = eventWithUserText(task);
-        HookResult<PreReasoningEvent> r2 = hook.onPreReasoning(event2);
+        // Second call — same file already in injectedFiles, should not re-inject
+        PreCompleteEvent event2 = eventWithUserText(task);
+        HookResult<PreCompleteEvent> r2 = hook.onPreComplete(event2);
         assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
         assertThat(r2.injectedMessage()).isNull();
     }
@@ -116,23 +116,26 @@ class UnfulfilledInstructionHookTest {
     void maxInjections_cap(@TempDir Path tempDir) {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString());
 
-        String task = """
-                Create src/test/java/io/TestA.java
-                Create src/test/java/io/TestB.java
-                Create src/test/java/io/TestC.java
-                Create src/test/java/io/TestD.java
-                """;
-        PreReasoningEvent event = eventWithUserText(task);
-
-        // First call injects the first missing file
-        HookResult<PreReasoningEvent> r1 = hook.onPreReasoning(event);
+        // First call injects the first missing file (TestA)
+        String taskA = "Create src/test/java/io/TestA.java";
+        HookResult<PreCompleteEvent> r1 = hook.onPreComplete(eventWithUserText(taskA));
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(r1.injectedMessage().text()).contains("TestA.java");
 
-        // Since scanned=true, subsequent calls return CONTINUE
-        // The hook only fires once per session — it injects the first missing file and stops.
-        // MAX_INJECTIONS is enforced within the single scan pass.
-        // After first injection the hook returns immediately (one injection per call).
+        // Second call (different file) injects TestB
+        String taskB = "Create src/test/java/io/TestB.java";
+        HookResult<PreCompleteEvent> r2 = hook.onPreComplete(eventWithUserText(taskB));
+        assertThat(r2.decision()).isEqualTo(HookResult.Decision.INJECT);
+
+        // Third call injects TestC
+        String taskC = "Create src/test/java/io/TestC.java";
+        HookResult<PreCompleteEvent> r3 = hook.onPreComplete(eventWithUserText(taskC));
+        assertThat(r3.decision()).isEqualTo(HookResult.Decision.INJECT);
+
+        // Fourth call: injection count == MAX_INJECTIONS (3), so CONTINUE
+        String taskD = "Create src/test/java/io/TestD.java";
+        HookResult<PreCompleteEvent> r4 = hook.onPreComplete(eventWithUserText(taskD));
+        assertThat(r4.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
 
     // --- 6. REPL mode: no trigger ---
@@ -142,33 +145,38 @@ class UnfulfilledInstructionHookTest {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString(), true);
 
         String task = "Create src/test/java/io/RateLimiterTest.java with tests.";
-        PreReasoningEvent event = eventWithUserText(task);
+        PreCompleteEvent event = eventWithUserText(task);
 
-        HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
+        HookResult<PreCompleteEvent> result = hook.onPreComplete(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.CONTINUE);
         assertThat(result.injectedMessage()).isNull();
     }
 
-    // --- 7. Multiple missing files: each gets injected once (within single scan) ---
+    // --- 7. Multiple missing files: injects first missing, then second on next call ---
 
     @Test
-    void multipleMissingFiles_injectsFirst(@TempDir Path tempDir) {
+    void multipleMissingFiles_injectsFirstThenSecond(@TempDir Path tempDir) {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString());
 
-        String task = """
+        String task =
+                """
                 Create src/test/java/io/RateLimiterTest.java
                 Create src/test/java/io/ValidatorTest.java
                 """;
-        PreReasoningEvent event = eventWithUserText(task);
 
-        // First call: injects the first missing file
-        HookResult<PreReasoningEvent> r1 = hook.onPreReasoning(event);
+        // First call: injects the first missing file (RateLimiterTest.java)
+        HookResult<PreCompleteEvent> r1 = hook.onPreComplete(eventWithUserText(task));
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(r1.injectedMessage().text()).contains("RateLimiterTest.java");
 
-        // Second call: already scanned, continues
-        HookResult<PreReasoningEvent> r2 = hook.onPreReasoning(event);
-        assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+        // Second call: RateLimiterTest.java already in injectedFiles, injects ValidatorTest.java
+        HookResult<PreCompleteEvent> r2 = hook.onPreComplete(eventWithUserText(task));
+        assertThat(r2.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(r2.injectedMessage().text()).contains("ValidatorTest.java");
+
+        // Third call: both files in injectedFiles → CONTINUE
+        HookResult<PreCompleteEvent> r3 = hook.onPreComplete(eventWithUserText(task));
+        assertThat(r3.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
 
     // --- 8. Null workingDir: CONTINUE ---
@@ -178,9 +186,9 @@ class UnfulfilledInstructionHookTest {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(null);
 
         String task = "Create src/test/java/io/RateLimiterTest.java";
-        PreReasoningEvent event = eventWithUserText(task);
+        PreCompleteEvent event = eventWithUserText(task);
 
-        HookResult<PreReasoningEvent> result = hook.onPreReasoning(event);
+        HookResult<PreCompleteEvent> result = hook.onPreComplete(event);
         assertThat(result.decision()).isEqualTo(HookResult.Decision.CONTINUE);
         assertThat(result.injectedMessage()).isNull();
     }
@@ -196,7 +204,8 @@ class UnfulfilledInstructionHookTest {
 
     @Test
     void extractCreatePaths_matchesMultiplePaths() {
-        String text = """
+        String text =
+                """
                 Please do the following:
                 Create src/test/java/io/RateLimiterTest.java
                 And also Create src/test/java/io/ValidatorTest.java
@@ -204,9 +213,10 @@ class UnfulfilledInstructionHookTest {
         List<Msg> messages = List.of(Msg.of(MsgRole.USER, text));
         List<String> paths = UnfulfilledInstructionHook.extractCreatePaths(messages);
         assertThat(paths).hasSize(2);
-        assertThat(paths).containsExactly(
-                "src/test/java/io/RateLimiterTest.java",
-                "src/test/java/io/ValidatorTest.java");
+        assertThat(paths)
+                .containsExactly(
+                        "src/test/java/io/RateLimiterTest.java",
+                        "src/test/java/io/ValidatorTest.java");
     }
 
     @Test
@@ -218,26 +228,25 @@ class UnfulfilledInstructionHookTest {
         assertThat(paths).isEmpty();
     }
 
-    // --- 10. File created after first scan: second scan still skipped (scanned=true) ---
+    // --- 10. File created between calls: second scan finds it exists ---
 
     @Test
-    void scannedOnce_doesNotRescan(@TempDir Path tempDir) throws IOException {
+    void fileCreatedBetweenCalls_secondCallContinues(@TempDir Path tempDir) throws IOException {
         UnfulfilledInstructionHook hook = new UnfulfilledInstructionHook(tempDir.toString());
 
         String task = "Create src/test/java/io/RateLimiterTest.java";
-        PreReasoningEvent event = eventWithUserText(task);
 
-        // First call: file missing, injects
-        HookResult<PreReasoningEvent> r1 = hook.onPreReasoning(event);
+        // First call: file missing → INJECT, adds to injectedFiles
+        HookResult<PreCompleteEvent> r1 = hook.onPreComplete(eventWithUserText(task));
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.INJECT);
 
-        // Now create the file
+        // File gets created by the agent
         Path testFile = tempDir.resolve("src/test/java/io/RateLimiterTest.java");
         Files.createDirectories(testFile.getParent());
         Files.writeString(testFile, "// test");
 
-        // Second call: still CONTINUE because scanned=true
-        HookResult<PreReasoningEvent> r2 = hook.onPreReasoning(event);
+        // Second call: file now exists, already in injectedFiles → CONTINUE
+        HookResult<PreCompleteEvent> r2 = hook.onPreComplete(eventWithUserText(task));
         assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
 }
