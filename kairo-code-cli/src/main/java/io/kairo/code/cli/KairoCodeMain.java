@@ -11,6 +11,7 @@ import io.kairo.code.core.CheckpointLoader;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.mcp.McpConfig;
+import io.kairo.code.core.hook.PlanModeHook;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kairo.core.model.anthropic.AnthropicProvider;
 import io.kairo.core.model.openai.OpenAIProvider;
@@ -109,6 +110,9 @@ public class KairoCodeMain implements Callable<Integer> {
 
     @Option(names = "--resume", description = "Resume from last checkpoint in working directory")
     private boolean resume;
+
+    @Option(names = "--plan", description = "Show execution plan and wait for confirmation before acting")
+    private boolean planMode;
 
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -238,7 +242,7 @@ public class KairoCodeMain implements Callable<Integer> {
 
             if (resolvedTask != null && !resolvedTask.isBlank()) {
                 final String taskToRun = resolvedTask;
-                return retryPolicy.execute(() -> runOneShot(config, taskToRun, modelProvider));
+                return retryPolicy.execute(() -> runOneShot(config, taskToRun, modelProvider, planMode));
             } else {
                 return runRepl(config, !noNotifications);
             }
@@ -269,8 +273,19 @@ public class KairoCodeMain implements Callable<Integer> {
         return new OpenAIProvider(apiKey, baseUrl);
     }
 
-    private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider) {
-        List<Object> hooks = noHooks ? List.of() : List.of(new ProgressPrinter());
+    private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider,
+            boolean planMode) {
+        PlanModeHook planHook = planMode ? new PlanModeHook(true) : null;
+        List<Object> baseHooks = noHooks ? List.of() : List.of(new ProgressPrinter());
+        List<Object> hooks;
+        if (planHook != null) {
+            List<Object> merged = new java.util.ArrayList<>();
+            merged.add(planHook);
+            merged.addAll(baseHooks);
+            hooks = List.copyOf(merged);
+        } else {
+            hooks = baseHooks;
+        }
         String taskWithDiscipline = ONE_SHOT_DISCIPLINE_PREFIX + resolvedTask;
         Msg userMsg = Msg.of(MsgRole.USER, taskWithDiscipline);
 
@@ -307,6 +322,12 @@ public class KairoCodeMain implements Callable<Integer> {
         }
         Msg response = mono.block();
         long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
+
+        // Handle plan rejection: exit code 3.
+        if (planHook != null && planHook.wasRejected()) {
+            System.err.println("[kairo-code] Plan rejected by user. No changes made.");
+            return 3;
+        }
 
         if (response != null) {
             if (showUsage) {
