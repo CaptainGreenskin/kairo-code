@@ -96,10 +96,10 @@ class NoWriteDetectedHookTest {
         hook.onPostReasoning(eventWithToolCalls(bash("ls")));
         hook.onPostReasoning(eventWithToolCalls(bash("ls")));
         HookResult<PostReasoningEvent> r6 = hook.onPostReasoning(eventWithToolCalls(bash("ls")));
-        assertThat(r6.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+        assertThat(r6.decision()).isEqualTo(HookResult.Decision.INJECT);
 
         HookResult<PostReasoningEvent> r7 = hook.onPostReasoning(eventWithToolCalls(bash("ls")));
-        assertThat(r7.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(r7.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
 
     @Test
