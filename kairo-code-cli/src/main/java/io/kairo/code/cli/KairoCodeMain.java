@@ -92,6 +92,15 @@ public class KairoCodeMain implements Callable<Integer> {
     @Option(names = "--no-notifications", description = "Disable desktop notifications on task completion")
     private boolean noNotifications;
 
+    @Option(names = "--tool-budget",
+            description = "Max tool calls before forced wrap-up (default: 100, 0 = disabled). "
+                    + "Overrides KAIRO_CODE_TOOL_BUDGET_FORCE env var.")
+    private int toolBudget = 0;
+
+    @Option(names = "--no-hooks",
+            description = "Disable all auto-registered hooks (for debugging / testing)")
+    private boolean noHooks = false;
+
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen");
@@ -194,7 +203,7 @@ public class KairoCodeMain implements Callable<Integer> {
 
             CodeAgentConfig config = new CodeAgentConfig(
                     resolvedApiKey, resolvedBaseUrl, resolvedModel,
-                    maxIterations, resolvedWorkingDir, mcpConfig);
+                    maxIterations, resolvedWorkingDir, mcpConfig, toolBudget, 0);
             ModelProvider modelProvider = buildModelProvider(
                     resolvedProvider, resolvedApiKey, resolvedBaseUrl, resolvedChatPath);
 
@@ -252,17 +261,20 @@ public class KairoCodeMain implements Callable<Integer> {
     }
 
     private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider) {
+        List<Object> hooks = noHooks ? List.of() : List.of(new ProgressPrinter());
         Agent agent = verbose
-                ? CodeAgentFactory.create(config, modelProvider, null, List.of(new ProgressPrinter()))
+                ? CodeAgentFactory.create(config, modelProvider, null, hooks)
                 : CodeAgentFactory.create(config, modelProvider);
 
         String taskWithDiscipline = ONE_SHOT_DISCIPLINE_PREFIX + resolvedTask;
         Msg userMsg = Msg.of(MsgRole.USER, taskWithDiscipline);
+        long startTime = System.nanoTime();
         var mono = agent.call(userMsg);
         if (timeoutSeconds > 0) {
             mono = mono.timeout(Duration.ofSeconds(timeoutSeconds));
         }
         Msg response = mono.block();
+        long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
 
         if (response != null) {
             if (showUsage) {
@@ -288,6 +300,12 @@ public class KairoCodeMain implements Callable<Integer> {
                     System.err.println("[USAGE] token stats not available for this agent");
                 }
             }
+
+            // Verbose completion summary — reads from KAIRO_SESSION_RESULT.json if available.
+            if (verbose) {
+                printVerboseSummary(config.workingDir(), elapsedMs);
+            }
+
             try {
                 if (outputFile != null) {
                     Files.writeString(outputFile, response.text(), StandardCharsets.UTF_8);
@@ -302,6 +320,69 @@ public class KairoCodeMain implements Callable<Integer> {
         } else {
             System.err.println("Error: Agent returned no response.");
             return 1;
+        }
+    }
+
+    /**
+     * Print a compact completion summary to stderr.
+     * Reads data from KAIRO_SESSION_RESULT.json written by SessionResultWriterHook.
+     */
+    private void printVerboseSummary(String workingDir, long elapsedMs) {
+        String finalState = "COMPLETED";
+        int iterations = 0;
+        int tools = 0;
+
+        if (workingDir != null && !workingDir.isBlank()) {
+            Path resultFile = Path.of(workingDir).resolve("KAIRO_SESSION_RESULT.json");
+            try {
+                if (Files.exists(resultFile)) {
+                    String json = Files.readString(resultFile, StandardCharsets.UTF_8);
+                    // Minimal JSON parsing — no extra dependency needed.
+                    finalState = extractJsonStringField(json, "finalState");
+                    iterations = extractJsonIntField(json, "iterations");
+                }
+            } catch (Exception e) {
+                // Ignore — best-effort summary.
+            }
+        }
+
+        long elapsedSec = elapsedMs / 1000;
+        System.err.printf("[kairo-code] Task completed in %ds | iterations=%d | tools=%d | final-state=%s%n",
+                elapsedSec, iterations, tools, finalState);
+    }
+
+    private static String extractJsonStringField(String json, String field) {
+        String key = "\"" + field + "\"";
+        int idx = json.indexOf(key);
+        if (idx < 0) return "UNKNOWN";
+        int colon = json.indexOf(':', idx + key.length());
+        if (colon < 0) return "UNKNOWN";
+        int start = json.indexOf('"', colon + 1);
+        if (start < 0) return "UNKNOWN";
+        int end = json.indexOf('"', start + 1);
+        if (end < 0) return "UNKNOWN";
+        return json.substring(start + 1, end);
+    }
+
+    private static int extractJsonIntField(String json, String field) {
+        String key = "\"" + field + "\"";
+        int idx = json.indexOf(key);
+        if (idx < 0) return 0;
+        int colon = json.indexOf(':', idx + key.length());
+        if (colon < 0) return 0;
+        int start = colon + 1;
+        while (start < json.length() && Character.isWhitespace(json.charAt(start))) {
+            start++;
+        }
+        int end = start;
+        while (end < json.length() && (Character.isDigit(json.charAt(end)) || json.charAt(end) == '-')) {
+            end++;
+        }
+        if (end == start) return 0;
+        try {
+            return Integer.parseInt(json.substring(start, end));
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 

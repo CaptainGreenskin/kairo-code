@@ -23,9 +23,11 @@ import io.kairo.code.core.hook.NoWriteDetectedHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
+import io.kairo.code.core.hook.RepetitiveToolHook;
 import io.kairo.code.core.hook.SessionResultWriterHook;
 import io.kairo.code.core.hook.StaleReadDetectorHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
+import io.kairo.code.core.hook.ToolBudgetHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
 import io.kairo.core.model.openai.OpenAIProvider;
@@ -221,6 +223,25 @@ public final class CodeAgentFactory {
             if (metrics != null) {
                 builder.hook(new MaxTurnsGuardHook(metrics));
             }
+
+            // ToolBudgetHook: guards against excessive total tool calls.
+            // warn = 60% of force (floor); when force=0 use env defaults.
+            int forceThreshold = config.toolBudgetForce();
+            if (forceThreshold > 0) {
+                int warnThreshold = (int) Math.floor(forceThreshold * 0.6);
+                builder.hook(new ToolBudgetHook(false, warnThreshold, forceThreshold));
+            } else {
+                builder.hook(new ToolBudgetHook(false));
+            }
+
+            // RepetitiveToolHook: detects same-tool called in consecutive turns.
+            int repThreshold = config.repetitiveToolThreshold();
+            if (repThreshold > 0) {
+                builder.hook(new RepetitiveToolHook(false, repThreshold));
+            } else {
+                builder.hook(new RepetitiveToolHook(false));
+            }
+
             builder.hook(new PlanWithoutActionHook());
             builder.hook(new NoWriteDetectedHook());
             builder.hook(new PostEditHintHook());

@@ -22,7 +22,7 @@ import reactor.core.publisher.Mono;
 class SystemPromptResolutionTest {
 
     private static CodeAgentConfig configWithModel(String model) {
-        return new CodeAgentConfig("dummy-key", "https://example.invalid", model, 5, null, null);
+        return new CodeAgentConfig("dummy-key", "https://example.invalid", model, 5, null, null, 0, 0);
     }
 
     /** Stand-in {@link ModelProvider} that does not pattern-match Anthropic or OpenAI. */

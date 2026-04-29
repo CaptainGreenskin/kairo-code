@@ -11,6 +11,8 @@ import io.kairo.code.core.mcp.McpConfig;
  * @param maxIterations maximum ReAct loop iterations (default: 50)
  * @param workingDir   the working directory for file/exec tools (nullable)
  * @param mcpConfig    MCP server config from ~/.kairo-code/mcp.json (nullable)
+ * @param toolBudgetForce max tool calls before hard stop (0 = use default from ToolBudgetHook)
+ * @param repetitiveToolThreshold consecutive turns threshold for RepetitiveToolHook (0 = use default)
  */
 public record CodeAgentConfig(
         String apiKey,
@@ -18,7 +20,9 @@ public record CodeAgentConfig(
         String modelName,
         int maxIterations,
         String workingDir,
-        McpConfig mcpConfig
+        McpConfig mcpConfig,
+        int toolBudgetForce,
+        int repetitiveToolThreshold
 ) {
     public CodeAgentConfig {
         if (apiKey == null || apiKey.isBlank()) {
@@ -32,6 +36,12 @@ public record CodeAgentConfig(
         }
         if (maxIterations <= 0) {
             maxIterations = 50;
+        }
+        if (toolBudgetForce < 0) {
+            toolBudgetForce = 0;
+        }
+        if (repetitiveToolThreshold < 0) {
+            repetitiveToolThreshold = 0;
         }
     }
 }
