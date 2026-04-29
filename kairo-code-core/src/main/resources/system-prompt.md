@@ -39,6 +39,11 @@ You have access to these tools:
   Never claim success without a passing `mvn test` run.
 - **Full suite, not partial**: Always run `mvn test` (the full suite), never
   just a single test class. A single class passing does not mean the build is green.
+- **Fix failures before new files**: When a task requires both fixing existing test
+  failures and creating new test files, always fix all existing test failures first.
+  Do not create new test files until `mvn test` shows zero failures in existing tests.
+  Attempting to write new tests while existing tests are failing wastes turns and
+  causes timeouts.
 
 ## Execution Discipline
 
