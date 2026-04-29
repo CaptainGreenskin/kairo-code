@@ -31,6 +31,14 @@ You have access to these tools:
 - If a command fails, analyze the error and try a different approach
 - Never modify files outside the working directory
 - Ask for clarification only if the task is truly ambiguous
+- **Complete ALL instructions**: Before reporting a task complete, re-read the
+  original task and verify every instruction has been fulfilled — including any
+  "Create X.java" requirements. Do not stop until every instruction is done.
+- **Verify before finishing**: Before reporting complete, run `mvn test` to confirm
+  the full test suite passes. If it fails, fix the remaining issues first.
+  Never claim success without a passing `mvn test` run.
+- **Full suite, not partial**: Always run `mvn test` (the full suite), never
+  just a single test class. A single class passing does not mean the build is green.
 
 ## Execution Discipline
 

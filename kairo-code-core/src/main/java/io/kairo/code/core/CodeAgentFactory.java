@@ -17,6 +17,7 @@ import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
 import io.kairo.code.core.hook.ContextCompactionHook;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
+import io.kairo.code.core.hook.FullTestSuiteHook;
 import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.MissingTestHintHook;
 import io.kairo.code.core.hook.NoWriteDetectedHook;
@@ -28,6 +29,7 @@ import io.kairo.code.core.hook.SessionResultWriterHook;
 import io.kairo.code.core.hook.StaleReadDetectorHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
 import io.kairo.code.core.hook.ToolBudgetHook;
+import io.kairo.code.core.hook.UnfulfilledInstructionHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
 import io.kairo.core.model.openai.OpenAIProvider;
@@ -249,9 +251,19 @@ public final class CodeAgentFactory {
             builder.hook(new MissingTestHintHook());
             builder.hook(new AutoCommitOnSuccessHook());
 
+            // Auto-register FullTestSuiteHook: detects partial test runs (single test class)
+            // and reminds the agent to run the full mvn test suite. Non-REPL only.
+            builder.hook(new FullTestSuiteHook());
+
+            // Auto-register UnfulfilledInstructionHook: scans task for "Create ...Test.java"
+            // requirements and injects a reminder if the files don't exist yet. Non-REPL only.
+            String wd = config.workingDir();
+            if (wd != null && !wd.isBlank()) {
+                builder.hook(new UnfulfilledInstructionHook(wd));
+            }
+
             // Auto-register SessionResultWriterHook: writes KAIRO_SESSION_RESULT.json on session
             // end so the dispatcher can machine-read the outcome.
-            String wd = config.workingDir();
             if (wd != null && !wd.isBlank()) {
                 builder.hook(new SessionResultWriterHook(Path.of(wd)));
             }
