@@ -467,11 +467,16 @@ public class KairoCodeMain implements Callable<Integer> {
     private int runRepl(CodeAgentConfig config, boolean notificationsEnabled) {
         // Create event printer for hook-based output during agent calls
         PrintWriter sysWriter = new PrintWriter(System.out, true);
-        AgentEventPrinter eventPrinter = new AgentEventPrinter(sysWriter, "", true);
+        boolean supportsColor = AgentEventPrinter.supportsColor();
+        ModelCallSpinner spinner = new ModelCallSpinner(sysWriter, supportsColor);
+        boolean verboseThinking = "true".equalsIgnoreCase(System.getenv("KAIRO_SHOW_THINKING"));
+        AgentEventPrinter eventPrinter = new AgentEventPrinter(
+                sysWriter, "", true, spinner, verboseThinking);
 
         // ReplLoop owns the ConsoleApprovalHandler lifecycle —
         // it creates the handler wired to JLine's terminal I/O.
         new ReplLoop(config, List.of(eventPrinter), null, notificationsEnabled).run();
+        spinner.shutdown();
         return 0;
     }
 
