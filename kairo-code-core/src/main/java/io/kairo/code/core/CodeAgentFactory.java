@@ -15,6 +15,7 @@ import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
+import io.kairo.code.core.hook.CompileErrorFeedbackHook;
 import io.kairo.code.core.hook.ContextCompactionHook;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
 import io.kairo.code.core.hook.FullTestSuiteHook;
@@ -217,6 +218,12 @@ public final class CodeAgentFactory {
         // Auto-register TestFailureFeedbackHook: intercepts bash mvn test failures and injects
         // structured error context so the agent focuses on the right fixes.
         builder.hook(new TestFailureFeedbackHook());
+
+        // Auto-register CompileErrorFeedbackHook: detects Maven compilation errors in bash
+        // tool results and injects a reminder to fix them before proceeding. Non-REPL only.
+        if (!options.isRepl()) {
+            builder.hook(new CompileErrorFeedbackHook());
+        }
 
         // Auto-register PlanWithoutActionHook: detects plan-only responses (todo_write without
         // implementation tools) and injects a corrective message. Disabled in REPL mode.
