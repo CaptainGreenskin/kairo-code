@@ -34,6 +34,7 @@ import io.kairo.code.core.hook.SessionResultWriterHook;
 import io.kairo.code.core.hook.StaleReadDetectorHook;
 import io.kairo.code.core.hook.CheckpointWriterHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
+import io.kairo.code.core.hook.TextOnlyStallHook;
 import io.kairo.code.core.hook.ToolBudgetHook;
 import io.kairo.code.core.hook.UnfulfilledInstructionHook;
 import io.kairo.core.agent.AgentBuilder;
@@ -259,6 +260,7 @@ public final class CodeAgentFactory {
 
             builder.hook(new PlanWithoutActionHook());
             builder.hook(new NoWriteDetectedHook());
+            builder.hook(new TextOnlyStallHook());
             builder.hook(new PostEditHintHook());
             builder.hook(new PostBatchEditVerifyHook());
             builder.hook(new MissingTestHintHook());

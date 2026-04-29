@@ -43,12 +43,12 @@ class NoWriteDetectedHookTest {
     }
 
     private static Content.ToolUseContent readFile(String path) {
-        return new Content.ToolUseContent("tool-1", "read_file", Map.of("path", path));
+        return new Content.ToolUseContent("tool-1", "read", Map.of("path", path));
     }
 
     private static Content.ToolUseContent writeFile(String path) {
         return new Content.ToolUseContent(
-                "tool-1", "write_file", Map.of("path", path, "content", "hello"));
+                "tool-1", "write", Map.of("path", path, "content", "hello"));
     }
 
     @Test
@@ -66,7 +66,7 @@ class NoWriteDetectedHookTest {
         HookResult<PostReasoningEvent> r3 = hook.onPostReasoning(eventWithToolCalls(bash("echo hello > Foo.java")));
         assertThat(r3.decision()).isEqualTo(HookResult.Decision.INJECT);
         assertThat(r3.injectedMessage()).isNotNull();
-        assertThat(r3.injectedMessage().text()).contains("MUST call write_file or edit_file");
+        assertThat(r3.injectedMessage().text()).contains("MUST call write or edit");
     }
 
     @Test
@@ -125,11 +125,11 @@ class NoWriteDetectedHookTest {
     }
 
     @Test
-    void editFileCall_resetsCounter() {
+    void editCall_resetsCounter() {
         Content.ToolUseContent editFile =
                 new Content.ToolUseContent(
                         "tool-1",
-                        "edit_file",
+                        "edit",
                         Map.of("path", "Foo.java", "originalText", "old", "newText", "new"));
 
         NoWriteDetectedHook hook = new NoWriteDetectedHook(2, false);
@@ -147,8 +147,9 @@ class NoWriteDetectedHookTest {
     }
 
     @Test
-    void emptyToolCalls_doesNotTrigger() {
-        NoWriteDetectedHook hook = new NoWriteDetectedHook(1, false);
+    void emptyToolCalls_doesNotImmediatelyTrigger() {
+        // threshold=2: first text-only turn increments counter but doesn't inject yet
+        NoWriteDetectedHook hook = new NoWriteDetectedHook(2, false);
         ModelResponse response =
                 new ModelResponse(
                         "resp-1",
@@ -160,6 +161,50 @@ class NoWriteDetectedHookTest {
 
         HookResult<PostReasoningEvent> r = hook.onPostReasoning(event);
         assertThat(r.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+    }
+
+    @Test
+    void textOnlyTurns_countTowardThreshold() {
+        NoWriteDetectedHook hook = new NoWriteDetectedHook(2, false);
+
+        ModelResponse textResponse =
+                new ModelResponse(
+                        "resp-1",
+                        List.of(new Content.TextContent("Let me think about this.")),
+                        null,
+                        ModelResponse.StopReason.END_TURN,
+                        "gpt-4o");
+        PostReasoningEvent textEvent = new PostReasoningEvent(textResponse, false);
+
+        // First text-only turn: no injection yet
+        HookResult<PostReasoningEvent> r1 = hook.onPostReasoning(textEvent);
+        assertThat(r1.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+
+        // Second text-only turn: threshold reached, inject
+        HookResult<PostReasoningEvent> r2 = hook.onPostReasoning(textEvent);
+        assertThat(r2.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(r2.injectedMessage()).isNotNull();
+    }
+
+    @Test
+    void mixedTextAndToolCalls_countWhenNoWrite() {
+        NoWriteDetectedHook hook = new NoWriteDetectedHook(3, false);
+
+        // Turn 1: bash only
+        hook.onPostReasoning(eventWithToolCalls(bash("ls")));
+
+        // Turn 2: text-only
+        ModelResponse textResponse =
+                new ModelResponse(
+                        "resp-2",
+                        List.of(new Content.TextContent("Thinking...")),
+                        null,
+                        ModelResponse.StopReason.END_TURN,
+                        "gpt-4o");
+        hook.onPostReasoning(new PostReasoningEvent(textResponse, false));
+
+        // Turn 3: read only → threshold reached
+        hook.onPostReasoning(eventWithToolCalls(readFile("Foo.java")));
     }
 
     @Test
