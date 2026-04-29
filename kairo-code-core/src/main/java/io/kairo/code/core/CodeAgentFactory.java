@@ -15,6 +15,7 @@ import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
+import io.kairo.code.core.hook.ContextCompactionHook;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
 import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.MissingTestHintHook;
@@ -194,6 +195,12 @@ public final class CodeAgentFactory {
         // Auto-register ContextWindowGuardHook: warns on large context to prevent GLM-5.1
         // overflow. Active in both REPL and one-shot mode.
         builder.hook(new ContextWindowGuardHook());
+
+        // Auto-register ContextCompactionHook: when context approaches the limit, injects a
+        // compaction request so the model summarizes work and continues. Non-REPL only.
+        if (!options.isRepl()) {
+            builder.hook(new ContextCompactionHook());
+        }
 
         // Auto-register StaleReadDetectorHook: warns when the agent re-reads the same file
         // multiple times, to improve token efficiency. Active in both REPL and one-shot mode.
