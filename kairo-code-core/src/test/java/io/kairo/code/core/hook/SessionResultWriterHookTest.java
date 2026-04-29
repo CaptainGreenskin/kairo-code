@@ -107,4 +107,52 @@ class SessionResultWriterHookTest {
 
         assertThat(result.decision()).isEqualTo(HookResult.Decision.CONTINUE);
     }
+
+    @Test
+    void metricsNull_outputFormatUnchanged(@TempDir Path tempDir) throws Exception {
+        SessionResultWriterHook hook = new SessionResultWriterHook(tempDir, null);
+
+        hook.onSessionEnd(completedEvent());
+
+        String content = Files.readString(tempDir.resolve("KAIRO_SESSION_RESULT.json"));
+        assertThat(content).contains("\"finalState\": \"COMPLETED\"");
+        assertThat(content).contains("\"iterations\": 12");
+        assertThat(content).contains("\"tokensUsed\": 45200");
+        assertThat(content).contains("\"durationSeconds\": 187");
+        assertThat(content).contains("\"error\": null");
+        assertThat(content).doesNotContain("toolCallCounts");
+        assertThat(content).doesNotContain("redundantReads");
+        assertThat(content).doesNotContain("iterationsWithoutTools");
+        assertThat(content).doesNotContain("hookInterventions");
+    }
+
+    @Test
+    void metricsNonNull_containsEnrichedFields(@TempDir Path tempDir) throws Exception {
+        SessionMetricsCollector metrics = new SessionMetricsCollector();
+        metrics.recordToolCall("bash_execute");
+        metrics.recordToolCall("bash_execute");
+        metrics.recordToolCall("read_file");
+        metrics.recordFileRead("src/main/java/Foo.java");
+        metrics.recordFileRead("src/main/java/Foo.java");
+        metrics.recordFileRead("src/main/java/Foo.java");
+        metrics.recordIterationWithoutTools();
+        metrics.recordHookIntervention("CompileErrorFeedbackHook");
+
+        SessionResultWriterHook hook = new SessionResultWriterHook(tempDir, metrics);
+        hook.onSessionEnd(completedEvent());
+
+        String content = Files.readString(tempDir.resolve("KAIRO_SESSION_RESULT.json"));
+
+        assertThat(content).contains("\"finalState\": \"COMPLETED\"");
+        assertThat(content).contains("\"iterations\": 12");
+        assertThat(content).contains("\"toolCallCounts\": {");
+        assertThat(content).contains("\"bash_execute\": 2");
+        assertThat(content).contains("\"read_file\": 1");
+        assertThat(content).contains("\"redundantReads\": [");
+        assertThat(content).contains("\"file\": \"src/main/java/Foo.java\"");
+        assertThat(content).contains("\"count\": 3");
+        assertThat(content).contains("\"iterationsWithoutTools\": 1");
+        assertThat(content).contains("\"hookInterventions\": {");
+        assertThat(content).contains("\"CompileErrorFeedbackHook\": 1");
+    }
 }
