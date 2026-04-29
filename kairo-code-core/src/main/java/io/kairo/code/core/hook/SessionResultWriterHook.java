@@ -37,12 +37,22 @@ public final class SessionResultWriterHook {
     private static final Logger log = LoggerFactory.getLogger(SessionResultWriterHook.class);
 
     private final Path workingDir;
+    private final SessionMetricsCollector metrics;
 
     /**
      * @param workingDir directory to write the result file into; null means no-op (safe for REPL)
      */
     public SessionResultWriterHook(Path workingDir) {
+        this(workingDir, null);
+    }
+
+    /**
+     * @param workingDir directory to write the result file into; null means no-op (safe for REPL)
+     * @param metrics optional metrics collector to enrich the result with efficiency data
+     */
+    public SessionResultWriterHook(Path workingDir, SessionMetricsCollector metrics) {
         this.workingDir = workingDir;
+        this.metrics = metrics;
     }
 
     @HookHandler(HookPhase.SESSION_END)
@@ -52,7 +62,7 @@ public final class SessionResultWriterHook {
         }
 
         try {
-            String json = toJson(event);
+            String json = toJson(event, metrics);
             Files.writeString(workingDir.resolve("KAIRO_SESSION_RESULT.json"), json);
         } catch (Exception e) {
             log.debug("Failed to write session result file: {}", e.getMessage());
@@ -62,18 +72,24 @@ public final class SessionResultWriterHook {
     }
 
     private static String toJson(SessionEndEvent event) {
+        return toJson(event, null);
+    }
+
+    private static String toJson(SessionEndEvent event, SessionMetricsCollector metrics) {
         String escapedError =
                 event.error() != null
                         ? "\"" + event.error().replace("\"", "\\\"").replace("\n", "\\n") + "\""
                         : "null";
 
-        return "{\n"
+        String base = "{\n"
                 + "  \"finalState\": \"" + event.finalState() + "\",\n"
                 + "  \"iterations\": " + event.iterations() + ",\n"
                 + "  \"tokensUsed\": " + event.tokensUsed() + ",\n"
                 + "  \"durationSeconds\": " + event.duration().toSeconds() + ",\n"
                 + "  \"error\": " + escapedError + ",\n"
-                + "  \"timestamp\": \"" + Instant.now() + "\"\n"
-                + "}";
+                + "  \"timestamp\": \"" + Instant.now() + "\"";
+
+        String metricsFragment = metrics != null ? metrics.toJsonFragment() : "";
+        return base + metricsFragment + "\n}";
     }
 }

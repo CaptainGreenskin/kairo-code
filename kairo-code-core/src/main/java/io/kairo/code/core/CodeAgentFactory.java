@@ -26,6 +26,8 @@ import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
 import io.kairo.code.core.hook.RepetitiveToolHook;
+import io.kairo.code.core.hook.SessionMetricsCollector;
+import io.kairo.code.core.hook.SessionMetricsHook;
 import io.kairo.code.core.hook.SessionResultWriterHook;
 import io.kairo.code.core.hook.StaleReadDetectorHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
@@ -269,10 +271,16 @@ public final class CodeAgentFactory {
                 builder.hook(new UnfulfilledInstructionHook(wd));
             }
 
+            // Auto-register SessionMetricsCollector + SessionMetricsHook: tracks tool call
+            // distribution, redundant file reads, idle iterations, and hook interventions.
+            // Non-REPL only.
+            SessionMetricsCollector metricsCollector = new SessionMetricsCollector();
+            builder.hook(new SessionMetricsHook(metricsCollector));
+
             // Auto-register SessionResultWriterHook: writes KAIRO_SESSION_RESULT.json on session
-            // end so the dispatcher can machine-read the outcome.
+            // end so the dispatcher can machine-read the outcome. Enriched with metrics.
             if (wd != null && !wd.isBlank()) {
-                builder.hook(new SessionResultWriterHook(Path.of(wd)));
+                builder.hook(new SessionResultWriterHook(Path.of(wd), metricsCollector));
             }
         }
 
