@@ -2,12 +2,16 @@ package io.kairo.code.cli;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentSnapshot;
+import io.kairo.api.agent.AgentState;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelProvider;
+import io.kairo.code.core.CheckpointData;
+import io.kairo.code.core.CheckpointLoader;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.mcp.McpConfig;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kairo.core.model.anthropic.AnthropicProvider;
 import io.kairo.core.model.openai.OpenAIProvider;
 import java.io.PrintWriter;
@@ -15,7 +19,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -100,6 +106,9 @@ public class KairoCodeMain implements Callable<Integer> {
     @Option(names = "--no-hooks",
             description = "Disable all auto-registered hooks (for debugging / testing)")
     private boolean noHooks = false;
+
+    @Option(names = "--resume", description = "Resume from last checkpoint in working directory")
+    private boolean resume;
 
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -262,12 +271,35 @@ public class KairoCodeMain implements Callable<Integer> {
 
     private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider) {
         List<Object> hooks = noHooks ? List.of() : List.of(new ProgressPrinter());
-        Agent agent = verbose
-                ? CodeAgentFactory.create(config, modelProvider, null, hooks)
-                : CodeAgentFactory.create(config, modelProvider);
-
         String taskWithDiscipline = ONE_SHOT_DISCIPLINE_PREFIX + resolvedTask;
         Msg userMsg = Msg.of(MsgRole.USER, taskWithDiscipline);
+
+        // Handle --resume: load checkpoint and inject messages via AgentSnapshot.
+        AgentSnapshot restoreSnapshot = null;
+        if (resume && config.workingDir() != null && !config.workingDir().isBlank()) {
+            restoreSnapshot = tryLoadCheckpoint(config.workingDir());
+        }
+
+        Agent agent;
+        if (restoreSnapshot != null) {
+            CodeAgentFactory.SessionOptions opts = CodeAgentFactory.SessionOptions.empty()
+                    .withModelProvider(modelProvider)
+                    .withRestoreFrom(restoreSnapshot)
+                    .withCheckpointInitialMessage(userMsg);
+            if (!noHooks) {
+                opts = opts.withHooks(hooks);
+            }
+            agent = CodeAgentFactory.createSession(config, opts).agent();
+        } else {
+            CodeAgentFactory.SessionOptions opts = CodeAgentFactory.SessionOptions.empty()
+                    .withModelProvider(modelProvider)
+                    .withCheckpointInitialMessage(userMsg);
+            if (!noHooks) {
+                opts = opts.withHooks(hooks);
+            }
+            agent = CodeAgentFactory.createSession(config, opts).agent();
+        }
+
         long startTime = System.nanoTime();
         var mono = agent.call(userMsg);
         if (timeoutSeconds > 0) {
@@ -320,6 +352,31 @@ public class KairoCodeMain implements Callable<Integer> {
         } else {
             System.err.println("Error: Agent returned no response.");
             return 1;
+        }
+    }
+
+    private static AgentSnapshot tryLoadCheckpoint(String workingDir) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            return CheckpointLoader.load(Path.of(workingDir), mapper)
+                    .map(cp -> {
+                        System.err.printf(
+                                "[kairo-code] Resuming from iteration %d (session %s)%n",
+                                cp.iteration(), cp.sessionId());
+                        return new AgentSnapshot(
+                                cp.sessionId(),
+                                "kairo-code-resume",
+                                AgentState.IDLE,
+                                cp.iteration(),
+                                0L,
+                                cp.messages(),
+                                Map.of(),
+                                Instant.now());
+                    })
+                    .orElse(null);
+        } catch (Exception e) {
+            // Best-effort: if checkpoint loading fails, start fresh.
+            return null;
         }
     }
 
