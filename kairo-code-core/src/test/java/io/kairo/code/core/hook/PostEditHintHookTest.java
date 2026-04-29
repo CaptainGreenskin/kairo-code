@@ -39,11 +39,11 @@ class PostEditHintHookTest {
     }
 
     private static Content.ToolUseContent writeFile(String path) {
-        return new Content.ToolUseContent("tool-1", "write_file", Map.of("path", path, "content", "code"));
+        return new Content.ToolUseContent("tool-1", "write", Map.of("path", path, "content", "code"));
     }
 
     private static Content.ToolUseContent editFile(String path) {
-        return new Content.ToolUseContent("tool-1", "edit_file", Map.of("path", path, "old_string", "old", "new_string", "new"));
+        return new Content.ToolUseContent("tool-1", "edit", Map.of("path", path, "old_string", "old", "new_string", "new"));
     }
 
     private static Content.ToolUseContent bash(String command) {

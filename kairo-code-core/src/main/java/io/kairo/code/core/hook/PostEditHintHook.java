@@ -26,7 +26,7 @@ import io.kairo.api.model.ModelResponse;
 import java.util.Set;
 
 /**
- * After the model calls {@code write_file} or {@code edit_file} on a {@code .java} file,
+ * After the model calls {@code write} or {@code edit} on a {@code .java} file,
  * injects a hint urging it to run {@code mvn test} to verify the changes compile and tests pass.
  *
  * <p>Only active in headless/one-shot mode (non-REPL). REPL mode is excluded to avoid
@@ -34,7 +34,7 @@ import java.util.Set;
  */
 public final class PostEditHintHook {
 
-    private static final Set<String> EDIT_TOOLS = Set.of("write_file", "edit_file");
+    private static final Set<String> EDIT_TOOLS = Set.of("write", "edit");
 
     private static final String INJECT_MESSAGE =
             "You just modified Java source files. "

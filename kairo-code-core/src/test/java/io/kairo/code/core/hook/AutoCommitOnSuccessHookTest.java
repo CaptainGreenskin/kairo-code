@@ -33,12 +33,12 @@ class AutoCommitOnSuccessHookTest {
 
     private static ToolResultEvent editEvent(String content) {
         ToolResult result = new ToolResult("id-2", content, false, Map.of());
-        return new ToolResultEvent("edit_file", result, Duration.ofMillis(10), true);
+        return new ToolResultEvent("edit", result, Duration.ofMillis(10), true);
     }
 
     private static ToolResultEvent writeEvent(String content) {
         ToolResult result = new ToolResult("id-3", content, false, Map.of());
-        return new ToolResultEvent("write_file", result, Duration.ofMillis(10), true);
+        return new ToolResultEvent("write", result, Duration.ofMillis(10), true);
     }
 
     private static ToolResultEvent nonBashEvent(String content) {
@@ -135,7 +135,7 @@ class AutoCommitOnSuccessHookTest {
     void nonBashTool_doesNotTriggerCommitPrompt_onlySetsHasEditedFlag() {
         AutoCommitOnSuccessHook hook = new AutoCommitOnSuccessHook();
 
-        // edit_file sets hasEdited but doesn't trigger commit
+        // edit sets hasEdited but doesn't trigger commit
         String editOutput = "Fixed src/main/java/io/kairo/code/core/Baz.java";
         HookResult<ToolResultEvent> r1 = hook.onToolResult(editEvent(editOutput));
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.CONTINUE);
@@ -153,10 +153,10 @@ class AutoCommitOnSuccessHookTest {
     }
 
     @Test
-    void editNonJavaFileAndBuildSuccess_doesNotInject() {
+    void editNonJavaFileAndBuildSuccess_injects() {
         AutoCommitOnSuccessHook hook = new AutoCommitOnSuccessHook();
 
-        // Edit a non-Java file (e.g., pom.xml)
+        // Edit a non-Java file (e.g., pom.xml) - still counts as an edit
         String editOutput = "Updated pom.xml";
         HookResult<ToolResultEvent> r1 = hook.onToolResult(editEvent(editOutput));
         assertThat(r1.decision()).isEqualTo(HookResult.Decision.CONTINUE);
@@ -164,8 +164,8 @@ class AutoCommitOnSuccessHookTest {
         String buildOutput = "[INFO] BUILD SUCCESS";
         HookResult<ToolResultEvent> r2 = hook.onToolResult(bashEvent(buildOutput));
 
-        // Should NOT inject because no .java file was edited
-        assertThat(r2.decision()).isEqualTo(HookResult.Decision.CONTINUE);
-        assertThat(r2.injectedMessage()).isNull();
+        // Should inject because any write/edit counts (conservative simplification)
+        assertThat(r2.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(r2.injectedMessage()).isNotNull();
     }
 }

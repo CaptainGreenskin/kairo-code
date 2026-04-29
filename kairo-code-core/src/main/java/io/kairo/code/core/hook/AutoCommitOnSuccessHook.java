@@ -23,15 +23,16 @@ import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 
 /**
- * In one-shot (non-REPL) mode, detects when the agent has edited Java files and then
- * received a {@code BUILD SUCCESS} from Maven, and injects a one-time prompt to commit.
+ * In one-shot (non-REPL) mode, detects when the agent has edited files using {@code write} or
+ * {@code edit} and then received a {@code BUILD SUCCESS} from Maven, and injects a one-time
+ * prompt to commit.
  *
  * <p>This prevents the agent from finishing a bug-fix task without saving the result
  * via a git commit, which hurts benchmark completion and Autonomous Verify scores.
  *
  * <p>Phase: {@link HookPhase#TOOL_RESULT} — two-stage detection:
  * <ol>
- *   <li>Any {@code write_file} or {@code edit_file} result → mark {@code hasEdited = true}</li>
+ *   <li>Any {@code write} or {@code edit} result → mark {@code hasEdited = true}</li>
  *   <li>Any {@code bash} result containing {@code BUILD SUCCESS} after edits → inject commit prompt</li>
  * </ol>
  */
@@ -51,8 +52,8 @@ public final class AutoCommitOnSuccessHook {
 
     @HookHandler(HookPhase.TOOL_RESULT)
     public HookResult<ToolResultEvent> onToolResult(ToolResultEvent event) {
-        // Stage 1: detect Java file edits
-        if (isEditTool(event.toolName()) && isJavaFile(event)) {
+        // Stage 1: detect file edits (write or edit tool)
+        if (isEditTool(event.toolName())) {
             hasEdited = true;
             return HookResult.proceed(event);
         }
@@ -71,21 +72,6 @@ public final class AutoCommitOnSuccessHook {
     }
 
     private static boolean isEditTool(String toolName) {
-        return "write_file".equals(toolName) || "edit_file".equals(toolName);
-    }
-
-    private static boolean isJavaFile(ToolResultEvent event) {
-        String content = event.result().content();
-        if (content == null) {
-            return false;
-        }
-        // Check if any line contains a .java path reference
-        for (String line : content.lines().toList()) {
-            if (line.endsWith(".java") || line.contains(".java:") || line.contains(".java ")) {
-                return true;
-            }
-        }
-        // Fallback: if content looks like a file write confirmation mentioning java
-        return content.contains(".java");
+        return "write".equals(toolName) || "edit".equals(toolName);
     }
 }
