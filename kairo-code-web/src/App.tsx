@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Search, FolderTree, Settings, Moon } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -51,6 +51,9 @@ function App() {
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
     const [showCommandPalette, setShowCommandPalette] = useState(false);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
+    const [atBottom, setAtBottom] = useState(true);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const prevMsgCount = useRef(messages.length);
 
     const handleEvent = useCallback(
         (event: AgentEvent) => {
@@ -326,6 +329,24 @@ function App() {
         if (sessionId) sendMessage(sessionId, newText);
     }, [sessionId, sendMessage, setMessages]);
 
+    // Track unread count when new messages arrive while not at bottom
+    useEffect(() => {
+        if (!atBottom && messages.length > prevMsgCount.current) {
+            setUnreadCount(prev => prev + (messages.length - prevMsgCount.current));
+        }
+        prevMsgCount.current = messages.length;
+    }, [messages.length, atBottom]);
+
+    // Reset unread count when at bottom
+    useEffect(() => {
+        if (atBottom) setUnreadCount(0);
+    }, [atBottom]);
+
+    const handleScrollToBottom = useCallback(() => {
+        virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, behavior: 'smooth' });
+        setUnreadCount(0);
+    }, [messages.length]);
+
     const handleNewSession = useCallback(() => {
         disconnect();
         setSessionId(null);
@@ -454,7 +475,7 @@ function App() {
                     onInsertFile={handleInsertFile}
                 />
 
-                <main className="flex-1 flex flex-col min-w-0">
+                <main className="relative flex-1 flex flex-col min-w-0">
                     {/* Chat area */}
                     {messages.length === 0 ? (
                         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
@@ -469,11 +490,13 @@ function App() {
                             </div>
                         </div>
                     ) : (
+                        <>
                         <Virtuoso
                             ref={virtuosoRef}
                             className="flex-1 px-4 py-4"
                             data={messages}
                             followOutput="smooth"
+                            atBottomStateChange={(bottom) => setAtBottom(bottom)}
                             itemContent={(_index, msg) => (
                                 <div className="max-w-3xl mx-auto">
                                     <ChatMessage
@@ -495,6 +518,29 @@ function App() {
                                     ) : null,
                             }}
                         />
+
+                        {/* Scroll to bottom button */}
+                        {!atBottom && (
+                            <div className="absolute bottom-20 right-6 z-10">
+                                <button
+                                    onClick={handleScrollToBottom}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                                        bg-[var(--bg-secondary)] border border-[var(--border)] rounded-full
+                                        shadow-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)]
+                                        hover:bg-[var(--bg-hover)] transition-all"
+                                    aria-label="Scroll to bottom"
+                                >
+                                    <ArrowDown size={12} />
+                                    <span>Jump to latest</span>
+                                    {unreadCount > 0 && (
+                                        <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-[var(--color-primary)] text-white">
+                                            {unreadCount > 9 ? '9+' : unreadCount}
+                                        </span>
+                                    )}
+                                </button>
+                            </div>
+                        )}
+                        </>
                     )}
 
                     {/* Connection status bar */}
