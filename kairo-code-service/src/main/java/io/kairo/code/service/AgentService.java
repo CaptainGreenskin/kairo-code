@@ -42,6 +42,32 @@ public class AgentService {
     private final Map<String, SessionEntry> sessions = new ConcurrentHashMap<>();
     private final Map<String, AtomicBoolean> runningState = new ConcurrentHashMap<>();
 
+    private volatile CodeAgentConfig defaultConfig;
+
+    /**
+     * Hot-update the default config for new sessions.
+     * Does not affect running sessions.
+     */
+    public void updateDefaultConfig(String apiKey, String model, String provider,
+                                     String baseUrl, String workingDir) {
+        String resolvedBaseUrl = resolveBaseUrl(provider, baseUrl);
+        this.defaultConfig = new CodeAgentConfig(
+                apiKey, resolvedBaseUrl, model, 50, workingDir, null, 0, 0
+        );
+        log.info("Updated default agent config (model={}, provider={})", model, provider);
+    }
+
+    private String resolveBaseUrl(String provider, String propsBaseUrl) {
+        if (provider == null || provider.isBlank()) {
+            return propsBaseUrl;
+        }
+        return switch (provider.toLowerCase()) {
+            case "openai" -> "https://api.openai.com";
+            case "anthropic" -> "https://api.anthropic.com";
+            default -> propsBaseUrl;
+        };
+    }
+
     /**
      * Create a new session. Returns the session ID.
      */

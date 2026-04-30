@@ -88,6 +88,11 @@ export interface ToolCall {
 }
 
 export interface ServerConfig {
+    provider: string;
+    model: string;
+    workingDir: string;
+    baseUrl?: string;
+    apiKeySet: boolean;
     defaultModel: string;
     availableModels: string[];
 }
