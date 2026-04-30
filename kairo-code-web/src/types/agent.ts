@@ -8,7 +8,8 @@ export type AgentEventType =
     | 'TOOL_RESULT'
     | 'AGENT_DONE'
     | 'AGENT_ERROR'
-    | 'AGENT_THINKING';
+    | 'AGENT_THINKING'
+    | 'SESSION_RESTORED';
 
 export interface AgentEvent {
     type: AgentEventType;
@@ -23,7 +24,8 @@ export type AgentEventPayload =
     | ToolResultPayload
     | AgentDonePayload
     | AgentErrorPayload
-    | AgentThinkingPayload;
+    | AgentThinkingPayload
+    | SessionRestoredPayload;
 
 export interface TextChunkPayload {
     text: string;
@@ -54,6 +56,16 @@ export interface AgentErrorPayload {
 
 export interface AgentThinkingPayload {
     isThinking: boolean;
+}
+
+/**
+ * Payload for SESSION_RESTORED event.
+ * messages: array of Message objects restored from the backend checkpoint.
+ * running: whether the session is currently executing an agent call.
+ */
+export interface SessionRestoredPayload {
+    messages: Message[];
+    running: boolean;
 }
 
 export interface Message {

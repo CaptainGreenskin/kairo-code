@@ -27,7 +27,8 @@ public record AgentEvent(
         TOOL_CALL,
         TOOL_RESULT,
         AGENT_DONE,
-        AGENT_ERROR
+        AGENT_ERROR,
+        SESSION_RESTORED
     }
 
     public static AgentEvent thinking(String sessionId) {
@@ -59,5 +60,15 @@ public record AgentEvent(
     public static AgentEvent error(String sessionId, String message, String type) {
         return new AgentEvent(EventType.AGENT_ERROR, sessionId, null, null, null,
                 false, null, null, null, null, message, type, System.currentTimeMillis());
+    }
+
+    /**
+     * Create a SESSION_RESTORED event. The {@code content} field holds a JSON object
+     * with {messages: [...], running: boolean}.
+     */
+    public static AgentEvent sessionRestored(String sessionId, String messagesJson, boolean running) {
+        String payload = "{\"messages\":" + messagesJson + ",\"running\":" + running + "}";
+        return new AgentEvent(EventType.SESSION_RESTORED, sessionId, payload, null, null,
+                false, null, null, null, null, null, null, System.currentTimeMillis());
     }
 }

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSessionStore } from '@store/sessionStore';
+import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
 import { Header } from '@components/Header';
 import { ChatMessage, ThinkingIndicator } from '@components/ChatMessage';
@@ -23,7 +24,7 @@ function App() {
         currentModel,
         setSessionId,
         addMessage,
-        appendChunk,
+        setMessages,
         addToolCall,
         updateToolCall,
         setThinking,
@@ -31,9 +32,11 @@ function App() {
         setEstimatedCost,
         setCurrentModel,
         clearMessages,
+        restoreSession,
     } = useSessionStore();
 
     const assistantMsgRef = useRef<string | null>(null);
+    const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
 
     const handleEvent = useCallback(
@@ -44,16 +47,18 @@ function App() {
                     if (!assistantMsgRef.current) {
                         const msgId = generateId();
                         assistantMsgRef.current = msgId;
+                        setStreamingMsgId(msgId);
+                        // Create initial message in sessionStore
                         addMessage({
                             id: msgId,
                             role: 'assistant',
-                            content: text,
+                            content: '',
                             toolCalls: [],
                             timestamp: Date.now(),
                         });
-                    } else {
-                        appendChunk(assistantMsgRef.current, text);
                     }
+                    // Stream to external store (bypasses Immer)
+                    streamingStore.append(event.sessionId, text);
                     break;
                 }
 
@@ -114,7 +119,22 @@ function App() {
                         inputTokens: number;
                         outputTokens: number;
                     };
+                    // Flush streaming content to sessionStore
+                    if (assistantMsgRef.current) {
+                        const content = streamingStore.getContent(event.sessionId);
+                        if (content) {
+                            setMessages(
+                                useSessionStore.getState().messages.map((m) =>
+                                    m.id === assistantMsgRef.current
+                                        ? { ...m, content }
+                                        : m,
+                                ),
+                            );
+                        }
+                        streamingStore.clear(event.sessionId);
+                    }
                     assistantMsgRef.current = null;
+                    setStreamingMsgId(null);
                     setThinking(false);
                     setTokenUsage({
                         input: payload.inputTokens,
@@ -131,6 +151,7 @@ function App() {
                 case 'AGENT_ERROR': {
                     const payload = event.payload as { message: string };
                     assistantMsgRef.current = null;
+                    setStreamingMsgId(null);
                     setThinking(false);
                     addMessage({
                         id: generateId(),
@@ -147,19 +168,29 @@ function App() {
                     setThinking(payload.isThinking);
                     if (payload.isThinking) {
                         assistantMsgRef.current = null;
+                        setStreamingMsgId(null);
                     }
+                    break;
+                }
+
+                case 'SESSION_RESTORED': {
+                    const payload = event.payload as { messages: Message[]; running: boolean };
+                    restoreSession(event.sessionId, payload.messages, payload.running);
+                    // Clear streaming store for this session
+                    streamingStore.clear(event.sessionId);
                     break;
                 }
             }
         },
         [
             addMessage,
-            appendChunk,
+            setMessages,
             addToolCall,
             updateToolCall,
             setThinking,
             setTokenUsage,
             setEstimatedCost,
+            restoreSession,
         ],
     );
 
@@ -172,6 +203,7 @@ function App() {
         approveTool,
         stopAgent,
         createSession,
+        bindSession,
     } = useAgentWebSocket(handleEvent);
 
     // Override store's isThinking with WS state
@@ -189,6 +221,19 @@ function App() {
                 // Backend not running yet
             });
     }, [setCurrentModel]);
+
+    // Session restore: if sessionStorage has a sessionId, reconnect and bind
+    useEffect(() => {
+        const savedId = sessionStorage.getItem('kairo-code-session-id');
+        if (!savedId) return;
+
+        connect();
+        // Wait for connection to establish before binding
+        const timer = setTimeout(() => {
+            bindSession(savedId);
+        }, 500);
+        return () => clearTimeout(timer);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleSend = useCallback(
         (text: string) => {
@@ -235,8 +280,10 @@ function App() {
         setSessionId(null);
         clearMessages();
         assistantMsgRef.current = null;
+        setStreamingMsgId(null);
         setTokenUsage({ input: 0, output: 0 });
         setEstimatedCost(0);
+        sessionStorage.removeItem('kairo-code-session-id');
     }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost]);
 
     const handleSelectSession = useCallback(
@@ -246,6 +293,7 @@ function App() {
             setSessionId(id);
             clearMessages();
             assistantMsgRef.current = null;
+            setStreamingMsgId(null);
             connect();
         },
         [sessionId, disconnect, setSessionId, clearMessages, connect],
@@ -316,6 +364,8 @@ function App() {
                                     <ChatMessage
                                         message={msg as Message}
                                         onApproveTool={handleApproveTool}
+                                        isStreaming={(msg as Message).id === streamingMsgId}
+                                        sessionId={sessionId ?? undefined}
                                     />
                                 </div>
                             )}

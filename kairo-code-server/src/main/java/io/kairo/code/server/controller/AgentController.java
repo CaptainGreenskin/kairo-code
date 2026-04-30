@@ -21,6 +21,7 @@ import org.springframework.stereotype.Controller;
  *   <li>/app/agent/message — send a user message to the agent</li>
  *   <li>/app/agent/approve — approve or reject a tool call</li>
  *   <li>/app/agent/stop — stop the current agent execution</li>
+ *   <li>/app/agent/bind-session — bind to an existing session and restore history</li>
  * </ul>
  *
  * Events are pushed to /topic/session/{sessionId}.
@@ -119,6 +120,22 @@ public class AgentController {
     public void stopAgent(@Payload AgentMessageRequest request) {
         agentService.stopAgent(request.sessionId());
         log.info("Stop requested for session {}", request.sessionId());
+    }
+
+    /**
+     * Bind to an existing session and restore its history.
+     * The session must already exist (created via /app/agent/create).
+     * Pushes a SESSION_RESTORED event with the message history.
+     */
+    @MessageMapping("/agent/bind-session")
+    public void bindSession(@Payload BindSessionRequest request) {
+        AgentEvent event = agentService.bindSession(request.sessionId());
+        if (event != null) {
+            messagingTemplate.convertAndSend("/topic/session/" + request.sessionId(), event);
+            log.info("Session {} restored via WebSocket", request.sessionId());
+        } else {
+            pushError(request.sessionId(), "Session not found: " + request.sessionId(), "SESSION_NOT_FOUND");
+        }
     }
 
     // -- Private helpers --
