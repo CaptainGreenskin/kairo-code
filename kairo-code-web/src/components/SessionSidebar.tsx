@@ -103,6 +103,14 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
 
     return (
         <li
+            tabIndex={0}
+            onKeyDown={(e) => {
+                if (e.key === 'F2' && isActive) {
+                    e.preventDefault();
+                    setNameInput(customName ?? '');
+                    setRenaming(true);
+                }
+            }}
             className={`group flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer transition-colors ${
                 isActive
                     ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
@@ -115,6 +123,7 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                     {renaming ? (
                         <input
                             autoFocus
+                            ref={el => { if (el) { el.focus(); el.select(); } }}
                             className="text-xs px-1 py-0.5 bg-[var(--bg-primary)] border border-[var(--color-primary)] rounded outline-none text-[var(--text-primary)] w-full"
                             value={nameInput}
                             onChange={e => setNameInput(e.target.value)}
