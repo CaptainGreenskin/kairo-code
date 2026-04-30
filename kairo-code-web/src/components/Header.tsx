@@ -1,7 +1,7 @@
 import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download, Menu } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
-import { formatTokenCount } from '@utils/tokenCount';
 import { ModelSelector } from './ModelSelector';
+import { StatsPopover } from './StatsPopover';
 import type { ConnectionStatus } from '@/types/agent';
 
 interface HeaderProps {
@@ -18,8 +18,12 @@ interface HeaderProps {
     onExport?: () => void;
     messagesCount?: number;
     searchActive?: boolean;
-    tokenCount?: number;
-    contextLimit?: number;
+    sessionStats?: {
+        userMessages: number;
+        assistantMessages: number;
+        toolCalls: number;
+        estimatedTokens: number;
+    };
     models?: string[];
     onModelChange?: (model: string) => void;
     isThinking?: boolean;
@@ -62,8 +66,7 @@ export const Header = React.memo(function Header({
     onExport,
     messagesCount,
     searchActive,
-    tokenCount,
-    contextLimit,
+    sessionStats,
     models,
     onModelChange,
     isThinking,
@@ -173,18 +176,7 @@ export const Header = React.memo(function Header({
                     <Search size={16} />
                 </button>
 
-                {(tokenCount ?? 0) > 0 && (
-                    <div
-                        className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--text-secondary)] bg-[var(--bg-secondary)]"
-                        title={`Estimated tokens in context${contextLimit ? ` (${Math.round((tokenCount! / contextLimit) * 100)}% of ${formatTokenCount(contextLimit)})` : ''}`}
-                    >
-                        <span className="font-mono">{formatTokenCount(tokenCount!)}</span>
-                        <span>tokens</span>
-                        {contextLimit && tokenCount! > contextLimit * 0.8 && (
-                            <span className="text-amber-500 ml-0.5">⚠</span>
-                        )}
-                    </div>
-                )}
+                {sessionStats && <StatsPopover stats={sessionStats} />}
 
                 {(messagesCount ?? 0) > 0 && onExport && (
                     <button
