@@ -23,6 +23,7 @@ import { WelcomeScreen } from '@components/WelcomeScreen';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
+import { MemoryEditorPanel } from '@components/MemoryEditorPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -720,6 +721,8 @@ function App() {
 
     const handleOpenSettings = useCallback(() => setShowSettings(true), []);
     const handleCloseSettings = useCallback(() => setShowSettings(false), []);
+    const [showMemoryEditor, setShowMemoryEditor] = useState(false);
+    const handleOpenMemory = useCallback(() => setShowMemoryEditor(true), []);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -899,6 +902,12 @@ function App() {
             action: () => { handleOpenSettings(); setShowCommandPalette(false); },
         },
         {
+            id: 'open-memory',
+            label: 'Edit Memory Files (CLAUDE.md)',
+            icon: <FileText size={16} />,
+            action: () => { setShowMemoryEditor(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -971,6 +980,7 @@ function App() {
                 searchActive={showSearch}
                 onOpenSearch={handleOpenSearch}
                 onOpenShortcuts={handleOpenShortcuts}
+                onOpenMemory={handleOpenMemory}
                 exportAction={
                     <ExportMenu
                         onExport={handleExport}
@@ -1207,6 +1217,13 @@ function App() {
             <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
 
             <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+            {showMemoryEditor && serverConfig && (
+                <MemoryEditorPanel
+                    workingDir={serverConfig.workingDir}
+                    onClose={() => setShowMemoryEditor(false)}
+                />
+            )}
         </div>
     );
 }

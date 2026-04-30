@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu, Star } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu, Star, FileText } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { StatsPopover } from './StatsPopover';
@@ -32,6 +32,7 @@ interface HeaderProps {
     connectionStatus?: ConnectionStatus;
     bookmarksActive?: boolean;
     onToggleBookmarks?: () => void;
+    onOpenMemory?: () => void;
 }
 
 const statusDotClass: Record<ConnectionStatus, string> = {
@@ -70,6 +71,7 @@ export const Header = React.memo(function Header({
     connectionStatus,
     bookmarksActive,
     onToggleBookmarks,
+    onOpenMemory,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -176,6 +178,17 @@ export const Header = React.memo(function Header({
                 {sessionStats && <StatsPopover stats={sessionStats} />}
 
                 {exportAction}
+
+                {onOpenMemory && (
+                    <button
+                        onClick={onOpenMemory}
+                        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                        aria-label="Edit memory files (CLAUDE.md)"
+                        title="Edit memory files (CLAUDE.md)"
+                    >
+                        <FileText size={18} />
+                    </button>
+                )}
 
                 <button
                     onClick={onOpenSettings}
