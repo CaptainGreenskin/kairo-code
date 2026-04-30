@@ -19,6 +19,7 @@ import type { Command } from '@components/CommandPalette';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
 import { exportChatAsMarkdown } from '@utils/exportChat';
+import { estimateMessagesTokens } from '@utils/tokenCount';
 import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
 import { setSessionName, getSessionName } from '@utils/sessionNames';
@@ -502,6 +503,8 @@ function App() {
         );
     }, [messages, searchQuery]);
 
+    const estimatedTokens = useMemo(() => estimateMessagesTokens(messages), [messages]);
+
     const handleExport = useCallback(() => {
         exportChatAsMarkdown(messages, sessionId);
     }, [messages, sessionId]);
@@ -576,6 +579,8 @@ function App() {
                 onOpenShortcuts={() => setShowShortcuts(true)}
                 messagesCount={messages.length}
                 onExport={handleExport}
+                tokenCount={estimatedTokens}
+                contextLimit={128000}
             />
 
             <SearchBar

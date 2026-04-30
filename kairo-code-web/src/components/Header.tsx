@@ -1,5 +1,6 @@
 import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { formatTokenCount } from '@utils/tokenCount';
 
 interface HeaderProps {
     currentModel: string;
@@ -15,6 +16,8 @@ interface HeaderProps {
     onExport?: () => void;
     messagesCount?: number;
     searchActive?: boolean;
+    tokenCount?: number;
+    contextLimit?: number;
 }
 
 function getUsageColor(ratio: number): string {
@@ -37,6 +40,8 @@ export function Header({
     onExport,
     messagesCount,
     searchActive,
+    tokenCount,
+    contextLimit,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -114,6 +119,19 @@ export function Header({
                 >
                     <Search size={16} />
                 </button>
+
+                {(tokenCount ?? 0) > 0 && (
+                    <div
+                        className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--text-secondary)] bg-[var(--bg-secondary)]"
+                        title={`Estimated tokens in context${contextLimit ? ` (${Math.round((tokenCount! / contextLimit) * 100)}% of ${formatTokenCount(contextLimit)})` : ''}`}
+                    >
+                        <span className="font-mono">{formatTokenCount(tokenCount!)}</span>
+                        <span>tokens</span>
+                        {contextLimit && tokenCount! > contextLimit * 0.8 && (
+                            <span className="text-amber-500 ml-0.5">⚠</span>
+                        )}
+                    </div>
+                )}
 
                 {(messagesCount ?? 0) > 0 && onExport && (
                     <button
