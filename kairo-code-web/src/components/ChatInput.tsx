@@ -3,6 +3,7 @@ import { Send, Square } from 'lucide-react';
 import { FilePicker } from './FilePicker';
 import { getHistory, pushHistory } from '@utils/inputHistory';
 import { saveDraft, clearDraft } from '@utils/inputDraft';
+import { readFile, formatFileBlock } from '@utils/fileReader';
 
 interface ChatInputProps {
     onSend: (text: string) => void;
@@ -157,20 +158,15 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
         setShowFilePicker(false);
     };
 
-    const handleDrop = (e: React.DragEvent) => {
+    const handleDrop = async (e: React.DragEvent) => {
         e.preventDefault();
         setDragging(false);
         setIsDragOver(false);
         const files = Array.from(e.dataTransfer.files);
         if (files.length === 0) return;
-        const paths = files.map(f => f.name).join(' ');
-        setText(prev => {
-            const textarea = textareaRef.current;
-            if (!textarea) return prev + ' ' + paths;
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            return prev.slice(0, start) + paths + prev.slice(end);
-        });
+        const blocks = await Promise.all(files.map(readFile));
+        const text = blocks.map(formatFileBlock).join('\n');
+        setText(prev => prev ? prev + '\n' + text : text);
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -181,13 +177,23 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
 
     const handleDragLeave = (e: React.DragEvent) => {
         e.preventDefault();
-        // Only reset if we actually left the container (not entering a child)
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX;
         const y = e.clientY;
         if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
             setDragging(false);
             setIsDragOver(false);
+        }
+    };
+
+    const handlePaste = async (e: React.ClipboardEvent) => {
+        const files = Array.from(e.clipboardData.files);
+        if (files.length > 0) {
+            e.preventDefault();
+            const blocks = await Promise.all(files.map(readFile));
+            const text = blocks.map(formatFileBlock).join('\n');
+            setText(prev => prev ? prev + '\n' + text : text);
+            return;
         }
     };
 
@@ -235,6 +241,7 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
                             value={text}
                             onChange={(e) => setText(e.target.value)}
                             onKeyDown={handleKeyDown}
+                            onPaste={handlePaste}
                             placeholder={historyIndexRef.current !== null ? 'Cmd+↑/↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
                             disabled={disabled && !isThinking}
                             rows={1}
@@ -252,7 +259,7 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
                         )}
                         {isDragOver && (
                             <div className="absolute inset-0 flex items-center justify-center bg-[var(--accent)]/10 rounded-lg z-10 pointer-events-none">
-                                <span className="text-sm text-[var(--accent)]">Drop to insert file path</span>
+                                <span className="text-sm text-[var(--accent)]">Drop files to insert as code blocks</span>
                             </div>
                         )}
                     </div>
