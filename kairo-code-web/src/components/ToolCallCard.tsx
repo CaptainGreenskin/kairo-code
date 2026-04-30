@@ -4,8 +4,24 @@ import type { ToolCall } from '@/types/agent';
 import { TerminalOutput } from './TerminalOutput';
 import { FileDiffView } from './FileDiffView';
 import { getToolRisk, RISK_LABELS, RISK_COLORS, RISK_BADGE_COLORS } from '@utils/toolRisk';
-import { extractFileWriteInfo } from '@utils/toolPreview';
+import { extractFileWriteInfo, getToolRiskLevel } from '@utils/toolPreview';
 import { FileContentPreview } from './FileContentPreview';
+
+function ToolRiskBadge({ toolName }: { toolName: string }) {
+    const level = getToolRiskLevel(toolName);
+    const config = {
+        read:    { label: 'read',    cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+        write:   { label: 'write',   cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+        execute: { label: 'execute', cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
+        other:   { label: 'tool',    cls: 'bg-[var(--bg-secondary)] text-[var(--text-muted)] border-[var(--border)]' },
+    }[level];
+
+    return (
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${config.cls}`}>
+            {config.label}
+        </span>
+    );
+}
 
 interface ToolCallCardProps {
     toolCall: ToolCall;
@@ -252,15 +268,13 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     };
 
     return (
-        <div
-            className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}
-            {...(toolCall.status === 'pending' ? { 'data-pending-tool': 'true' } : {})}
-        >
+        <div className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}>
             <div className="px-3 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <code className="text-sm font-mono font-medium text-[var(--text-primary)]">
                         {toolCall.toolName}
                     </code>
+                    <ToolRiskBadge toolName={toolCall.toolName} />
                     {riskLabel && toolCall.status === 'pending' && (
                         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${RISK_BADGE_COLORS[risk]}`}>
                             {riskLabel}
@@ -338,11 +352,12 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                         </div>
                     </div>
                     {/* Keyboard shortcut hints */}
-                    <div className="text-[10px] text-[var(--text-muted)]">
-                        <kbd className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded text-[10px]">y</kbd>
-                        {' '}approve{' · '}
-                        <kbd className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded text-[10px]">n</kbd>
-                        {' '}reject
+                    <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
+                        <kbd className="px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-tertiary)] font-mono">y</kbd>
+                        <span>approve</span>
+                        <span className="opacity-40">·</span>
+                        <kbd className="px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-tertiary)] font-mono">n</kbd>
+                        <span>reject</span>
                     </div>
                 </div>
             )}

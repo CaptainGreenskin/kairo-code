@@ -34,3 +34,27 @@ function inferLanguage(filePath: string): string {
     };
     return map[ext] ?? 'text';
 }
+
+export type ToolRiskLevel = 'read' | 'write' | 'execute' | 'other';
+
+const WRITE_TOOLS = new Set([
+    'write_file', 'create_file', 'edit_file', 'str_replace_editor',
+    'overwrite_file', 'patch_file', 'delete_file', 'rename_file',
+]);
+
+const EXECUTE_TOOLS = new Set([
+    'bash', 'execute_command', 'run_code', 'shell', 'terminal',
+    'execute_script', 'run_script',
+]);
+
+const READ_TOOLS = new Set([
+    'read_file', 'list_directory', 'search_files', 'find_files',
+    'get_file_info', 'read_url', 'web_search', 'web_fetch',
+]);
+
+export function getToolRiskLevel(toolName: string): ToolRiskLevel {
+    if (EXECUTE_TOOLS.has(toolName)) return 'execute';
+    if (WRITE_TOOLS.has(toolName)) return 'write';
+    if (READ_TOOLS.has(toolName)) return 'read';
+    return 'other';
+}

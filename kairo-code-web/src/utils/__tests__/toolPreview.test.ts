@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractFileWriteInfo } from '../toolPreview';
+import { extractFileWriteInfo, getToolRiskLevel } from '../toolPreview';
 
 describe('extractFileWriteInfo', () => {
     it('returns null for non-write tools', () => {
@@ -40,5 +40,23 @@ describe('extractFileWriteInfo', () => {
     it('falls back to text for unknown extensions', () => {
         const info = extractFileWriteInfo('write_file', { path: 'file.xyz', content: 'x' });
         expect(info!.language).toBe('text');
+    });
+});
+
+describe('getToolRiskLevel', () => {
+    it('classifies bash as execute', () => {
+        expect(getToolRiskLevel('bash')).toBe('execute');
+    });
+
+    it('classifies write_file as write', () => {
+        expect(getToolRiskLevel('write_file')).toBe('write');
+    });
+
+    it('classifies read_file as read', () => {
+        expect(getToolRiskLevel('read_file')).toBe('read');
+    });
+
+    it('classifies unknown as other', () => {
+        expect(getToolRiskLevel('some_custom_tool')).toBe('other');
     });
 });
