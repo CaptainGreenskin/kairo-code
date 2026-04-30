@@ -9,6 +9,7 @@ interface ChatInputProps {
     isThinking: boolean;
     appendText?: string;
     onAppendConsumed?: () => void;
+    sentMessages?: string[];
 }
 
 const AT_RE = /@([^\s]*)$/;
@@ -31,11 +32,13 @@ function inferLanguage(fileName: string): string {
     return map[ext] || '';
 }
 
-export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, onAppendConsumed }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sentMessages }: ChatInputProps) {
     const [text, setText] = useState('');
     const [dragging, setDragging] = useState(false);
     const [showFilePicker, setShowFilePicker] = useState(false);
     const [atQuery, setAtQuery] = useState('');
+    const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+    const [draftText, setDraftText] = useState('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
@@ -69,6 +72,51 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
     }, [text]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        // History navigation: ArrowUp
+        if (e.key === 'ArrowUp' && !e.shiftKey && (sentMessages?.length ?? 0) > 0) {
+            const textarea = e.currentTarget;
+            const firstNewline = textarea.value.indexOf('\n');
+            const atFirstLine = firstNewline === -1 || textarea.selectionStart <= firstNewline;
+            if (!atFirstLine) return;
+
+            e.preventDefault();
+            const history = sentMessages!;
+            if (historyIndex === null) {
+                setDraftText(text);
+                const newIndex = history.length - 1;
+                setHistoryIndex(newIndex);
+                setText(history[newIndex]);
+            } else if (historyIndex > 0) {
+                const newIndex = historyIndex - 1;
+                setHistoryIndex(newIndex);
+                setText(history[newIndex]);
+            }
+            return;
+        }
+
+        // History navigation: ArrowDown
+        if (e.key === 'ArrowDown' && historyIndex !== null && !e.shiftKey) {
+            e.preventDefault();
+            const history = sentMessages!;
+            if (historyIndex < history.length - 1) {
+                const newIndex = historyIndex + 1;
+                setHistoryIndex(newIndex);
+                setText(history[newIndex]);
+            } else {
+                setHistoryIndex(null);
+                setText(draftText);
+            }
+            return;
+        }
+
+        // Exit history: Escape
+        if (e.key === 'Escape' && historyIndex !== null) {
+            e.preventDefault();
+            setHistoryIndex(null);
+            setText(draftText);
+            return;
+        }
+
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSend();
@@ -78,6 +126,8 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
     const handleSend = () => {
         const trimmed = text.trim();
         if (!trimmed || disabled) return;
+        setHistoryIndex(null);
+        setDraftText('');
         onSend(trimmed);
         setText('');
         setShowFilePicker(false);
@@ -154,7 +204,7 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
                         value={text}
                         onChange={(e) => setText(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"
+                        placeholder={historyIndex !== null ? '↑↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
                         disabled={disabled && !isThinking}
                         rows={1}
                         className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] disabled:opacity-50"
