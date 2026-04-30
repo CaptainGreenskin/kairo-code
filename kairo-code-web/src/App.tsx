@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -23,7 +23,7 @@ import type { Command } from '@components/CommandPalette';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
-import { exportAndDownload } from '@utils/exportSession';
+import { exportAndDownload, copySessionToClipboard } from '@utils/exportSession';
 import { estimateMessagesTokens } from '@utils/tokenCount';
 import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
@@ -566,6 +566,18 @@ function App() {
         [sessionId, handleNewSession, addToast],
     );
 
+    const handleCopyConversation = useCallback(async () => {
+        if (messages.length === 0) return;
+        const name = (sessionId ? getSessionName(sessionId) : null)
+            ?? `session-${sessionId?.slice(0, 8) ?? 'new'}`;
+        try {
+            await copySessionToClipboard(messages, name);
+            addToast('success', 'Conversation copied to clipboard');
+        } catch {
+            addToast('error', 'Failed to copy — clipboard access denied');
+        }
+    }, [messages, sessionId, addToast]);
+
     // Global keyboard shortcut: Cmd+N new session, Cmd+W close session, Cmd+1-9 switch session
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
@@ -594,10 +606,17 @@ function App() {
                     handleSelectSession(sidebarSessions[idx].sessionId);
                 }
             }
+
+            // Cmd+Shift+C — copy conversation as Markdown
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c') {
+                e.preventDefault();
+                handleCopyConversation();
+                return;
+            }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [sessionId, sidebarSessions, handleNewSession, handleDeleteSession, handleSelectSession]);
+    }, [sessionId, sidebarSessions, handleNewSession, handleDeleteSession, handleSelectSession, handleCopyConversation]);
 
     const handleToggleTheme = useCallback(() => {
         // Theme toggling is handled by the Header component via DOM classList
@@ -751,8 +770,14 @@ function App() {
             description: 'Download as Markdown',
             icon: <FileText size={16} />,
             action: () => { handleExport('markdown'); setShowCommandPalette(false); },
+        }, {
+            id: 'copy-conversation',
+            label: 'Copy conversation as Markdown',
+            icon: <Clipboard size={14} />,
+            shortcut: '⌘⇧C',
+            action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, messages.length]);
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, messages.length]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -771,6 +796,7 @@ function App() {
                     <ExportMenu
                         onExport={handleExport}
                         onExportSuccess={handleExportSuccess}
+                        onCopy={handleCopyConversation}
                         disabled={messages.length === 0}
                     />
                 }

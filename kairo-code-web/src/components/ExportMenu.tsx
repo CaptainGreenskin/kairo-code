@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { Download, FileText, FileJson } from 'lucide-react';
+import { Download, FileText, FileJson, Clipboard } from 'lucide-react';
 
 interface ExportMenuProps {
     onExport: (format: 'markdown' | 'json') => void;
     onExportSuccess?: (format: 'markdown' | 'json') => void;
+    onCopy?: () => void;
     disabled?: boolean;
 }
 
-export function ExportMenu({ onExport, onExportSuccess, disabled }: ExportMenuProps) {
+export function ExportMenu({ onExport, onExportSuccess, onCopy, disabled }: ExportMenuProps) {
     const [open, setOpen] = useState(false);
     return (
         <div className="relative">
@@ -35,6 +36,14 @@ export function ExportMenu({ onExport, onExportSuccess, disabled }: ExportMenuPr
                         >
                             <FileJson size={13} /> Export as JSON
                         </button>
+                        {onCopy && (
+                            <button
+                                onClick={() => { onCopy(); setOpen(false); }}
+                                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] transition-colors border-t border-[var(--border)]"
+                            >
+                                <Clipboard size={13} /> Copy as Markdown
+                            </button>
+                        )}
                     </div>
                 </>
             )}
