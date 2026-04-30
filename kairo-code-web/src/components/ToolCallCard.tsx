@@ -4,6 +4,8 @@ import type { ToolCall } from '@/types/agent';
 import { TerminalOutput } from './TerminalOutput';
 import { FileDiffView } from './FileDiffView';
 import { getToolRisk, RISK_LABELS, RISK_COLORS, RISK_BADGE_COLORS } from '@utils/toolRisk';
+import { extractFileWriteInfo } from '@utils/toolPreview';
+import { FileContentPreview } from './FileContentPreview';
 
 interface ToolCallCardProps {
     toolCall: ToolCall;
@@ -188,6 +190,10 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const isPending = toolCall.requiresApproval && toolCall.status === 'pending';
 
+    const fileWriteInfo = toolCall.status === 'pending'
+        ? extractFileWriteInfo(toolCall.toolName, toolCall.input ?? {})
+        : null;
+
     // Start countdown when the card is pending
     useEffect(() => {
         if (!isPending) return;
@@ -289,6 +295,8 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                     input={toolCall.input}
                 />
             )}
+
+            {fileWriteInfo && <FileContentPreview info={fileWriteInfo} />}
 
             {isPending && onApprove && (
                 <div className="px-3 py-2 border-t border-[var(--border)]">
