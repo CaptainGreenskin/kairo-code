@@ -4,6 +4,7 @@ import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
 import { Header } from '@components/Header';
+import { SearchBar } from '@components/SearchBar';
 import { ChatMessage, ThinkingIndicator } from '@components/ChatMessage';
 import { ChatInput } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
@@ -51,6 +52,7 @@ function App() {
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
     const [fileTreeOpen, setFileTreeOpen] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
     const [chatInputAppend, setChatInputAppend] = useState<string>('');
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
     const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -269,9 +271,16 @@ function App() {
         }
     }, [sessionId, messages]);
 
-    // Global keyboard shortcut: Cmd+Shift+F opens search
+    // Global keyboard shortcut: Cmd+F or Cmd+Shift+F opens message search
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'f') {
+                e.preventDefault();
+                setShowSearch(v => {
+                    if (!v) setSearchQuery('');
+                    return !v;
+                });
+            }
             if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
                 e.preventDefault();
                 setShowSearch(true);
@@ -456,6 +465,23 @@ function App() {
         setFileTreeOpen(prev => !prev);
     }, []);
 
+    const handleCloseSearch = useCallback(() => {
+        setShowSearch(false);
+        setSearchQuery('');
+    }, []);
+
+    const filteredMessages = useMemo(() => {
+        if (!searchQuery.trim()) return messages;
+        const q = searchQuery.toLowerCase();
+        return messages.filter(m =>
+            m.content?.toLowerCase().includes(q) ||
+            m.toolCalls?.some(tc =>
+                tc.toolName?.toLowerCase().includes(q) ||
+                tc.result?.toLowerCase().includes(q)
+            )
+        );
+    }, [messages, searchQuery]);
+
     const handleExport = useCallback(() => {
         exportChatAsMarkdown(messages, sessionId);
     }, [messages, sessionId]);
@@ -476,10 +502,10 @@ function App() {
         },
         {
             id: 'open-search',
-            label: 'Search Workspace',
-            shortcut: '⌘⇧F',
+            label: 'Search Messages',
+            shortcut: '⌘F',
             icon: <Search size={16} />,
-            action: () => { setShowSearch(true); setShowCommandPalette(false); },
+            action: () => { setShowSearch(v => !v); if (!showSearch) setSearchQuery(''); setShowCommandPalette(false); },
         },
         {
             id: 'toggle-file-tree',
@@ -525,10 +551,19 @@ function App() {
                 onOpenSettings={handleOpenSettings}
                 onToggleFileTree={handleToggleFileTree}
                 fileTreeOpen={fileTreeOpen}
-                onOpenSearch={() => setShowSearch(true)}
+                searchActive={showSearch}
+                onOpenSearch={() => { setShowSearch(v => !v); if (!showSearch) setSearchQuery(''); }}
                 onOpenShortcuts={() => setShowShortcuts(true)}
                 messagesCount={messages.length}
                 onExport={handleExport}
+            />
+
+            <SearchBar
+                isOpen={showSearch}
+                query={searchQuery}
+                onQueryChange={setSearchQuery}
+                resultCount={filteredMessages.length}
+                onClose={handleCloseSearch}
             />
 
             <div className="flex flex-1 overflow-hidden">
@@ -575,7 +610,7 @@ function App() {
                         <Virtuoso
                             ref={virtuosoRef}
                             className="flex-1 px-4 py-4"
-                            data={messages}
+                            data={filteredMessages}
                             followOutput="smooth"
                             atBottomStateChange={(bottom) => setAtBottom(bottom)}
                             itemContent={(_index, msg) => (

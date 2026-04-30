@@ -14,6 +14,7 @@ interface HeaderProps {
     onOpenShortcuts?: () => void;
     onExport?: () => void;
     messagesCount?: number;
+    searchActive?: boolean;
 }
 
 function getUsageColor(ratio: number): string {
@@ -35,6 +36,7 @@ export function Header({
     onOpenShortcuts,
     onExport,
     messagesCount,
+    searchActive,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -102,11 +104,15 @@ export function Header({
 
                 <button
                     onClick={onOpenSearch}
-                    className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                    aria-label="Search workspace"
-                    title="Search workspace (Cmd+Shift+F)"
+                    className={`p-1.5 rounded transition-colors ${
+                        searchActive
+                            ? 'text-[var(--accent)] bg-[var(--accent)]/10'
+                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    }`}
+                    aria-label="Search messages"
+                    title="Search messages (⌘F)"
                 >
-                    <Search size={18} />
+                    <Search size={16} />
                 </button>
 
                 {(messagesCount ?? 0) > 0 && onExport && (
