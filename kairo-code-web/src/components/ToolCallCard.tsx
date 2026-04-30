@@ -3,6 +3,7 @@ import { Check, X, Loader2, AlertCircle } from 'lucide-react';
 import type { ToolCall } from '@/types/agent';
 import { TerminalOutput } from './TerminalOutput';
 import { FileDiffView } from './FileDiffView';
+import { getToolRisk, RISK_LABELS, RISK_COLORS, RISK_BADGE_COLORS } from '@utils/toolRisk';
 
 interface ToolCallCardProps {
     toolCall: ToolCall;
@@ -89,6 +90,8 @@ function extractModified(diff: string): string {
 
 export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: ToolCallCardProps) {
     const config = statusConfig[toolCall.status];
+    const risk = getToolRisk(toolCall.toolName);
+    const riskLabel = RISK_LABELS[risk];
     const [expanded, setExpanded] = useState(false);
 
     // Timeout countdown for pending tool calls
@@ -154,12 +157,17 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     };
 
     return (
-        <div className="my-2 border border-[var(--border)] rounded-lg overflow-hidden bg-[var(--bg-secondary)]">
+        <div className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}>
             <div className="px-3 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <code className="text-sm font-mono font-medium text-[var(--text-primary)]">
                         {toolCall.toolName}
                     </code>
+                    {riskLabel && toolCall.status === 'pending' && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${RISK_BADGE_COLORS[risk]}`}>
+                            {riskLabel}
+                        </span>
+                    )}
                     <span className={`flex items-center gap-1 text-xs ${config.color}`}>
                         {config.icon}
                         {config.label}
@@ -215,10 +223,16 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                     <div className="flex items-center gap-2 mb-2">
                         <button
                             onClick={() => onApprove(toolCall.id, true)}
-                            className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-[var(--color-success)] hover:bg-[var(--color-success)]/90 rounded transition-colors"
+                            className={`flex items-center gap-1 px-3 py-1 text-xs font-medium text-white rounded transition-colors ${
+                                risk === 'danger'
+                                    ? 'bg-red-600 hover:bg-red-700'
+                                    : risk === 'caution'
+                                    ? 'bg-amber-600 hover:bg-amber-700'
+                                    : 'bg-[var(--color-success)] hover:bg-[var(--color-success)]/90'
+                            }`}
                         >
                             <Check size={12} />
-                            Approve
+                            {risk === 'danger' ? 'Run' : 'Approve'}
                         </button>
                         <button
                             onClick={() => onApprove(toolCall.id, false)}
