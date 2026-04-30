@@ -29,6 +29,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
 import { setSessionName, getSessionName } from '@utils/sessionNames';
 import { loadPrefs, savePref } from '@utils/userPrefs';
+import { loadDraft } from '@utils/inputDraft';
 
 function generateId(): string {
     return crypto.randomUUID();
@@ -707,6 +708,11 @@ function App() {
 
     const estimatedTokens = useMemo(() => estimateMessagesTokens(messages), [messages]);
 
+    const currentDraft = useMemo(
+        () => (sessionId ? loadDraft(sessionId) : ''),
+        [sessionId],
+    );
+
     const sessionStats = useMemo(() => {
         const userMessages = messages.filter(m => m.role === 'user').length;
         const assistantMessages = messages.filter(m => m.role === 'assistant').length;
@@ -998,7 +1004,9 @@ function App() {
 
                     {/* Input */}
                     <ChatInput
+                        key={sessionId ?? 'no-session'}
                         sessionId={sessionId ?? undefined}
+                        initialDraft={currentDraft}
                         onSend={handleSend}
                         onInterruptAndSend={handleInterruptAndSend}
                         onStop={handleStop}
