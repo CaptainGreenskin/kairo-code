@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -11,6 +11,7 @@ import { SettingsModal } from '@components/SettingsModal';
 import { FileTreePanel } from '@components/FileTreePanel';
 import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
+import { ShortcutsModal } from '@components/ShortcutsModal';
 import type { Command } from '@components/CommandPalette';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -50,6 +51,7 @@ function App() {
     const [chatInputAppend, setChatInputAppend] = useState<string>('');
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
     const [showCommandPalette, setShowCommandPalette] = useState(false);
+    const [showShortcuts, setShowShortcuts] = useState(false);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
     const [atBottom, setAtBottom] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -274,6 +276,20 @@ function App() {
         return () => window.removeEventListener('keydown', handler);
     }, []);
 
+    // Global keyboard shortcut: ? opens shortcuts modal
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            const tag = (e.target as HTMLElement).tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+            if (e.key === '?') {
+                e.preventDefault();
+                setShowShortcuts(prev => !prev);
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, []);
+
     const handleSend = useCallback(
         (text: string) => {
             // Add user message to store
@@ -435,6 +451,13 @@ function App() {
             icon: <Moon size={16} />,
             action: () => { handleToggleTheme(); setShowCommandPalette(false); },
         },
+        {
+            id: 'show-shortcuts',
+            label: 'Keyboard Shortcuts',
+            shortcut: '?',
+            icon: <HelpCircle size={16} />,
+            action: () => { setShowShortcuts(true); setShowCommandPalette(false); },
+        },
     ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme]);
 
     return (
@@ -448,6 +471,7 @@ function App() {
                 onToggleFileTree={handleToggleFileTree}
                 fileTreeOpen={fileTreeOpen}
                 onOpenSearch={() => setShowSearch(true)}
+                onOpenShortcuts={() => setShowShortcuts(true)}
             />
 
             <div className="flex flex-1 overflow-hidden">
@@ -582,6 +606,8 @@ function App() {
                 onClose={() => setShowCommandPalette(false)}
                 commands={commands}
             />
+
+            <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
         </div>
     );
 }
