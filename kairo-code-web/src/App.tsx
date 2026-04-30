@@ -35,6 +35,7 @@ import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from
 import { setSessionName, getSessionName } from '@utils/sessionNames';
 import { loadPrefs, savePref } from '@utils/userPrefs';
 import { loadDraft } from '@utils/inputDraft';
+import { isCollapsible } from '@utils/messageCollapse';
 
 declare const __APP_VERSION__: string;
 
@@ -103,6 +104,17 @@ function App() {
     const [messageSearchMatchIndex, setMessageSearchMatchIndex] = useState(0);
     const [chatInputAppend, setChatInputAppend] = useState<string>('');
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
+
+    // Expanded messages state for collapsible messages
+    const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
+
+    const handleToggleMessageExpand = useCallback((messageId: string) => {
+        setExpandedMessages(prev => {
+            const next = new Set(prev);
+            if (next.has(messageId)) next.delete(messageId); else next.add(messageId);
+            return next;
+        });
+    }, []);
     const [showCommandPalette, setShowCommandPalette] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [sidebarSessions, setSidebarSessions] = useState<Array<{ sessionId: string }>>([]);
@@ -548,6 +560,7 @@ function App() {
         setCurrentToolName(undefined);
         setTokenUsage({ input: 0, output: 0 });
         setEstimatedCost(0);
+        setExpandedMessages(new Set());
         sessionStorage.removeItem('kairo-code-session-id');
     }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost, sessionId]);
 
@@ -557,6 +570,7 @@ function App() {
             setLoadingSessionId(id);
             disconnect();
             setSessionId(id);
+            setExpandedMessages(new Set());
             // 立即从缓存恢复
             const cached = loadMessages(id);
             if (cached.length > 0) {
@@ -1005,6 +1019,9 @@ function App() {
                                 const currentMatchMsgIdx = sortedMessageSearchResults[messageSearchMatchIndex]?.messageIndex;
                                 const isSearchMatch = messageSearchQuery.length > 0 && sortedMessageSearchResults.some(r => r.messageIndex === index);
                                 const isCurrentMatch = index === currentMatchMsgIdx;
+                                const shouldCollapse = msgObj.role === 'assistant' && isCollapsible(msgObj.content ?? '');
+                                const isExpanded = expandedMessages.has(msgObj.id);
+                                const isStreaming = msgObj.id === streamingMsgId;
                                 return (
                                     <div className="max-w-3xl mx-auto">
                                         {showDateSep && (
@@ -1017,7 +1034,7 @@ function App() {
                                         <ChatMessage
                                             message={msgObj}
                                             onApproveTool={handleApproveTool}
-                                            isStreaming={msgObj.id === streamingMsgId}
+                                            isStreaming={isStreaming}
                                             sessionId={sessionId ?? undefined}
                                             onRegenerate={handleRegenerate}
                                             onEditResend={handleEditResend}
@@ -1026,6 +1043,8 @@ function App() {
                                             onRetry={msgObj.role === 'error' ? () => handleRegenerate(msgObj.id) : undefined}
                                             searchHighlight={isSearchMatch}
                                             isCurrentMatch={isCurrentMatch}
+                                            isCollapsed={shouldCollapse && !isExpanded}
+                                            onToggleCollapse={shouldCollapse && !isStreaming ? () => handleToggleMessageExpand(msgObj.id) : undefined}
                                         />
                                     </div>
                                 );

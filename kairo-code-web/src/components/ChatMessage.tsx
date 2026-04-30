@@ -2,7 +2,7 @@ import { useSyncExternalStore, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus, Brain, ChevronDown, Star } from 'lucide-react';
+import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus, Brain, ChevronDown, ChevronUp, Star } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
@@ -14,6 +14,7 @@ import { parseMarkdownContent } from '@utils/markdownTable';
 import { streamingStore } from '@store/streamingStore';
 import { formatRelativeTime, formatAbsoluteTime } from '@utils/formatTime';
 import { useDebounce } from '@hooks/useDebounce';
+import { getPreviewContent, countLines, COLLAPSE_PREVIEW_LINES } from '@utils/messageCollapse';
 
 interface ChatMessageProps {
     message: Message;
@@ -29,6 +30,8 @@ interface ChatMessageProps {
     isCurrentMatch?: boolean;
     isBookmarked?: boolean;
     onToggleBookmark?: (messageId: string) => void;
+    isCollapsed?: boolean;
+    onToggleCollapse?: () => void;
 }
 
 interface CodeBlockProps {
@@ -175,7 +178,7 @@ function renderWithTables(content: string, mkComponents: React.ComponentProps<ty
     );
 }
 
-export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch, isBookmarked, onToggleBookmark }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch, isBookmarked, onToggleBookmark, isCollapsed, onToggleCollapse }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
     const [editing, setEditing] = useState(false);
     const [editText, setEditText] = useState(message.content);
@@ -186,10 +189,16 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
         () => (sessionId ? streamingStore.getContent(sessionId) : ''),
     );
 
-    const displayContent = isStreaming && sessionId ? streamingContent : message.content;
+    // Determine raw content source: streaming store or stored message
+    const rawContent = isStreaming && sessionId ? streamingContent : message.content;
+
+    // Apply collapse preview before debouncing
+    const displayContent = isCollapsed
+        ? getPreviewContent(rawContent ?? '')
+        : (rawContent ?? '');
 
     // Debounce streaming content to avoid per-token ReactMarkdown re-parse (CPU spike)
-    const debouncedContent = useDebounce(displayContent ?? '', isStreaming ? 80 : 0);
+    const debouncedContent = useDebounce(displayContent, isStreaming ? 80 : 0);
 
     if (message.role === 'user') {
         return (
@@ -398,6 +407,26 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                 isStreaming={isStreaming}
                             />
                         )
+                    )}
+
+                    {/* Collapse/expand toggle */}
+                    {onToggleCollapse && (
+                        <button
+                            onClick={onToggleCollapse}
+                            className="mt-2 flex items-center gap-1.5 text-xs text-[var(--accent)] hover:text-[var(--accent)]/80 transition-colors"
+                        >
+                            {isCollapsed ? (
+                                <>
+                                    <ChevronDown size={13} />
+                                    {`Show ${Math.max(0, countLines(message.content ?? '') - COLLAPSE_PREVIEW_LINES)} more lines`}
+                                </>
+                            ) : (
+                                <>
+                                    <ChevronUp size={13} />
+                                    Show less
+                                </>
+                            )}
+                        </button>
                     )}
 
                     {/* Character count */}
