@@ -4,7 +4,9 @@ import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
 import { Header } from '@components/Header';
-import { ChatMessage, ThinkingIndicator } from '@components/ChatMessage';
+import { ChatMessage } from '@components/ChatMessage';
+import { ThinkingIndicator } from '@components/ThinkingIndicator';
+import type { Phase } from '@components/ThinkingIndicator';
 import { ChatInput } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
 import { SettingsModal } from '@components/SettingsModal';
@@ -47,6 +49,8 @@ function App() {
 
     const assistantMsgRef = useRef<string | null>(null);
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
+    const [agentPhase, setAgentPhase] = useState<Phase>('thinking');
+    const [currentToolName, setCurrentToolName] = useState<string | undefined>(undefined);
     const [showSettings, setShowSettings] = useState(false);
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
     const [fileTreeOpen, setFileTreeOpen] = useState(false);
@@ -66,6 +70,8 @@ function App() {
             switch (event.type) {
                 case 'TEXT_CHUNK': {
                     const text = (event.payload as { text: string }).text;
+                    setAgentPhase('writing');
+                    setCurrentToolName(undefined);
                     if (!assistantMsgRef.current) {
                         const msgId = generateId();
                         assistantMsgRef.current = msgId;
@@ -91,6 +97,8 @@ function App() {
                         input: Record<string, unknown>;
                         requiresApproval: boolean;
                     };
+                    setAgentPhase('tool');
+                    setCurrentToolName(payload.toolName);
                     if (!assistantMsgRef.current) {
                         const msgId = generateId();
                         assistantMsgRef.current = msgId;
@@ -120,6 +128,8 @@ function App() {
                         isError: boolean;
                         durationMs: number;
                     };
+                    setAgentPhase('thinking');
+                    setCurrentToolName(undefined);
                     // Find the message containing this tool call
                     const store = useSessionStore.getState();
                     const targetMsg = store.messages.find((m) =>
@@ -158,6 +168,8 @@ function App() {
                     assistantMsgRef.current = null;
                     setStreamingMsgId(null);
                     setThinking(false);
+                    setAgentPhase('thinking');
+                    setCurrentToolName(undefined);
                     setTokenUsage({
                         input: payload.inputTokens,
                         output: payload.outputTokens,
@@ -175,6 +187,8 @@ function App() {
                     assistantMsgRef.current = null;
                     setStreamingMsgId(null);
                     setThinking(false);
+                    setAgentPhase('thinking');
+                    setCurrentToolName(undefined);
                     setLoadingSessionId(null);
                     addMessage({
                         id: generateId(),
@@ -192,6 +206,8 @@ function App() {
                     if (payload.isThinking) {
                         assistantMsgRef.current = null;
                         setStreamingMsgId(null);
+                        setAgentPhase('thinking');
+                        setCurrentToolName(undefined);
                     }
                     break;
                 }
@@ -405,6 +421,8 @@ function App() {
         setSentMessages([]);
         assistantMsgRef.current = null;
         setStreamingMsgId(null);
+        setAgentPhase('thinking');
+        setCurrentToolName(undefined);
         setTokenUsage({ input: 0, output: 0 });
         setEstimatedCost(0);
         sessionStorage.removeItem('kairo-code-session-id');
@@ -426,6 +444,8 @@ function App() {
             }
             assistantMsgRef.current = null;
             setStreamingMsgId(null);
+            setAgentPhase('thinking');
+            setCurrentToolName(undefined);
             connect();
         },
         [sessionId, disconnect, setSessionId, clearMessages, connect],
@@ -592,9 +612,13 @@ function App() {
                             )}
                             components={{
                                 Footer: () =>
-                                    isThinking ? (
+                                    isThinking && !streamingMsgId ? (
                                         <div className="max-w-3xl mx-auto">
-                                            <ThinkingIndicator />
+                                            <ThinkingIndicator
+                                                isVisible={true}
+                                                phase={agentPhase}
+                                                toolName={currentToolName}
+                                            />
                                         </div>
                                     ) : null,
                             }}

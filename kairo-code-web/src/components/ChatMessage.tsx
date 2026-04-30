@@ -2,7 +2,7 @@ import { useSyncExternalStore, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Loader2, Copy, Check, RefreshCw, Pencil } from 'lucide-react';
+import { Copy, Check, RefreshCw, Pencil } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
@@ -200,6 +200,12 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                         </div>
                     )}
 
+                    {isStreaming && (
+                        <span
+                            className="inline-block w-0.5 h-4 bg-[var(--text-primary)] ml-0.5 align-text-bottom animate-pulse"
+                        />
+                    )}
+
                     {hasToolCalls && (
                         message.toolCalls.length === 1 ? (
                             <div className="mt-2">
@@ -228,19 +234,6 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                 <span className="text-[10px] text-[var(--text-muted)] mt-1 ml-2 block">
                     {new Date(message.timestamp).toLocaleTimeString()}
                 </span>
-            </div>
-        </div>
-    );
-}
-
-export function ThinkingIndicator() {
-    return (
-        <div className="flex justify-start mb-4">
-            <div className="px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)]">
-                <div className="flex items-center gap-2 text-[var(--text-muted)] text-sm">
-                    <Loader2 size={16} className="animate-spin" />
-                    <span>Thinking...</span>
-                </div>
             </div>
         </div>
     );
