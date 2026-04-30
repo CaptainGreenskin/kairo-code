@@ -68,3 +68,8 @@ export function exportAndDownload(messages: Message[], sessionName: string, form
         downloadFile(json, `${slug}.json`, 'application/json');
     }
 }
+
+export async function copySessionToClipboard(messages: Message[], sessionName: string): Promise<void> {
+    const md = exportSessionAsMarkdown(messages, sessionName);
+    await navigator.clipboard.writeText(md);
+}
