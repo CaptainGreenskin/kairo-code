@@ -26,12 +26,15 @@ import { estimateMessagesTokens } from '@utils/tokenCount';
 import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
 import { setSessionName, getSessionName } from '@utils/sessionNames';
+import { loadPrefs, savePref } from '@utils/userPrefs';
 
 function generateId(): string {
     return crypto.randomUUID();
 }
 
 function App() {
+    const prefs = loadPrefs();
+
     const {
         sessionId,
         messages,
@@ -58,7 +61,7 @@ function App() {
     const [currentToolName, setCurrentToolName] = useState<string | undefined>(undefined);
     const [showSettings, setShowSettings] = useState(false);
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
-    const [fileTreeOpen, setFileTreeOpen] = useState(false);
+    const [fileTreeOpen, setFileTreeOpen] = useState(() => prefs.fileTreeOpen ?? false);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [chatInputAppend, setChatInputAppend] = useState<string>('');
@@ -304,6 +307,13 @@ function App() {
                 // Backend not running yet
             });
     }, [setCurrentModel]);
+
+    // Restore model from prefs if set
+    useEffect(() => {
+        if (prefs.model && !currentModel) {
+            setCurrentModel(prefs.model);
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Session restore: if sessionStorage has a sessionId, reconnect and auto-bind
     useEffect(() => {
@@ -559,6 +569,8 @@ function App() {
 
     const handleToggleTheme = useCallback(() => {
         // Theme toggling is handled by the Header component via DOM classList
+        // Save the inverted theme preference
+        savePref('theme', document.documentElement.classList.contains('dark') ? 'light' : 'dark');
     }, []);
 
     const handleOpenSettings = useCallback(() => setShowSettings(true), []);
@@ -566,10 +578,19 @@ function App() {
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
+        savePref('model', cfg.defaultModel);
+    }, [setCurrentModel]);
+
+    const handleModelChange = useCallback((m: string) => {
+        setCurrentModel(m);
+        savePref('model', m);
     }, [setCurrentModel]);
 
     const handleToggleFileTree = useCallback(() => {
-        setFileTreeOpen(prev => !prev);
+        setFileTreeOpen(prev => {
+            savePref('fileTreeOpen', !prev);
+            return !prev;
+        });
     }, []);
 
     const handleCloseSearch = useCallback(() => {
@@ -677,7 +698,7 @@ function App() {
                 tokenCount={estimatedTokens}
                 contextLimit={128000}
                 models={serverConfig?.availableModels ?? []}
-                onModelChange={setCurrentModel}
+                onModelChange={handleModelChange}
                 isThinking={isThinking}
                 isMobile={isMobile}
                 onMenuClick={() => setSidebarOpen(v => !v)}
