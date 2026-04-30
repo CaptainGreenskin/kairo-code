@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, Download } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -15,6 +15,7 @@ import { ShortcutsModal } from '@components/ShortcutsModal';
 import type { Command } from '@components/CommandPalette';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
+import { exportChatAsMarkdown } from '@utils/exportChat';
 import { Virtuoso } from 'react-virtuoso';
 
 function generateId(): string {
@@ -412,6 +413,10 @@ function App() {
         setFileTreeOpen(prev => !prev);
     }, []);
 
+    const handleExport = useCallback(() => {
+        exportChatAsMarkdown(messages, sessionId);
+    }, [messages, sessionId]);
+
     const handleInsertFile = useCallback((path: string, content: string, language: string) => {
         const block = `\`\`\`${language}\n// ${path}\n${content}\n\`\`\`\n`;
         setChatInputAppend(block);
@@ -458,7 +463,14 @@ function App() {
             icon: <HelpCircle size={16} />,
             action: () => { setShowShortcuts(true); setShowCommandPalette(false); },
         },
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme]);
+        ...(messages.length > 0 ? [{
+            id: 'export-chat',
+            label: 'Export Chat',
+            description: 'Download as Markdown',
+            icon: <Download size={16} />,
+            action: () => { handleExport(); setShowCommandPalette(false); },
+        }] : []),
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, messages.length]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -472,6 +484,8 @@ function App() {
                 fileTreeOpen={fileTreeOpen}
                 onOpenSearch={() => setShowSearch(true)}
                 onOpenShortcuts={() => setShowShortcuts(true)}
+                messagesCount={messages.length}
+                onExport={handleExport}
             />
 
             <div className="flex flex-1 overflow-hidden">
