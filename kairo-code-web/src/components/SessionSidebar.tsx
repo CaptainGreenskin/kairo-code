@@ -27,6 +27,9 @@ interface SessionItemProps {
     onPinChange?: () => void;
     onTagsChange?: () => void;
     searchQuery?: string;
+    selectMode?: boolean;
+    isSelected?: boolean;
+    onToggleSelect?: (sessionId: string) => void;
 }
 
 function highlightMatch(text: string, query: string): React.ReactNode {
@@ -44,7 +47,7 @@ function highlightMatch(text: string, query: string): React.ReactNode {
     );
 }
 
-function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange, onTagsChange, searchQuery }: SessionItemProps) {
+function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange, onTagsChange, searchQuery, selectMode, isSelected, onToggleSelect }: SessionItemProps) {
     const [renaming, setRenaming] = useState(false);
     const [nameInput, setNameInput] = useState('');
     const [pinned, setPinned] = useState(() => isSessionPinned(session.sessionId));
@@ -115,10 +118,20 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                 isActive
                     ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                     : 'hover:bg-[var(--bg-hover)]'
-            } ${isLoading ? 'opacity-60' : ''}`}
-            onClick={() => onSelect(session.sessionId)}
+            } ${isLoading ? 'opacity-60' : ''} ${selectMode && isSelected ? 'ring-1 ring-[var(--accent)]' : ''}`}
+            onClick={selectMode ? () => onToggleSelect?.(session.sessionId) : () => onSelect(session.sessionId)}
         >
-            <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+                {selectMode && (
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onToggleSelect?.(session.sessionId)}
+                        onClick={e => e.stopPropagation()}
+                        className="accent-[var(--accent)] cursor-pointer"
+                    />
+                )}
+                <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1">
                     {renaming ? (
                         <input
@@ -170,6 +183,7 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                         {tags.length > 3 && <span className="text-[9px] text-[var(--text-muted)]">+{tags.length - 3}</span>}
                     </div>
                 )}
+                </div>
             </div>
             <div className="flex items-center gap-1">
                 <button
@@ -241,6 +255,8 @@ export function SessionSidebar({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showNewDialog, setShowNewDialog] = useState(false);
+    const [selectMode, setSelectMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [pins, setPins] = useState<string[]>(() => getPinnedSessions());
     const [allTags, setAllTags] = useState<string[]>(() => getAllTags());
     const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
@@ -347,6 +363,36 @@ export function SessionSidebar({
         }
     };
 
+    const exitSelectMode = () => {
+        setSelectMode(false);
+        setSelectedIds(new Set());
+    };
+
+    const toggleSelect = (sessionId: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(sessionId)) next.delete(sessionId);
+            else next.add(sessionId);
+            return next;
+        });
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedIds.size === 0) return;
+        const confirmed = window.confirm(
+            `Delete ${selectedIds.size} session${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`
+        );
+        if (!confirmed) return;
+        selectedIds.forEach(id => {
+            onDeleteSession(id);
+            removeSessionName(id);
+            unpinSession(id);
+        });
+        setPins(getPinnedSessions());
+        fetchSessions();
+        exitSelectMode();
+    };
+
     const handleCreate = useCallback(
         (info: { sessionId: string; model: string }) => {
             setShowNewDialog(false);
@@ -359,13 +405,23 @@ export function SessionSidebar({
     return (
         <>
             <aside className="w-64 border-r border-[var(--border)] bg-[var(--bg-secondary)] flex flex-col shrink-0 hidden lg:flex">
-                <div className="p-3 border-b border-[var(--border)]">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
                     <button
                         onClick={() => setShowNewDialog(true)}
-                        className="w-full px-3 py-2 text-sm font-medium text-white bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] rounded-lg transition-colors flex items-center justify-center gap-2"
+                        className="px-3 py-2 text-sm font-medium text-white bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] rounded-lg transition-colors flex items-center justify-center gap-2"
                     >
                         <Plus size={14} />
                         New Session
+                    </button>
+                    <button
+                        onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+                        className={`text-xs px-2 py-1 rounded transition-colors ${
+                            selectMode
+                                ? 'bg-[var(--accent)] text-white'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                        }`}
+                    >
+                        {selectMode ? 'Cancel' : 'Select'}
                     </button>
                 </div>
 
@@ -410,6 +466,21 @@ export function SessionSidebar({
                     </div>
                 )}
 
+                {selectMode && selectedIds.size > 0 && (
+                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--bg-secondary)] border-b border-[var(--border)]">
+                        <span className="text-xs text-[var(--text-muted)]">
+                            {selectedIds.size} selected
+                        </span>
+                        <button
+                            onClick={handleBulkDelete}
+                            className="text-xs px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-1"
+                        >
+                            <Trash2 size={11} />
+                            Delete {selectedIds.size}
+                        </button>
+                    </div>
+                )}
+
                 <div className="flex-1 overflow-y-auto">
                     {loading ? (
                         <div className="p-4 text-center text-sm text-[var(--text-muted)]">
@@ -446,6 +517,9 @@ export function SessionSidebar({
                                                     onPinChange={handlePinChange}
                                                     onTagsChange={handleTagsChange}
                                                     searchQuery={sessionFilter}
+                                                    selectMode={selectMode}
+                                                    isSelected={selectedIds.has(session.sessionId)}
+                                                    onToggleSelect={toggleSelect}
                                                 />
                                                 {showDivider && (
                                                     <div className="mx-3 my-1 border-t border-[var(--border)]" />
