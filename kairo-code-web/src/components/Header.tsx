@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface HeaderProps {
@@ -12,6 +12,8 @@ interface HeaderProps {
     fileTreeOpen: boolean;
     onOpenSearch: () => void;
     onOpenShortcuts?: () => void;
+    onExport?: () => void;
+    messagesCount?: number;
 }
 
 function getUsageColor(ratio: number): string {
@@ -31,6 +33,8 @@ export function Header({
     fileTreeOpen,
     onOpenSearch,
     onOpenShortcuts,
+    onExport,
+    messagesCount,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -104,6 +108,17 @@ export function Header({
                 >
                     <Search size={18} />
                 </button>
+
+                {(messagesCount ?? 0) > 0 && onExport && (
+                    <button
+                        onClick={onExport}
+                        className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                        title="Export chat (Markdown)"
+                        aria-label="Export chat (Markdown)"
+                    >
+                        <Download size={16} />
+                    </button>
+                )}
 
                 <button
                     onClick={onOpenSettings}
