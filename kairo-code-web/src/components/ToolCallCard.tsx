@@ -12,6 +12,95 @@ interface ToolCallCardProps {
     approvalTimeout?: number;
 }
 
+const MAX_PREVIEW = 200;
+
+interface ResultOutputProps {
+    toolName: string;
+    result: string;
+    input: Record<string, unknown>;
+}
+
+function ResultOutput({ toolName, result, input }: ResultOutputProps) {
+    const [expanded, setExpanded] = useState(false);
+    const preview = result.slice(0, MAX_PREVIEW);
+    const hasMore = result.length > MAX_PREVIEW;
+
+    if (toolName === 'bash') {
+        return (
+            <div className="border-t border-[var(--border)]">
+                <div className="relative">
+                    <TerminalOutput output={expanded ? result : preview} />
+                    {hasMore && !expanded && (
+                        <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[var(--code-bg)] to-transparent" />
+                    )}
+                </div>
+                {hasMore && (
+                    <button
+                        onClick={() => setExpanded((prev) => !prev)}
+                        className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
+                    >
+                        {expanded ? 'Show less' : `Show ${result.length - MAX_PREVIEW} more chars…`}
+                    </button>
+                )}
+            </div>
+        );
+    }
+
+    if (toolName === 'write_file') {
+        return (
+            <div className="border-t border-[var(--border)]">
+                <FileDiffView
+                    fileName={(input as { path?: string })?.path || 'file'}
+                    original=""
+                    modified={expanded ? result : preview}
+                    mode="preview"
+                />
+                {hasMore && (
+                    <button
+                        onClick={() => setExpanded((prev) => !prev)}
+                        className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
+                    >
+                        {expanded ? 'Show less' : `Show ${result.length - MAX_PREVIEW} more chars…`}
+                    </button>
+                )}
+            </div>
+        );
+    }
+
+    if (toolName === 'patch_apply') {
+        return (
+            <div className="border-t border-[var(--border)]">
+                <FileDiffView
+                    fileName={(input as { path?: string })?.path || 'file'}
+                    original={extractOriginal(result)}
+                    modified={extractModified(result)}
+                />
+            </div>
+        );
+    }
+
+    // Generic tool: show raw output with expand/collapse
+    return (
+        <div className="border-t border-[var(--border)]">
+            <pre
+                className={`px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] whitespace-pre-wrap break-all ${
+                    !expanded && hasMore ? 'line-clamp-3' : 'max-h-96 overflow-auto'
+                }`}
+            >
+                {expanded ? result : preview}
+            </pre>
+            {hasMore && (
+                <button
+                    onClick={() => setExpanded((prev) => !prev)}
+                    className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
+                >
+                    {expanded ? 'Show less' : `Show ${result.length - MAX_PREVIEW} more chars…`}
+                </button>
+            )}
+        </div>
+    );
+}
+
 const statusConfig: Record<ToolCall['status'], { label: string; color: string; icon: React.ReactNode }> = {
     pending: {
         label: 'Pending',
@@ -194,28 +283,11 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
             )}
 
             {toolCall.result && toolCall.status === 'done' && (
-                <div className="border-t border-[var(--border)]">
-                    {toolCall.toolName === 'bash' ? (
-                        <TerminalOutput output={toolCall.result} />
-                    ) : toolCall.toolName === 'write_file' ? (
-                        <FileDiffView
-                            fileName={(toolCall.input as { path?: string })?.path || 'file'}
-                            original=""
-                            modified={toolCall.result}
-                            mode="preview"
-                        />
-                    ) : toolCall.toolName === 'patch_apply' ? (
-                        <FileDiffView
-                            fileName={(toolCall.input as { path?: string })?.path || 'file'}
-                            original={extractOriginal(toolCall.result)}
-                            modified={extractModified(toolCall.result)}
-                        />
-                    ) : (
-                        <pre className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] max-h-48">
-                            {toolCall.result}
-                        </pre>
-                    )}
-                </div>
+                <ResultOutput
+                    toolName={toolCall.toolName}
+                    result={toolCall.result}
+                    input={toolCall.input}
+                />
             )}
 
             {isPending && onApprove && (
