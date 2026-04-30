@@ -1,0 +1,44 @@
+# =============================================================================
+# Kairo Code — Docker Compose (Production)
+# =============================================================================
+# Usage:
+#   docker compose up -d          # Start in background
+#   docker compose logs -f        # Follow logs
+#   docker compose down           # Stop and remove
+#   docker compose up --build     # Rebuild and start
+# =============================================================================
+
+services:
+  kairo-server:
+    build:
+      context: ./kairo-code-server
+      dockerfile: Dockerfile
+    image: kairo-code-server:latest
+    container_name: kairo-server
+    environment:
+      - KAIRO_CODE_API_KEY=${KAIRO_CODE_API_KEY}
+      - KAIRO_PROVIDER=${KAIRO_PROVIDER:-openai}
+      - KAIRO_MODEL=${KAIRO_MODEL:-gpt-4o}
+      - KAIRO_BASE_URL=${KAIRO_BASE_URL:-https://api.openai.com}
+      - KAIRO_WORKING_DIR=/workspace
+      - JAVA_OPTS=${JAVA_OPTS:--Xms256m -Xmx1024m}
+    volumes:
+      - ./workspace:/workspace
+      - kairo-memory:/root/.kairo-code/memory
+    restart: unless-stopped
+
+  kairo-web:
+    build:
+      context: ./kairo-code-web
+      dockerfile: Dockerfile
+    image: kairo-code-web:latest
+    container_name: kairo-web
+    ports:
+      - "${KAIRO_WEB_PORT:-3000}:80"
+    depends_on:
+      - kairo-server
+    restart: unless-stopped
+
+volumes:
+  kairo-memory:
+    driver: local
