@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree, Search } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface HeaderProps {
@@ -11,6 +11,7 @@ interface HeaderProps {
     onToggleFileTree: () => void;
     fileTreeOpen: boolean;
     onOpenSearch: () => void;
+    onOpenShortcuts?: () => void;
 }
 
 function getUsageColor(ratio: number): string {
@@ -29,6 +30,7 @@ export function Header({
     onToggleFileTree,
     fileTreeOpen,
     onOpenSearch,
+    onOpenShortcuts,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -120,6 +122,17 @@ export function Header({
                 >
                     <Github size={18} />
                 </a>
+
+                {onOpenShortcuts && (
+                    <button
+                        onClick={onOpenShortcuts}
+                        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                        aria-label="Keyboard shortcuts"
+                        title="Keyboard shortcuts (?)"
+                    >
+                        <HelpCircle size={16} />
+                    </button>
+                )}
 
                 <button
                     onClick={handleToggle}
