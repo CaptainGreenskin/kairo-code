@@ -23,6 +23,8 @@ interface ChatMessageProps {
     onInsertToChat?: (text: string) => void;
     onApplyToFile?: (filename: string, content: string) => void;
     onRetry?: () => void;
+    searchHighlight?: boolean;
+    isCurrentMatch?: boolean;
 }
 
 interface CodeBlockProps {
@@ -160,7 +162,7 @@ function ThinkBlock({ content }: { content: string }) {
     );
 }
 
-export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
     const [editing, setEditing] = useState(false);
     const [editText, setEditText] = useState(message.content);
@@ -279,7 +281,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
     return (
         <div className="flex justify-start mb-4 animate-slide-up">
             <div className="max-w-[85%]">
-                <div className="relative group px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)]">
+                <div className={`relative group px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)] ${searchHighlight ? 'ring-1 ring-[var(--accent)]/40' : ''} ${isCurrentMatch ? 'ring-2 ring-[var(--accent)]' : ''}`}>
                     {/* Right-side overlay: timestamp + action buttons */}
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-end gap-1">
                         {/* Timestamp tooltip */}

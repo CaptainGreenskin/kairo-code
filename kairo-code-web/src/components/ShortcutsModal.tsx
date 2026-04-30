@@ -31,6 +31,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
         title: 'Chat',
         entries: [
             { keys: ['⌘', '↵'], description: 'Send message' },
+            { keys: ['⌘', 'F'], description: 'Search messages' },
             { keys: ['⌘', '⇧', 'C'], description: 'Copy conversation as Markdown' },
             { keys: ['?'], description: 'Show shortcuts' },
         ],

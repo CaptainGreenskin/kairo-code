@@ -18,6 +18,7 @@ import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
 import { PendingApprovalBanner } from '@components/PendingApprovalBanner';
+import { MessageSearchBar } from '@components/MessageSearchBar';
 import { WelcomeScreen } from '@components/WelcomeScreen';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
@@ -27,6 +28,8 @@ import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent'
 import { getConfig } from '@api/config';
 import { exportAndDownload, copySessionToClipboard } from '@utils/exportSession';
 import { estimateMessagesTokens } from '@utils/tokenCount';
+import { searchMessages } from '@utils/messageSearch';
+import type { MessageSearchResult } from '@utils/messageSearch';
 import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
 import { setSessionName, getSessionName } from '@utils/sessionNames';
@@ -94,6 +97,10 @@ function App() {
     const [fileTreeOpen, setFileTreeOpen] = useState(() => prefs.fileTreeOpen ?? false);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [showMessageSearch, setShowMessageSearch] = useState(false);
+    const [messageSearchQuery, setMessageSearchQuery] = useState('');
+    const [messageSearchResults, setMessageSearchResults] = useState<MessageSearchResult[]>([]);
+    const [messageSearchMatchIndex, setMessageSearchMatchIndex] = useState(0);
     const [chatInputAppend, setChatInputAppend] = useState<string>('');
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
     const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -366,19 +373,22 @@ function App() {
         }
     }, [sessionId, messages]);
 
-    // Global keyboard shortcut: Cmd+F or Cmd+Shift+F opens message search
+    // Global keyboard shortcut: Cmd+F opens in-message search, Cmd+Shift+F opens workspace search
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'f') {
+                const tag = (e.target as HTMLElement).tagName;
+                if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+                    e.preventDefault();
+                    setShowMessageSearch(v => !v);
+                }
+            }
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
                 e.preventDefault();
                 setShowSearch(v => {
                     if (!v) setSearchQuery('');
                     return !v;
                 });
-            }
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
-                e.preventDefault();
-                setShowSearch(true);
             }
         };
         window.addEventListener('keydown', handler);
@@ -702,6 +712,44 @@ function App() {
         setSearchQuery('');
     }, []);
 
+    // In-message search: sorted by original message order for navigation
+    const sortedMessageSearchResults = useMemo(
+        () => [...messageSearchResults].sort((a, b) => a.messageIndex - b.messageIndex),
+        [messageSearchResults],
+    );
+
+    const handleMessageSearchQueryChange = useCallback((q: string) => {
+        setMessageSearchQuery(q);
+        const results = searchMessages(messages, q);
+        setMessageSearchResults(results);
+        setMessageSearchMatchIndex(0);
+        if (results.length > 0) {
+            const sorted = [...results].sort((a, b) => a.messageIndex - b.messageIndex);
+            virtuosoRef.current?.scrollToIndex({ index: sorted[0].messageIndex, behavior: 'smooth' });
+        }
+    }, [messages]);
+
+    const handleMessageSearchNext = useCallback(() => {
+        if (sortedMessageSearchResults.length === 0) return;
+        const next = (messageSearchMatchIndex + 1) % sortedMessageSearchResults.length;
+        setMessageSearchMatchIndex(next);
+        virtuosoRef.current?.scrollToIndex({ index: sortedMessageSearchResults[next].messageIndex, behavior: 'smooth' });
+    }, [sortedMessageSearchResults, messageSearchMatchIndex]);
+
+    const handleMessageSearchPrev = useCallback(() => {
+        if (sortedMessageSearchResults.length === 0) return;
+        const prev = (messageSearchMatchIndex - 1 + sortedMessageSearchResults.length) % sortedMessageSearchResults.length;
+        setMessageSearchMatchIndex(prev);
+        virtuosoRef.current?.scrollToIndex({ index: sortedMessageSearchResults[prev].messageIndex, behavior: 'smooth' });
+    }, [sortedMessageSearchResults, messageSearchMatchIndex]);
+
+    const handleCloseMessageSearch = useCallback(() => {
+        setShowMessageSearch(false);
+        setMessageSearchQuery('');
+        setMessageSearchResults([]);
+        setMessageSearchMatchIndex(0);
+    }, []);
+
     const filteredMessages = useMemo(() => {
         if (!searchQuery.trim()) return messages;
         const q = searchQuery.toLowerCase();
@@ -931,12 +979,22 @@ function App() {
                         </div>
                     ) : (
                         <>
+                        {showMessageSearch && (
+                            <MessageSearchBar
+                                onQueryChange={handleMessageSearchQueryChange}
+                                onClose={handleCloseMessageSearch}
+                                matchCount={sortedMessageSearchResults.length}
+                                currentMatch={sortedMessageSearchResults.length > 0 ? messageSearchMatchIndex + 1 : 0}
+                                onPrev={handleMessageSearchPrev}
+                                onNext={handleMessageSearchNext}
+                            />
+                        )}
                         <ErrorBoundary>
                         <Virtuoso
                             ref={virtuosoRef}
                             className="flex-1 px-4 py-4"
                             data={filteredMessages}
-                            followOutput={showSearch && searchQuery ? false : "smooth"}
+                            followOutput={(showSearch && searchQuery) || (showMessageSearch && messageSearchQuery) ? false : "smooth"}
                             atBottomStateChange={(bottom) => setAtBottom(bottom)}
                             itemContent={(index, msg) => {
                                 const msgObj = msg as Message;
@@ -944,6 +1002,9 @@ function App() {
                                 const showDateSep = prevMsg && prevMsg.timestamp && msgObj.timestamp &&
                                     new Date(msgObj.timestamp).toDateString() !== new Date(prevMsg.timestamp).toDateString();
                                 const dateLabel = msgObj.timestamp ? new Date(msgObj.timestamp).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+                                const currentMatchMsgIdx = sortedMessageSearchResults[messageSearchMatchIndex]?.messageIndex;
+                                const isSearchMatch = messageSearchQuery.length > 0 && sortedMessageSearchResults.some(r => r.messageIndex === index);
+                                const isCurrentMatch = index === currentMatchMsgIdx;
                                 return (
                                     <div className="max-w-3xl mx-auto">
                                         {showDateSep && (
@@ -963,6 +1024,8 @@ function App() {
                                             onInsertToChat={handleInsertToChat}
                                             onApplyToFile={handleApplyToFile}
                                             onRetry={msgObj.role === 'error' ? () => handleRegenerate(msgObj.id) : undefined}
+                                            searchHighlight={isSearchMatch}
+                                            isCurrentMatch={isCurrentMatch}
                                         />
                                     </div>
                                 );
