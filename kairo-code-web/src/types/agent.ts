@@ -134,3 +134,6 @@ export interface SearchResponse {
     matches: SearchMatch[];
     truncated: boolean;
 }
+
+/** WebSocket connection status for the UI indicator. */
+export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';

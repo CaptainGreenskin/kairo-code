@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
-import type { AgentEvent } from '@/types/agent';
+import type { AgentEvent, ConnectionStatus } from '@/types/agent';
 import { useSessionStore } from '@store/sessionStore';
 
 const WS_ENDPOINT = '/ws';
@@ -90,12 +90,10 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
     }
 }
 
-const MAX_RECONNECT_ATTEMPTS = 3;
-const INITIAL_RECONNECT_DELAY = 1000;
-
 interface UseAgentWebSocketReturn {
     isConnected: boolean;
     isThinking: boolean;
+    connectionStatus: ConnectionStatus;
     connect: () => void;
     disconnect: () => void;
     sendMessage: (sessionId: string, text: string) => void;
@@ -110,6 +108,7 @@ export function useAgentWebSocket(
 ): UseAgentWebSocketReturn {
     const [isConnected, setIsConnected] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
     const clientRef = useRef<Client | null>(null);
     const subscriptionRef = useRef<StompSubscription | null>(null);
     const reconnectAttemptsRef = useRef(0);
@@ -139,6 +138,7 @@ export function useAgentWebSocket(
 
     const createConnection = useCallback(() => {
             cleanup();
+            setConnectionStatus('connecting');
 
             const client = new Client({
                 webSocketFactory: () => new SockJS(WS_ENDPOINT),
@@ -147,6 +147,7 @@ export function useAgentWebSocket(
                 heartbeatOutgoing: 10000,
                 onConnect: () => {
                     setIsConnected(true);
+                    setConnectionStatus('connected');
                     reconnectAttemptsRef.current = 0;
 
                     // Resolve session ID from cascading sources:
@@ -211,25 +212,24 @@ export function useAgentWebSocket(
                 onStompError: (frame) => {
                     console.error('[WebSocket] STOMP error:', frame);
                     setIsConnected(false);
+                    setConnectionStatus('error');
                 },
                 onWebSocketClose: () => {
                     setIsConnected(false);
-                    // Auto-reconnect with exponential backoff
-                    if (
-                        reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS &&
-                        sessionIdRef.current
-                    ) {
-                        const delay =
-                            INITIAL_RECONNECT_DELAY *
-                            Math.pow(2, reconnectAttemptsRef.current);
+                    setConnectionStatus('disconnected');
+                    // Auto-reconnect with exponential backoff (1s → 2s → 4s → … → 30s cap), infinite attempts
+                    if (sessionIdRef.current) {
+                        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
                         reconnectAttemptsRef.current += 1;
                         reconnectTimerRef.current = setTimeout(() => {
+                            reconnectTimerRef.current = null;
                             createConnection();
                         }, delay);
                     }
                 },
                 onWebSocketError: (event) => {
                     console.error('[WebSocket] WS error:', event);
+                    setConnectionStatus('error');
                 },
             });
 
@@ -245,6 +245,7 @@ export function useAgentWebSocket(
         cleanup();
         setIsConnected(false);
         setIsThinking(false);
+        setConnectionStatus('disconnected');
     }, [cleanup]);
 
     const publish = useCallback(
@@ -334,6 +335,7 @@ export function useAgentWebSocket(
     return {
         isConnected,
         isThinking,
+        connectionStatus,
         connect: createConnection,
         disconnect,
         sendMessage,
