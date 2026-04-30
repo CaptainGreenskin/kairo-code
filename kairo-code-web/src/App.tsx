@@ -311,6 +311,21 @@ function App() {
         [approveTool, sessionId],
     );
 
+    const handleRegenerate = useCallback((messageId: string) => {
+        const msgs = useSessionStore.getState().messages;
+        const idx = msgs.findIndex(m => m.id === messageId);
+        const prevUser = [...msgs.slice(0, idx)].reverse().find(m => m.role === 'user');
+        if (!prevUser || !sessionId) return;
+        sendMessage(sessionId, prevUser.content);
+    }, [sessionId, sendMessage]);
+
+    const handleEditResend = useCallback((messageId: string, newText: string) => {
+        const msgs = useSessionStore.getState().messages;
+        const updated = msgs.map(m => m.id === messageId ? { ...m, content: newText } : m);
+        setMessages(updated);
+        if (sessionId) sendMessage(sessionId, newText);
+    }, [sessionId, sendMessage, setMessages]);
+
     const handleNewSession = useCallback(() => {
         disconnect();
         setSessionId(null);
@@ -466,6 +481,8 @@ function App() {
                                         onApproveTool={handleApproveTool}
                                         isStreaming={(msg as Message).id === streamingMsgId}
                                         sessionId={sessionId ?? undefined}
+                                        onRegenerate={handleRegenerate}
+                                        onEditResend={handleEditResend}
                                     />
                                 </div>
                             )}

@@ -2,7 +2,7 @@ import { useSyncExternalStore, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Loader2, Copy, Check } from 'lucide-react';
+import { Loader2, Copy, Check, RefreshCw, Pencil } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
@@ -13,6 +13,8 @@ interface ChatMessageProps {
     onApproveTool?: (toolCallId: string, approved: boolean) => void;
     isStreaming?: boolean;
     sessionId?: string;
+    onRegenerate?: (messageId: string) => void;
+    onEditResend?: (messageId: string, newText: string) => void;
 }
 
 function CodeBlock({ language, content }: { language: string; content: string }) {
@@ -50,8 +52,10 @@ function CodeBlock({ language, content }: { language: string; content: string })
     );
 }
 
-export function ChatMessage({ message, onApproveTool, isStreaming, sessionId }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const [editText, setEditText] = useState(message.content);
 
     // Use external streaming store for active streaming messages
     const streamingContent = useSyncExternalStore(
@@ -65,10 +69,68 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId }: 
         return (
             <div className="flex justify-end mb-4 animate-slide-up">
                 <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-[var(--color-primary)] text-white">
-                    <p className="whitespace-pre-wrap text-sm">{message.content}</p>
-                    <span className="text-[10px] opacity-60 mt-1 block">
-                        {new Date(message.timestamp).toLocaleTimeString()}
-                    </span>
+                    {editing ? (
+                        <div>
+                            <textarea
+                                className="w-full p-2 text-sm bg-[var(--color-primary)] border border-white/30 rounded-lg resize-none outline-none text-white placeholder-white/50"
+                                value={editText}
+                                onChange={e => setEditText(e.target.value)}
+                                onKeyDown={e => {
+                                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                                        e.preventDefault();
+                                        if (editText.trim()) {
+                                            onEditResend?.(message.id, editText.trim());
+                                            setEditing(false);
+                                        }
+                                    }
+                                    if (e.key === 'Escape') {
+                                        setEditing(false);
+                                        setEditText(message.content);
+                                    }
+                                }}
+                                rows={Math.min(editText.split('\n').length + 1, 8)}
+                                autoFocus
+                            />
+                            <div className="flex gap-2 mt-1">
+                                <button
+                                    onClick={() => {
+                                        if (editText.trim()) {
+                                            onEditResend?.(message.id, editText.trim());
+                                            setEditing(false);
+                                        }
+                                    }}
+                                    className="px-3 py-1 text-xs font-medium text-[var(--color-primary)] bg-white rounded hover:bg-white/90 transition-colors"
+                                >
+                                    Resend
+                                </button>
+                                <button
+                                    onClick={() => { setEditing(false); setEditText(message.content); }}
+                                    className="px-3 py-1 text-xs font-medium text-white/80 rounded hover:bg-white/10 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                            <div className="text-[10px] text-white/50 mt-0.5">⌘↵ to send · Esc to cancel</div>
+                        </div>
+                    ) : (
+                        <>
+                            <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+                            <div className="flex items-center justify-between mt-1">
+                                <span className="text-[10px] opacity-60">
+                                    {new Date(message.timestamp).toLocaleTimeString()}
+                                </span>
+                                {onEditResend && !isStreaming && (
+                                    <button
+                                        onClick={() => setEditing(true)}
+                                        title="Edit message"
+                                        className="p-1 rounded hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                                    >
+                                        <Pencil size={14} />
+                                    </button>
+                                )}
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
         );
@@ -90,6 +152,15 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId }: 
                 <div className="relative group px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)]">
                     {/* Message-level action buttons */}
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                        {onRegenerate && !isStreaming && (
+                            <button
+                                onClick={() => onRegenerate(message.id)}
+                                className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                title="Regenerate response"
+                            >
+                                <RefreshCw size={14} />
+                            </button>
+                        )}
                         <button
                             onClick={handleCopyMessage}
                             className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
