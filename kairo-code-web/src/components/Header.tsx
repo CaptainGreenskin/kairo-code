@@ -31,8 +31,10 @@ export function Header({
     }, []);
 
     const handleToggle = () => {
+        const newIsDark = !isDark;
         document.documentElement.classList.toggle('dark');
-        setIsDark((prev) => !prev);
+        setIsDark(newIsDark);
+        localStorage.setItem('kairo-theme', newIsDark ? 'dark' : 'light');
         onToggleTheme();
     };
 
