@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Square } from 'lucide-react';
 import { FilePicker } from './FilePicker';
 import { loadHistory, pushHistory } from '@utils/inputHistory';
+import { saveDraft, clearDraft } from '@utils/inputDraft';
 
 interface ChatInputProps {
     onSend: (text: string) => void;
@@ -12,14 +13,15 @@ interface ChatInputProps {
     appendText?: string;
     onAppendConsumed?: () => void;
     sessionId?: string;
+    initialDraft?: string;
 }
 
 const AT_RE = /@([^\s]*)$/;
 const CHAR_WARN_THRESHOLD = 2000;
 const CHAR_MAX = 4000;
 
-export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sessionId }: ChatInputProps) {
-    const [text, setText] = useState('');
+export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sessionId, initialDraft }: ChatInputProps) {
+    const [text, setText] = useState(initialDraft ?? '');
     const [dragging, setDragging] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
     const [showFilePicker, setShowFilePicker] = useState(false);
@@ -43,6 +45,13 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
         historyIndexRef.current = null;
         draftRef.current = '';
     }, [sessionId]);
+
+    // Save draft to localStorage with debounce
+    useEffect(() => {
+        if (!sessionId) return;
+        const timer = setTimeout(() => saveDraft(sessionId, text), 300);
+        return () => clearTimeout(timer);
+    }, [text, sessionId]);
 
     // Auto-adjust textarea height
     useEffect(() => {
@@ -150,6 +159,7 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
         if (sessionId) pushHistory(sessionId, trimmed);
         historyIndexRef.current = null;
         draftRef.current = '';
+        if (sessionId) clearDraft(sessionId);
         onSend(trimmed);
         setText('');
         setShowFilePicker(false);
