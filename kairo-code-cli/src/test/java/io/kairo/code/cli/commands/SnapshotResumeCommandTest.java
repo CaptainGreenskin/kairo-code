@@ -182,10 +182,10 @@ class SnapshotResumeCommandTest {
         ReplContext resumeCtx = createContext(stubAgent());
         outputCapture.getBuffer().setLength(0);
 
-        new ResumeCommand().execute("check", resumeCtx);
+        new ResumeCommand().execute("snapshot:check", resumeCtx);
 
         String output = outputCapture.toString();
-        assertThat(output).contains("✓ Resumed from 'check'");
+        assertThat(output).contains("✓ Resumed from snapshot 'check'");
         assertThat(output).contains("9876 tokens");
     }
 
@@ -193,7 +193,7 @@ class SnapshotResumeCommandTest {
     void resumeMissingKeyShowsNotFound() {
         ReplContext context = createContext(stubAgent());
 
-        new ResumeCommand().execute("nonexistent", context);
+        new ResumeCommand().execute("snapshot:nonexistent", context);
 
         assertThat(outputCapture.toString()).contains("Snapshot not found: nonexistent");
     }
@@ -202,16 +202,16 @@ class SnapshotResumeCommandTest {
     void resumeWithoutKeyShowsUsage() {
         ReplContext context = createContext(stubAgent());
 
-        new ResumeCommand().execute("", context);
+        new ResumeCommand().execute("snapshot:", context);
 
-        assertThat(outputCapture.toString()).contains("Usage: :resume");
+        assertThat(outputCapture.toString()).contains("Usage: :resume snapshot:<key>");
     }
 
     @Test
     void resumeNoStoreReportsUnavailable() {
         ReplContext context = createContextWithoutStore();
 
-        new ResumeCommand().execute("anything", context);
+        new ResumeCommand().execute("snapshot:anything", context);
 
         assertThat(outputCapture.toString()).contains("Resume unavailable");
     }

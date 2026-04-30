@@ -62,6 +62,21 @@ public class AgentEventPrinter {
 
     private final Map<String, Long> toolStartTimes = new ConcurrentHashMap<>();
 
+    /** Return the cumulative input tokens across all turns. */
+    public long totalInputTokens() {
+        return totalInputTokens.get();
+    }
+
+    /** Return the cumulative output tokens across all turns. */
+    public long totalOutputTokens() {
+        return totalOutputTokens.get();
+    }
+
+    /** Return the max context token limit used for the fill bar. */
+    public int maxContextTokens() {
+        return maxContextTokens;
+    }
+
     public AgentEventPrinter(PrintWriter writer) {
         this(writer, "", false, null, false);
     }

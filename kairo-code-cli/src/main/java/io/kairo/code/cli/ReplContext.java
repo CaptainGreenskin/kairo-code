@@ -4,8 +4,10 @@ import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentSnapshot;
 import io.kairo.api.agent.AgentState;
 import io.kairo.api.agent.SnapshotStore;
+import io.kairo.api.memory.MemoryStore;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.code.core.session.SessionWriter;
 import io.kairo.api.skill.SkillRegistry;
 import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.core.CodeAgentConfig;
@@ -42,6 +44,8 @@ public class ReplContext {
     private final HooksConfig hooksConfig;
     private final Set<String> loadedSkills = new LinkedHashSet<>();
     private final Map<String, String> skillSources;
+    private final MemoryStore memoryStore;
+    private final SessionWriter sessionWriter;
     private volatile StreamingAgentRunner runner;
     private boolean running = true;
     private final Instant sessionStartTime;
@@ -58,7 +62,7 @@ public class ReplContext {
             SnapshotStore snapshotStore) {
         this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
                 approvalHandler, skillRegistry, snapshotStore, new HooksConfig(java.util.Map.of()),
-                java.util.Map.of());
+                java.util.Map.of(), null);
     }
 
     public ReplContext(
@@ -73,7 +77,7 @@ public class ReplContext {
             SnapshotStore snapshotStore,
             HooksConfig hooksConfig) {
         this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
-                approvalHandler, skillRegistry, snapshotStore, hooksConfig, java.util.Map.of());
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, java.util.Map.of(), null);
     }
 
     public ReplContext(
@@ -88,6 +92,41 @@ public class ReplContext {
             SnapshotStore snapshotStore,
             HooksConfig hooksConfig,
             Map<String, String> skillSources) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, skillSources, null);
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig,
+            Map<String, String> skillSources,
+            MemoryStore memoryStore) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, skillSources, memoryStore, null);
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig,
+            Map<String, String> skillSources,
+            MemoryStore memoryStore,
+            SessionWriter sessionWriter) {
         this.session = session;
         this.config = config;
         this.lineReader = lineReader;
@@ -100,6 +139,8 @@ public class ReplContext {
         this.snapshotStore = snapshotStore;
         this.hooksConfig = hooksConfig != null ? hooksConfig : new HooksConfig(java.util.Map.of());
         this.skillSources = skillSources != null ? skillSources : java.util.Map.of();
+        this.memoryStore = memoryStore;
+        this.sessionWriter = sessionWriter;
         this.sessionStartTime = Instant.now();
         if (session != null && session.loadedSkills() != null) {
             loadedSkills.addAll(session.loadedSkills());
@@ -155,6 +196,16 @@ public class ReplContext {
     /** Map of skill name to source tag (classpath/global/project). */
     public Map<String, String> skillSources() {
         return skillSources;
+    }
+
+    /** The memory store for persistent cross-session memory. May be {@code null}. */
+    public MemoryStore memoryStore() {
+        return memoryStore;
+    }
+
+    /** The session writer for JSONL turn persistence. May be {@code null}. */
+    public SessionWriter sessionWriter() {
+        return sessionWriter;
     }
 
     public CodeAgentConfig config() {

@@ -186,6 +186,82 @@ class SkillCommandTest {
         assertThat(output).contains("[project]");
     }
 
+    @Test
+    void listFiltersByCategory() {
+        skillRegistry.register(new SkillDefinition(
+                "deploy-helper", "1.0.0", "Helps deploy",
+                "# deploy\n\nInstructions", List.of(), SkillCategory.DEVOPS));
+        ReplContext context = createContext();
+
+        new SkillCommand().execute("list code", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("code-review");
+        assertThat(output).contains("test-writer");
+        assertThat(output).doesNotContain("deploy-helper");
+    }
+
+    @Test
+    void listWithUnknownCategoryReportsError() {
+        ReplContext context = createContext();
+
+        new SkillCommand().execute("list bogus", context);
+
+        assertThat(outputCapture.toString()).contains("Unknown category: bogus");
+    }
+
+    @Test
+    void listEmptyCategoryShowsMessage() {
+        ReplContext context = createContext();
+
+        new SkillCommand().execute("list devops", context);
+
+        assertThat(outputCapture.toString()).contains("No skills in category: DEVOPS");
+    }
+
+    @Test
+    void infoShowsMetadata() {
+        ReplContext context = createContext(Map.of("code-review", "classpath"));
+
+        new SkillCommand().execute("info code-review", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("Skill: code-review");
+        assertThat(output).contains("Version:     1.0.0");
+        assertThat(output).contains("Category:    CODE");
+        assertThat(output).contains("Description: Walk the diff and produce findings.");
+        assertThat(output).contains("Source:      classpath");
+        assertThat(output).contains("Status:      available");
+    }
+
+    @Test
+    void infoShowsLoadedStatus() {
+        ReplContext context = createContext();
+        context.loadedSkills().add("code-review");
+
+        new SkillCommand().execute("info code-review", context);
+
+        assertThat(outputCapture.toString()).contains("Status:      loaded");
+    }
+
+    @Test
+    void infoUnknownSkillReportsError() {
+        ReplContext context = createContext();
+
+        new SkillCommand().execute("info nonexistent", context);
+
+        assertThat(outputCapture.toString()).contains("Unknown skill: nonexistent");
+    }
+
+    @Test
+    void infoNoNameShowsUsage() {
+        ReplContext context = createContext();
+
+        new SkillCommand().execute("info", context);
+
+        assertThat(outputCapture.toString()).contains("Usage: :skill info <name>");
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────
 
     private ReplContext createContext() {

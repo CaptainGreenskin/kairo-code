@@ -8,12 +8,15 @@ import io.kairo.api.skill.SkillRegistry;
 import io.kairo.code.cli.commands.ClearCommand;
 import io.kairo.code.cli.commands.CompactCommand;
 import io.kairo.code.cli.commands.CostCommand;
+import io.kairo.code.cli.commands.DoctorCommand;
 import io.kairo.code.cli.commands.ExitCommand;
 import io.kairo.code.cli.commands.HelpCommand;
 import io.kairo.code.cli.commands.HistoryCommand;
 import io.kairo.code.cli.commands.HookCommand;
+import io.kairo.code.cli.commands.InitCommand;
 import io.kairo.code.cli.commands.LearnedCommand;
 import io.kairo.code.cli.commands.McpCommand;
+import io.kairo.code.cli.commands.MemoryCommand;
 import io.kairo.code.cli.commands.ModelCommand;
 import io.kairo.code.cli.commands.PlanCommand;
 import io.kairo.code.cli.commands.ResumeCommand;
@@ -23,12 +26,17 @@ import io.kairo.code.cli.commands.StatsCommand;
 import io.kairo.code.cli.commands.MetricsCommand;
 import io.kairo.code.cli.commands.SessionCommand;
 import io.kairo.code.cli.commands.UsageCommand;
+import io.kairo.api.memory.MemoryStore;
 import io.kairo.code.core.evolution.FailurePatternTracker;
 import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.evolution.ReflectionPipeline;
 import io.kairo.code.core.evolution.ToolStrikeEvent;
+import io.kairo.code.core.hook.SessionAppendHook;
+import io.kairo.code.core.memory.AutoMemoryHook;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
+import io.kairo.code.core.session.SessionWriter;
+import io.kairo.core.memory.FileMemoryStore;
 import io.kairo.code.cli.hooks.HookExecutor;
 import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.cli.hooks.ShellHookListener;
@@ -60,13 +68,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.UserInterruptException;
-import org.jline.reader.impl.completer.AggregateCompleter;
-import org.jline.reader.impl.completer.StringsCompleter;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.slf4j.Logger;
@@ -89,6 +96,7 @@ public class ReplLoop {
     private static final String KAIRO_CODE_DIR = ".kairo-code";
     private static final String HISTORY_FILE = "history";
     private static final String PROMPT = "kairo-code> ";
+    private static final String CONTINUATION_PROMPT = "> ";
     private static final String VERSION = "0.1.0";
 
     /** Built-in skills shipped on the classpath under {@code skills/}. */
@@ -165,13 +173,10 @@ public class ReplLoop {
             SnapshotStore snapshotStore = bootstrapSnapshotStore(kairoDir);
             CommandRegistry registry = createCommandRegistry();
 
+            final SkillRegistry completionRegistry = skillRegistry;
             LineReader lineReader = LineReaderBuilder.builder()
                     .terminal(terminal)
-                    .completer(new AggregateCompleter(
-                            new StringsCompleter(
-                                    registry.allCommandNames().stream()
-                                            .map(n -> ":" + n)
-                                            .toList())))
+                    .completer(new ReplCompleter(registry, () -> completionRegistry))
                     .variable(LineReader.HISTORY_FILE, kairoDir.resolve(HISTORY_FILE))
                     .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
                     .build();
@@ -209,6 +214,29 @@ public class ReplLoop {
             // Wire tool usage tracker: collects per-tool call count, success rate, avg duration.
             ToolUsageTracker usageTracker = new ToolUsageTracker();
             allHooks.add(usageTracker);
+
+            // Wire persistent memory store for cross-session memory enrichment.
+            // Storage path: {workingDir}/.kairo-code/memory/ (project-local memories).
+            Path memoryDir = config.workingDir() != null && !config.workingDir().isBlank()
+                    ? Path.of(config.workingDir(), KAIRO_CODE_DIR, "memory")
+                    : kairoDir.resolve("memory");
+            MemoryStore memoryStore = new FileMemoryStore(memoryDir);
+            log.debug("FileMemoryStore initialized at {}", memoryDir);
+
+            // Wire auto-memory hook: extracts facts/preferences from model responses and saves
+            // them to the memory store for cross-session enrichment.
+            allHooks.add(new AutoMemoryHook(memoryStore));
+
+            // Wire session persistence: each turn (user + assistant) is appended to a JSONL file
+            // under {workingDir}/.kairo-code/sessions/<sessionId>.jsonl.
+            String sessionId = UUID.randomUUID().toString().substring(0, 8);
+            Path sessionsDir = config.workingDir() != null && !config.workingDir().isBlank()
+                    ? Path.of(config.workingDir(), KAIRO_CODE_DIR, "sessions")
+                    : kairoDir.resolve("sessions");
+            Path sessionFile = sessionsDir.resolve(sessionId + ".jsonl");
+            SessionWriter sessionWriter = new SessionWriter(sessionFile);
+            allHooks.add(new SessionAppendHook(sessionWriter));
+            log.info("Session persistence: {}", sessionFile);
 
             // Wire turn metrics collector: collects per-turn tool calls, success, duration.
             TurnMetricsCollector turnMetrics = new TurnMetricsCollector();
@@ -255,6 +283,7 @@ public class ReplLoop {
                             .withTextDeltaConsumer(textDelta)
                             .withToolUsageTracker(usageTracker)
                             .withTurnMetricsCollector(turnMetrics)
+                            .withMemoryStore(memoryStore)
                             .asReplSession();
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
@@ -266,12 +295,15 @@ public class ReplLoop {
                             .withTaskTool(taskDeps)
                             .withTextDeltaConsumer(textDelta)
                             .withToolUsageTracker(usageTracker)
-                            .withTurnMetricsCollector(turnMetrics),
+                            .withTurnMetricsCollector(turnMetrics)
+                            .withMemoryStore(memoryStore),
                     approvalHandler,
                     skillRegistry,
                     snapshotStore,
                     hooksConfig,
-                    skillSources);
+                    skillSources,
+                    memoryStore,
+                    sessionWriter);
             context.setRunner(runner);
 
             // Wire Ctrl+C signal handler: cancel agent if running, else no-op
@@ -283,12 +315,34 @@ public class ReplLoop {
 
             printBanner(writer);
 
+            // Resolve context window limit for the token status line.
+            int contextLimit = eventPrinter != null
+                    ? eventPrinter.maxContextTokens()
+                    : TokenStatusLine.contextLimitForModel(config.modelName());
+
+            InputAccumulator accumulator = new InputAccumulator();
+            String currentPrompt = PROMPT;
+
             while (context.isRunning()) {
+                // Print persistent token status line above the prompt (after first response).
+                if (eventPrinter != null) {
+                    String statusLine = TokenStatusLine.format(
+                            eventPrinter.totalInputTokens(), contextLimit, null);
+                    if (!statusLine.isEmpty()) {
+                        writer.println(statusLine);
+                        writer.flush();
+                    }
+                }
+
                 String input;
                 try {
-                    input = lineReader.readLine(PROMPT);
+                    input = lineReader.readLine(currentPrompt);
                 } catch (UserInterruptException e) {
-                    // Ctrl+C at prompt — just print a new line and continue
+                    // Ctrl+C at prompt — reset accumulator if active, print new line
+                    if (accumulator.isAccumulating()) {
+                        accumulator.reset();
+                        currentPrompt = PROMPT;
+                    }
                     writer.println();
                     continue;
                 } catch (EndOfFileException e) {
@@ -302,11 +356,34 @@ public class ReplLoop {
                     break;
                 }
 
-                if (input == null || input.isBlank()) {
+                if (input == null) {
                     continue;
                 }
 
-                String trimmed = input.trim();
+                // Multi-line accumulation: feed through InputAccumulator
+                Optional<String> completed = accumulator.feed(input);
+                if (completed.isEmpty()) {
+                    // Still accumulating — switch to continuation prompt
+                    currentPrompt = CONTINUATION_PROMPT;
+                    continue;
+                }
+                currentPrompt = PROMPT;
+                String line = completed.get();
+
+                if (line.isBlank()) {
+                    continue;
+                }
+
+                String trimmed = line.trim();
+
+                // Shell passthrough: lines starting with ! execute a shell command
+                if (trimmed.startsWith("!")) {
+                    String shellCmd = trimmed.substring(1).trim();
+                    if (!shellCmd.isEmpty()) {
+                        executeShellCommand(shellCmd, config, writer);
+                    }
+                    continue;
+                }
 
                 // Check for slash commands
                 Optional<SlashCommand> command = registry.resolve(trimmed);
@@ -322,6 +399,11 @@ public class ReplLoop {
                 }
 
                 // Regular input — send to agent via StreamingAgentRunner
+                // Persist user turn to session JSONL before sending to agent
+                if (context.sessionWriter() != null) {
+                    context.sessionWriter().appendTurn(
+                            "user", trimmed, 0, java.time.Instant.now());
+                }
                 executeAgentCall(trimmed, context, runner, writer);
             }
 
@@ -334,6 +416,32 @@ public class ReplLoop {
         } catch (IOException e) {
             log.error("Failed to create terminal", e);
             System.err.println("Error: Failed to create terminal — " + e.getMessage());
+        }
+    }
+
+    /**
+     * Execute a shell command via {@code sh -c}, using the configured working directory.
+     * Output goes directly to the terminal (inheritIO). Non-zero exit codes are printed.
+     */
+    private static void executeShellCommand(String command, CodeAgentConfig config,
+                                             PrintWriter writer) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("sh", "-c", command);
+            String workDir = config.workingDir();
+            if (workDir != null && !workDir.isBlank()) {
+                pb.directory(Path.of(workDir).toFile());
+            }
+            pb.inheritIO();
+            Process process = pb.start();
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                writer.println("Exit code: " + exitCode);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            writer.println("Shell command interrupted");
+        } catch (Exception e) {
+            writer.println("Shell error: " + e.getMessage());
         }
     }
 
@@ -382,10 +490,13 @@ public class ReplLoop {
         registry.register(new ExitCommand());
         registry.register(new HookCommand());
         registry.register(new McpCommand());
+        registry.register(new MemoryCommand());
         registry.register(new LearnedCommand());
         registry.register(new StatsCommand());
         registry.register(new MetricsCommand());
         registry.register(new SessionCommand());
+        registry.register(new InitCommand());
+        registry.register(new DoctorCommand());
 
         return registry;
     }
