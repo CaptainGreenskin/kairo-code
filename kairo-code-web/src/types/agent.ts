@@ -102,3 +102,16 @@ export interface TokenUsage {
     input: number;
     output: number;
 }
+
+export interface FileEntry {
+    name: string;
+    path: string;
+    isDir: boolean;
+    size: number;
+}
+
+export interface FileContentResponse {
+    path: string;
+    content: string;
+    language: string;
+}
