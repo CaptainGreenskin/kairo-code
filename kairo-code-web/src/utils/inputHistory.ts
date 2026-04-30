@@ -1,26 +1,29 @@
-const HISTORY_KEY_PREFIX = 'kairo-input-history:';
-const MAX_HISTORY = 50;
+const PREFIX = 'kairo-input-history:';
+const MAX_HISTORY = 100;
 
-function historyKey(sessionId: string): string {
-    return HISTORY_KEY_PREFIX + sessionId;
-}
-
-export function loadHistory(sessionId: string): string[] {
+export function getHistory(sessionId: string): string[] {
+    if (!sessionId) return [];
     try {
-        return JSON.parse(localStorage.getItem(historyKey(sessionId)) ?? '[]');
+        return JSON.parse(localStorage.getItem(PREFIX + sessionId) ?? '[]') as string[];
     } catch {
         return [];
     }
 }
 
-export function pushHistory(sessionId: string, text: string): void {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const history = loadHistory(sessionId).filter(h => h !== trimmed);
-    history.unshift(trimmed);
-    localStorage.setItem(historyKey(sessionId), JSON.stringify(history.slice(0, MAX_HISTORY)));
+/**
+ * Appends an entry to the history for the given session.
+ * Deduplicates consecutive identical entries. Trims to MAX_HISTORY.
+ */
+export function pushHistory(sessionId: string, entry: string): void {
+    if (!sessionId || !entry.trim()) return;
+    const history = getHistory(sessionId);
+    if (history[history.length - 1] === entry) return; // skip consecutive duplicate
+    history.push(entry);
+    if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
+    localStorage.setItem(PREFIX + sessionId, JSON.stringify(history));
 }
 
 export function clearHistory(sessionId: string): void {
-    localStorage.removeItem(historyKey(sessionId));
+    if (!sessionId) return;
+    localStorage.removeItem(PREFIX + sessionId);
 }
