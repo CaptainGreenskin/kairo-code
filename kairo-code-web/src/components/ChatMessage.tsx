@@ -7,6 +7,8 @@ import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
 import { DiffBlock } from './DiffBlock';
+import { ErrorMessage } from './ErrorMessage';
+import { inferErrorType } from '@utils/errorType';
 import { streamingStore } from '@store/streamingStore';
 import { formatRelativeTime, formatAbsoluteTime } from '@utils/formatTime';
 import { useDebounce } from '@hooks/useDebounce';
@@ -20,6 +22,7 @@ interface ChatMessageProps {
     onEditResend?: (messageId: string, newText: string) => void;
     onInsertToChat?: (text: string) => void;
     onApplyToFile?: (filename: string, content: string) => void;
+    onRetry?: () => void;
 }
 
 interface CodeBlockProps {
@@ -28,6 +31,7 @@ interface CodeBlockProps {
     meta?: string;
     onInsertToChat?: (text: string) => void;
     onApplyToFile?: (filename: string, content: string) => void;
+    onRetry?: () => void;
 }
 
 function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFile }: CodeBlockProps) {
@@ -156,7 +160,7 @@ function ThinkBlock({ content }: { content: string }) {
     );
 }
 
-export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
     const [editing, setEditing] = useState(false);
     const [editText, setEditText] = useState(message.content);
@@ -247,6 +251,17 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                     )}
                 </div>
             </div>
+        );
+    }
+
+
+    if (message.role === 'error') {
+        return (
+            <ErrorMessage
+                message={message.content}
+                errorType={inferErrorType(message.content)}
+                onRetry={onRetry}
+            />
         );
     }
 

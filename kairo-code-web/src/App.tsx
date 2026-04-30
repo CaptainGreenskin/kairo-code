@@ -249,8 +249,8 @@ function App() {
                     addToast('error', payload.message);
                     addMessage({
                         id: generateId(),
-                        role: 'assistant',
-                        content: `Error: ${payload.message}`,
+                        role: 'error',
+                        content: payload.message,
                         toolCalls: [],
                         timestamp: Date.now(),
                     });
@@ -869,6 +869,7 @@ function App() {
                                             onEditResend={handleEditResend}
                                             onInsertToChat={handleInsertToChat}
                                             onApplyToFile={handleApplyToFile}
+                                            onRetry={msgObj.role === 'error' ? () => handleRegenerate(msgObj.id) : undefined}
                                         />
                                     </div>
                                 );

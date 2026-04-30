@@ -70,7 +70,7 @@ export interface SessionRestoredPayload {
 
 export interface Message {
     id: string;
-    role: 'user' | 'assistant';
+    role: 'user' | 'assistant' | 'error';
     content: string;
     toolCalls: ToolCall[];
     timestamp: number;
