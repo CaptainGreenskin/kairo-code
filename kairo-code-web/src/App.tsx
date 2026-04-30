@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, Search, FolderTree, Settings, Moon } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -9,6 +10,8 @@ import { SessionSidebar } from '@components/SessionSidebar';
 import { SettingsModal } from '@components/SettingsModal';
 import { FileTreePanel } from '@components/FileTreePanel';
 import { SearchPanel } from '@components/SearchPanel';
+import { CommandPalette } from '@components/CommandPalette';
+import type { Command } from '@components/CommandPalette';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
 import { Virtuoso } from 'react-virtuoso';
@@ -46,6 +49,7 @@ function App() {
     const [showSearch, setShowSearch] = useState(false);
     const [chatInputAppend, setChatInputAppend] = useState<string>('');
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
+    const [showCommandPalette, setShowCommandPalette] = useState(false);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
 
     const handleEvent = useCallback(
@@ -255,6 +259,18 @@ function App() {
         return () => window.removeEventListener('keydown', handler);
     }, []);
 
+    // Global keyboard shortcut: Cmd+K opens command palette
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'k') {
+                e.preventDefault();
+                setShowCommandPalette(prev => !prev);
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, []);
+
     const handleSend = useCallback(
         (text: string) => {
             // Add user message to store
@@ -348,6 +364,42 @@ function App() {
         const block = `\`\`\`${language}\n// ${path}\n${content}\n\`\`\`\n`;
         setChatInputAppend(block);
     }, []);
+
+    // Command palette commands
+    const commands: Command[] = useMemo(() => [
+        {
+            id: 'new-session',
+            label: 'New Session',
+            shortcut: '⌘N',
+            icon: <Plus size={16} />,
+            action: () => { handleNewSession(); setShowCommandPalette(false); },
+        },
+        {
+            id: 'open-search',
+            label: 'Search Workspace',
+            shortcut: '⌘⇧F',
+            icon: <Search size={16} />,
+            action: () => { setShowSearch(true); setShowCommandPalette(false); },
+        },
+        {
+            id: 'toggle-file-tree',
+            label: 'Toggle File Tree',
+            icon: <FolderTree size={16} />,
+            action: () => { handleToggleFileTree(); setShowCommandPalette(false); },
+        },
+        {
+            id: 'open-settings',
+            label: 'Open Settings',
+            icon: <Settings size={16} />,
+            action: () => { handleOpenSettings(); setShowCommandPalette(false); },
+        },
+        {
+            id: 'toggle-theme',
+            label: 'Toggle Theme',
+            icon: <Moon size={16} />,
+            action: () => { handleToggleTheme(); setShowCommandPalette(false); },
+        },
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -460,6 +512,12 @@ function App() {
                 isOpen={showSearch}
                 onClose={() => setShowSearch(false)}
                 onInsertResult={(text) => setChatInputAppend(text)}
+            />
+
+            <CommandPalette
+                isOpen={showCommandPalette}
+                onClose={() => setShowCommandPalette(false)}
+                commands={commands}
             />
         </div>
     );
