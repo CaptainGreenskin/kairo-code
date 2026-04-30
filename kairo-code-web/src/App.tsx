@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -24,6 +24,7 @@ import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
 import { MemoryEditorPanel } from '@components/MemoryEditorPanel';
+import { PromptTemplatesPanel } from '@components/PromptTemplatesPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -723,6 +724,10 @@ function App() {
     const handleCloseSettings = useCallback(() => setShowSettings(false), []);
     const [showMemoryEditor, setShowMemoryEditor] = useState(false);
     const handleOpenMemory = useCallback(() => setShowMemoryEditor(true), []);
+    const [showPromptTemplates, setShowPromptTemplates] = useState(false);
+    const handleInsertTemplate = useCallback((content: string) => {
+        setChatInputAppend(content);
+    }, []);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -908,6 +913,13 @@ function App() {
             action: () => { setShowMemoryEditor(true); setShowCommandPalette(false); },
         },
         {
+            id: 'open-prompt-templates',
+            label: 'Prompt Templates',
+            description: 'Manage saved prompt templates',
+            icon: <BookOpen size={16} />,
+            action: () => { setShowPromptTemplates(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -965,7 +977,7 @@ function App() {
             shortcut: '⌘⇧C',
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, messages.length, sortedSessions, sessionId, handleSelectSession]);
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -1222,6 +1234,13 @@ function App() {
                 <MemoryEditorPanel
                     workingDir={serverConfig.workingDir}
                     onClose={() => setShowMemoryEditor(false)}
+                />
+            )}
+
+            {showPromptTemplates && (
+                <PromptTemplatesPanel
+                    onClose={() => setShowPromptTemplates(false)}
+                    onInsert={handleInsertTemplate}
                 />
             )}
         </div>
