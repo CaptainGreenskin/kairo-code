@@ -2,7 +2,7 @@ import { useSyncExternalStore, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus } from 'lucide-react';
+import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus, Brain, ChevronDown } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
@@ -121,6 +121,40 @@ function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFile }: C
     );
 }
 
+function extractThinkBlocks(content: string): { think: string[]; rest: string } {
+    const thinkPattern = /<think>([\s\S]*?)<\/think>/g;
+    const thinks: string[] = [];
+    const rest = content.replace(thinkPattern, (_, inner) => {
+        thinks.push(inner.trim());
+        return '';
+    }).trim();
+    return { think: thinks, rest };
+}
+
+function ThinkBlock({ content }: { content: string }) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="my-2 rounded border border-[var(--border)] bg-[var(--bg-secondary)]">
+            <button
+                onClick={() => setOpen(v => !v)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            >
+                <Brain size={12} />
+                <span>Reasoning</span>
+                <ChevronDown
+                    size={12}
+                    className={`ml-auto transition-transform ${open ? 'rotate-180' : ''}`}
+                />
+            </button>
+            {open && (
+                <div className="px-3 pb-3 text-xs text-[var(--text-secondary)] whitespace-pre-wrap border-t border-[var(--border)] pt-2">
+                    {content}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
     const [editing, setEditing] = useState(false);
@@ -213,7 +247,8 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
     }
 
     const hasToolCalls = message.toolCalls.length > 0;
-    const hasContent = message.content.length > 0;
+    const { think: thinkBlocks, rest: mainContent } = extractThinkBlocks(displayContent ?? '');
+    const hasContent = mainContent.length > 0;
 
     const handleCopyMessage = () => {
         navigator.clipboard.writeText(message.content).then(() => {
@@ -226,8 +261,16 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
         <div className="flex justify-start mb-4 animate-slide-up">
             <div className="max-w-[85%]">
                 <div className="relative group px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)]">
-                    {/* Message-level action buttons */}
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                    {/* Right-side overlay: timestamp + action buttons */}
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-end gap-1">
+                        {/* Timestamp tooltip */}
+                        {message.timestamp && (
+                            <span className="text-[10px] text-[var(--text-muted)] select-none">
+                                {formatAbsoluteTime(message.timestamp)}
+                            </span>
+                        )}
+                        {/* Message-level action buttons */}
+                        <div className="flex gap-1">
                         {onRegenerate && !isStreaming && (
                             <button
                                 onClick={() => onRegenerate(message.id)}
@@ -244,7 +287,10 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                         >
                             {copiedMsg ? <Check size={14} /> : <Copy size={14} />}
                         </button>
+                        </div>
                     </div>
+
+                    {thinkBlocks.map((t, i) => <ThinkBlock key={i} content={t} />)}
 
                     {hasContent && (
                         <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -283,7 +329,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                     },
                                 }}
                             >
-                                {displayContent}
+                                {mainContent}
                             </Markdown>
                         </div>
                     )}
