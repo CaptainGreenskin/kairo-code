@@ -17,7 +17,13 @@ interface ChatMessageProps {
     onEditResend?: (messageId: string, newText: string) => void;
 }
 
-function CodeBlock({ language, content }: { language: string; content: string }) {
+interface CodeBlockProps {
+    language: string;
+    content: string;
+    meta?: string;
+}
+
+function CodeBlock({ language, content, meta }: CodeBlockProps) {
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -27,27 +33,63 @@ function CodeBlock({ language, content }: { language: string; content: string })
         });
     };
 
+    // Parse title from meta string (e.g., title="main.py")
+    const titleMatch = meta?.match(/title="([^"]+)"/);
+    const title = titleMatch?.[1];
+
+    const lines = content.split('\n');
+    // Remove trailing empty line if content ends with newline
+    const displayLines = lines.length > 1 && lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
+
     return (
-        <div className="relative group">
-            <div className="flex items-center justify-between px-3 py-1 bg-[var(--color-code-bg)] border border-[var(--color-code-border)] border-b-0 rounded-t-md text-xs text-[var(--text-muted)]">
-                <span>{language}</span>
+        <div className="relative group rounded-lg overflow-hidden border border-[var(--border)] my-3">
+            {/* Header bar: language tag + title + copy button */}
+            <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)]">
+                <div className="flex items-center gap-2">
+                    {language && (
+                        <span className="text-xs text-[var(--text-muted)] font-mono">{language}</span>
+                    )}
+                    {title && (
+                        <span className="text-xs text-[var(--text-secondary)]">{title}</span>
+                    )}
+                </div>
                 <button
                     onClick={handleCopy}
-                    className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
-                    aria-label="Copy code"
+                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                 >
                     {copied ? <Check size={12} /> : <Copy size={12} />}
-                    <span>{copied ? 'Copied!' : 'Copy'}</span>
+                    <span>{copied ? 'Copied' : 'Copy'}</span>
                 </button>
             </div>
-            <SyntaxHighlighter
-                style={vscDarkPlus as never}
-                language={language}
-                PreTag="div"
-                customStyle={{ margin: 0, borderRadius: '0 0 6px 6px', borderTop: 'none' }}
-            >
-                {content}
-            </SyntaxHighlighter>
+            {/* Code with line numbers */}
+            <div className="flex overflow-x-auto bg-[var(--color-code-bg)]">
+                {/* Line numbers column */}
+                <pre className="flex-shrink-0 m-0 py-4 pl-4 pr-4 text-right text-xs text-[var(--text-muted)] select-none font-mono leading-[1.5]">
+                    {displayLines.map((_, i) => (
+                        <span key={i} className="block">{i + 1}</span>
+                    ))}
+                </pre>
+                {/* Syntax highlighted code */}
+                <div className="flex-1 min-w-0">
+                    <SyntaxHighlighter
+                        style={vscDarkPlus as never}
+                        language={language}
+                        PreTag="div"
+                        customStyle={{
+                            margin: 0,
+                            borderRadius: 0,
+                            borderTop: 'none',
+                            borderBottom: 'none',
+                            background: 'transparent',
+                            padding: '1rem 1rem 1rem 0',
+                        }}
+                        showLineNumbers={false}
+                        wrapLines={false}
+                    >
+                        {content}
+                    </SyntaxHighlighter>
+                </div>
+            </div>
         </div>
     );
 }
@@ -178,13 +220,13 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                         const { className, children, ...rest } = props as {
                                             className?: string;
                                             children: React.ReactNode;
-                                            inline?: boolean;
-                                        };
+                                        } & Record<string, unknown>;
+                                        const propsRecord = props as Record<string, unknown>;
                                         const match = /language-(\w+)/.exec(className || '');
                                         const content = String(children).replace(/\n$/, '');
-                                        if (!(props as Record<string, unknown>).inline && match && content) {
+                                        if (!propsRecord.inline && match && content) {
                                             return (
-                                                <CodeBlock language={match[1]} content={content} />
+                                                <CodeBlock language={match[1]} content={content} meta={propsRecord.meta as string | undefined} />
                                             );
                                         }
                                         return (
