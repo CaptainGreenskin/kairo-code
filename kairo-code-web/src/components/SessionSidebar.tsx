@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { MessageSquare, Trash2, Plus, Loader, Pencil } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff } from 'lucide-react';
 import { listSessions, deleteSession as apiDeleteSession } from '@api/config';
 import type { SessionInfo } from '@/types/agent';
 import { NewSessionDialog } from './NewSessionDialog';
 import { formatRelativeTime } from '@utils/formatTime';
 import { getSessionName, setSessionName, removeSessionName } from '@utils/sessionNames';
+import { pinSession, unpinSession, isSessionPinned, getPinnedSessions } from '@utils/sessionPins';
 
 interface SessionSidebarProps {
     activeSessionId: string | null;
@@ -22,11 +23,13 @@ interface SessionItemProps {
     isLoading: boolean;
     onSelect: (id: string) => void;
     onDelete: (id: string) => void;
+    onPinChange?: () => void;
 }
 
-function SessionItem({ session, isActive, isLoading, onSelect, onDelete }: SessionItemProps) {
+function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange }: SessionItemProps) {
     const [renaming, setRenaming] = useState(false);
     const [nameInput, setNameInput] = useState('');
+    const [pinned, setPinned] = useState(() => isSessionPinned(session.sessionId));
     const customName = getSessionName(session.sessionId);
 
     const displayName = customName
@@ -47,6 +50,18 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete }: Sessi
             removeSessionName(session.sessionId);
         }
         setRenaming(false);
+    };
+
+    const handleTogglePin = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (pinned) {
+            unpinSession(session.sessionId);
+            setPinned(false);
+        } else {
+            pinSession(session.sessionId);
+            setPinned(true);
+        }
+        onPinChange?.();
     };
 
     return (
@@ -75,13 +90,16 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete }: Sessi
                             onClick={e => e.stopPropagation()}
                         />
                     ) : (
-                        <span
-                            className="text-sm font-mono truncate cursor-pointer"
-                            onDoubleClick={startRename}
-                            title={customName ?? session.sessionId}
-                        >
-                            {displayName}
-                        </span>
+                        <>
+                            {pinned && <Pin size={10} className="text-[var(--color-primary)] shrink-0" />}
+                            <span
+                                className="text-sm font-mono truncate cursor-pointer"
+                                onDoubleClick={startRename}
+                                title={customName ?? session.sessionId}
+                            >
+                                {displayName}
+                            </span>
+                        </>
                     )}
                     {isLoading && (
                         <Loader size={12} className="animate-spin shrink-0 text-[var(--color-primary)]" />
@@ -93,6 +111,13 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete }: Sessi
                 </p>
             </div>
             <div className="flex items-center gap-1">
+                <button
+                    onClick={handleTogglePin}
+                    className="opacity-0 group-hover:opacity-100 p-1 text-[var(--text-muted)] hover:text-[var(--color-primary)] transition-all"
+                    aria-label={pinned ? 'Unpin session' : 'Pin to top'}
+                >
+                    {pinned ? <PinOff size={12} /> : <Pin size={12} />}
+                </button>
                 {!renaming && (
                     <button
                         onClick={startRename}
@@ -130,6 +155,20 @@ export function SessionSidebar({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showNewDialog, setShowNewDialog] = useState(false);
+    const [pins, setPins] = useState<string[]>(() => getPinnedSessions());
+
+    const sortedSessions = useMemo(() => {
+        const pinSet = new Set(pins);
+        const pinned = sessions.filter(s => pinSet.has(s.sessionId));
+        const unpinned = sessions.filter(s => !pinSet.has(s.sessionId));
+        // pinned 按 pins 数组顺序排列
+        pinned.sort((a, b) => pins.indexOf(a.sessionId) - pins.indexOf(b.sessionId));
+        return [...pinned, ...unpinned];
+    }, [sessions, pins]);
+
+    const handlePinChange = useCallback(() => {
+        setPins(getPinnedSessions());
+    }, []);
 
     const updateSessions = useCallback((newSessions: SessionInfo[]) => {
         setSessions(newSessions);
@@ -158,7 +197,7 @@ export function SessionSidebar({
 
     useEffect(() => {
         const handleStorage = (e: StorageEvent) => {
-            if (e.key === 'kairo-session-names') {
+            if (e.key === 'kairo-session-names' || e.key === 'kairo-session-pins') {
                 scheduleFetch();
             }
         };
@@ -177,6 +216,8 @@ export function SessionSidebar({
             const remaining = sessions.filter((s) => s.sessionId !== id);
             updateSessions(remaining);
             removeSessionName(id);
+            unpinSession(id);
+            setPins(getPinnedSessions());
             onDeleteSession(id);
         } catch (err) {
             console.error('[SessionSidebar] Failed to delete session:', err);
@@ -221,16 +262,31 @@ export function SessionSidebar({
                         </div>
                     ) : (
                         <ul className="p-2 space-y-1">
-                            {sessions.map((session) => (
-                                <SessionItem
-                                    key={session.sessionId}
-                                    session={session}
-                                    isActive={session.sessionId === activeSessionId}
-                                    isLoading={session.sessionId === loadingSessionId}
-                                    onSelect={onSelectSession}
-                                    onDelete={handleDelete}
-                                />
-                            ))}
+                            {(() => {
+                                const pinSet = new Set(pins);
+                                const pinnedCount = sortedSessions.filter(s => pinSet.has(s.sessionId)).length;
+
+                                return sortedSessions.map((session, index) => {
+                                    const isPinned = pinSet.has(session.sessionId);
+                                    const showDivider = isPinned && index === pinnedCount - 1 && pinnedCount < sortedSessions.length;
+
+                                    return (
+                                        <div key={session.sessionId}>
+                                            <SessionItem
+                                                session={session}
+                                                isActive={session.sessionId === activeSessionId}
+                                                isLoading={session.sessionId === loadingSessionId}
+                                                onSelect={onSelectSession}
+                                                onDelete={handleDelete}
+                                                onPinChange={handlePinChange}
+                                            />
+                                            {showDivider && (
+                                                <div className="mx-3 my-1 border-t border-[var(--border)]" />
+                                            )}
+                                        </div>
+                                    );
+                                });
+                            })()}
                         </ul>
                     )}
                 </div>
