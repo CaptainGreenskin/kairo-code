@@ -22,7 +22,8 @@
       "@store/*": ["src/store/*"],
       "@api/*": ["src/api/*"],
       "@hooks/*": ["src/hooks/*"],
-      "@types/*": ["src/types/*"]
+      "@types/*": ["src/types/*"],
+      "@utils/*": ["src/utils/*"]
     }
   },
   "include": ["src"],

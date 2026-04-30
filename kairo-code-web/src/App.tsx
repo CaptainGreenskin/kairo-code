@@ -40,6 +40,7 @@ function App() {
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
+    const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
 
     const handleEvent = useCallback(
@@ -156,6 +157,7 @@ function App() {
                     assistantMsgRef.current = null;
                     setStreamingMsgId(null);
                     setThinking(false);
+                    setLoadingSessionId(null);
                     addMessage({
                         id: generateId(),
                         role: 'assistant',
@@ -181,6 +183,7 @@ function App() {
                     restoreSession(event.sessionId, payload.messages, payload.running);
                     // Clear streaming store for this session
                     streamingStore.clear(event.sessionId);
+                    setLoadingSessionId(null);
                     break;
                 }
             }
@@ -194,6 +197,7 @@ function App() {
             setTokenUsage,
             setEstimatedCost,
             restoreSession,
+            setLoadingSessionId,
         ],
     );
 
@@ -206,7 +210,6 @@ function App() {
         approveTool,
         stopAgent,
         createSession,
-        bindSession,
     } = useAgentWebSocket(handleEvent);
 
     // Override store's isThinking with WS state
@@ -226,17 +229,13 @@ function App() {
             });
     }, [setCurrentModel]);
 
-    // Session restore: if sessionStorage has a sessionId, reconnect and bind
+    // Session restore: if sessionStorage has a sessionId, reconnect and auto-bind
     useEffect(() => {
         const savedId = sessionStorage.getItem('kairo-code-session-id');
-        if (!savedId) return;
-
-        connect();
-        // Wait for connection to establish before binding
-        const timer = setTimeout(() => {
-            bindSession(savedId);
-        }, 500);
-        return () => clearTimeout(timer);
+        if (savedId) {
+            connect();
+        }
+        // onConnect auto-detects the session and sends bind-session
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleSend = useCallback(
@@ -293,6 +292,7 @@ function App() {
     const handleSelectSession = useCallback(
         (id: string) => {
             if (id === sessionId) return;
+            setLoadingSessionId(id);
             disconnect();
             setSessionId(id);
             clearMessages();
@@ -336,6 +336,7 @@ function App() {
             <div className="flex flex-1 overflow-hidden">
                 <SessionSidebar
                     activeSessionId={sessionId}
+                    loadingSessionId={loadingSessionId}
                     onSelectSession={handleSelectSession}
                     onDeleteSession={handleDeleteSession}
                     onCreateSession={async (workingDir, model) => {

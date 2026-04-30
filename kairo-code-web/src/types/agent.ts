@@ -101,6 +101,8 @@ export interface SessionInfo {
     sessionId: string;
     model: string;
     createdAt: number;
+    workingDir?: string;
+    running?: boolean;
 }
 
 export interface TokenUsage {
