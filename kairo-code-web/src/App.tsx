@@ -456,6 +456,20 @@ function App() {
         if (atBottom) setUnreadCount(0);
     }, [atBottom]);
 
+    // Re-render every 60 seconds to update relative timestamps
+    const messagesRef = useRef(messages);
+    useEffect(() => {
+        messagesRef.current = messages;
+    }, [messages]);
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (messagesRef.current.length > 0) {
+                setMessages([...messagesRef.current]);
+            }
+        }, 60000);
+        return () => clearInterval(interval);
+    }, [messages.length]);
+
     const handleScrollToBottom = useCallback(() => {
         virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, behavior: 'smooth' });
         setUnreadCount(0);
@@ -751,18 +765,32 @@ function App() {
                             data={filteredMessages}
                             followOutput="smooth"
                             atBottomStateChange={(bottom) => setAtBottom(bottom)}
-                            itemContent={(_index, msg) => (
-                                <div className="max-w-3xl mx-auto">
-                                    <ChatMessage
-                                        message={msg as Message}
-                                        onApproveTool={handleApproveTool}
-                                        isStreaming={(msg as Message).id === streamingMsgId}
-                                        sessionId={sessionId ?? undefined}
-                                        onRegenerate={handleRegenerate}
-                                        onEditResend={handleEditResend}
-                                    />
-                                </div>
-                            )}
+                            itemContent={(index, msg) => {
+                                const msgObj = msg as Message;
+                                const prevMsg = index > 0 ? (filteredMessages[index - 1] as Message) : null;
+                                const showDateSep = prevMsg && prevMsg.timestamp && msgObj.timestamp &&
+                                    new Date(msgObj.timestamp).toDateString() !== new Date(prevMsg.timestamp).toDateString();
+                                const dateLabel = msgObj.timestamp ? new Date(msgObj.timestamp).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+                                return (
+                                    <div className="max-w-3xl mx-auto">
+                                        {showDateSep && (
+                                            <div className="flex items-center gap-3 px-4 py-2">
+                                                <div className="flex-1 h-px bg-[var(--border)]" />
+                                                <span className="text-xs text-[var(--text-muted)]">{dateLabel}</span>
+                                                <div className="flex-1 h-px bg-[var(--border)]" />
+                                            </div>
+                                        )}
+                                        <ChatMessage
+                                            message={msgObj}
+                                            onApproveTool={handleApproveTool}
+                                            isStreaming={msgObj.id === streamingMsgId}
+                                            sessionId={sessionId ?? undefined}
+                                            onRegenerate={handleRegenerate}
+                                            onEditResend={handleEditResend}
+                                        />
+                                    </div>
+                                );
+                            }}
                             components={{
                                 Footer: () =>
                                     isThinking && !streamingMsgId ? (

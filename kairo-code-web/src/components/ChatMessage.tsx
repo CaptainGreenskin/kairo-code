@@ -7,6 +7,7 @@ import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
 import { streamingStore } from '@store/streamingStore';
+import { formatRelativeTime, formatAbsoluteTime } from '@utils/formatTime';
 
 interface ChatMessageProps {
     message: Message;
@@ -109,7 +110,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
 
     if (message.role === 'user') {
         return (
-            <div className="flex justify-end mb-4 animate-slide-up">
+            <div className="flex justify-end mb-4 animate-slide-up group">
                 <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-[var(--color-primary)] text-white">
                     {editing ? (
                         <div>
@@ -159,7 +160,14 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                             <p className="whitespace-pre-wrap text-sm">{message.content}</p>
                             <div className="flex items-center justify-between mt-1">
                                 <span className="text-[10px] opacity-60">
-                                    {new Date(message.timestamp).toLocaleTimeString()}
+                                    {message.timestamp && (
+                                        <span
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                            title={formatAbsoluteTime(message.timestamp)}
+                                        >
+                                            {formatRelativeTime(message.timestamp)}
+                                        </span>
+                                    )}
                                 </span>
                                 {onEditResend && !isStreaming && (
                                     <button
@@ -273,8 +281,8 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                     )}
                 </div>
 
-                <span className="text-[10px] text-[var(--text-muted)] mt-1 ml-2 block">
-                    {new Date(message.timestamp).toLocaleTimeString()}
+                <span className="text-[10px] text-[var(--text-muted)] mt-1 ml-2 block opacity-0 group-hover:opacity-100 transition-opacity" title={message.timestamp ? formatAbsoluteTime(message.timestamp) : undefined}>
+                    {message.timestamp ? formatRelativeTime(message.timestamp) : ''}
                 </span>
             </div>
         </div>
