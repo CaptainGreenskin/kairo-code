@@ -252,7 +252,10 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     };
 
     return (
-        <div className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}>
+        <div
+            className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}
+            {...(toolCall.status === 'pending' ? { 'data-pending-tool': 'true' } : {})}
+        >
             <div className="px-3 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <code className="text-sm font-mono font-medium text-[var(--text-primary)]">

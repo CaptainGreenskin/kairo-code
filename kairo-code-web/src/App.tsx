@@ -17,6 +17,7 @@ import { FileTreePanel } from '@components/FileTreePanel';
 import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
+import { PendingApprovalBanner } from '@components/PendingApprovalBanner';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
@@ -519,6 +520,10 @@ function App() {
         setUnreadCount(0);
     }, [messages.length]);
 
+    const handleScrollToPending = useCallback(() => {
+        document.querySelector('[data-pending-tool]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, []);
+
     const handleNewSession = useCallback(() => {
         if (sessionId) clearCachedMessages(sessionId);
         disconnect();
@@ -707,6 +712,16 @@ function App() {
     }, [messages, searchQuery]);
 
     const estimatedTokens = useMemo(() => estimateMessagesTokens(messages), [messages]);
+
+    const pendingToolCount = useMemo(() => {
+        let count = 0;
+        for (const msg of messages) {
+            for (const tc of msg.toolCalls ?? []) {
+                if (tc.status === 'pending') count++;
+            }
+        }
+        return count;
+    }, [messages]);
 
     const currentDraft = useMemo(
         () => (sessionId ? loadDraft(sessionId) : ''),
@@ -1003,6 +1018,10 @@ function App() {
                     )}
 
                     {/* Input */}
+                    <PendingApprovalBanner
+                        count={pendingToolCount}
+                        onScrollToPending={handleScrollToPending}
+                    />
                     <ChatInput
                         key={sessionId ?? 'no-session'}
                         sessionId={sessionId ?? undefined}
