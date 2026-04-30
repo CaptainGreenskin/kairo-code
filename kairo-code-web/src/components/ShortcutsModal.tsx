@@ -21,6 +21,9 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
         entries: [
             { keys: ['⌘', 'K'], description: 'Open command palette' },
             { keys: ['⌘', '⇧', 'F'], description: 'Search workspace' },
+            { keys: ['⌘', 'N'], description: 'New session' },
+            { keys: ['⌘', 'W'], description: 'Close session' },
+            { keys: ['⌘', '1-9'], description: 'Switch to session N' },
             { keys: ['Esc'], description: 'Close modal / cancel' },
         ],
     },

@@ -64,6 +64,7 @@ function App() {
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
     const [showCommandPalette, setShowCommandPalette] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(false);
+    const [sidebarSessions, setSidebarSessions] = useState<Array<{ sessionId: string }>>([]);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
     const [atBottom, setAtBottom] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -496,6 +497,39 @@ function App() {
         [sessionId, handleNewSession],
     );
 
+    // Global keyboard shortcut: Cmd+N new session, Cmd+W close session, Cmd+1-9 switch session
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            const tag = (e.target as HTMLElement).tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+            // Cmd+N — new session (do not block Shift+Cmd+N for browser incognito)
+            if ((e.metaKey || e.ctrlKey) && e.key === 'n' && !e.shiftKey) {
+                e.preventDefault();
+                handleNewSession();
+                return;
+            }
+
+            // Cmd+W — close current session
+            if ((e.metaKey || e.ctrlKey) && e.key === 'w' && sessionId) {
+                e.preventDefault();
+                handleDeleteSession(sessionId);
+                return;
+            }
+
+            // Cmd+1-9 — switch to session N (1-indexed)
+            if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
+                const idx = parseInt(e.key) - 1;
+                if (idx < sidebarSessions.length) {
+                    e.preventDefault();
+                    handleSelectSession(sidebarSessions[idx].sessionId);
+                }
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [sessionId, sidebarSessions, handleNewSession, handleDeleteSession, handleSelectSession]);
+
     const handleToggleTheme = useCallback(() => {
         // Theme toggling is handled by the Header component via DOM classList
     }, []);
@@ -633,6 +667,7 @@ function App() {
                         assistantMsgRef.current = null;
                         connect();
                     }}
+                    onSessionsChange={setSidebarSessions}
                 />
 
                 <FileTreePanel
