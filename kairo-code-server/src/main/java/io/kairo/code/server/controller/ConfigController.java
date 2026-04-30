@@ -4,6 +4,8 @@ import io.kairo.code.server.config.ConfigPersistenceService;
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.dto.FileContentResponse;
 import io.kairo.code.server.dto.FileEntry;
+import io.kairo.code.server.dto.SearchMatch;
+import io.kairo.code.server.dto.SearchResponse;
 import io.kairo.code.server.dto.ServerConfigResponse;
 import io.kairo.code.server.dto.UpdateConfigRequest;
 import io.kairo.code.service.AgentService;
@@ -13,16 +15,21 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 /**
@@ -116,6 +123,110 @@ public class ConfigController {
     public ResponseEntity<Void> destroySession(@PathVariable String id) {
         boolean destroyed = agentService.destroySession(id);
         return destroyed ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
+
+    private static final Set<String> SKIP_DIRS = Set.of(
+            ".git", "node_modules", "target", ".idea", "build", "dist", ".gradle", "__pycache__"
+    );
+    private static final int MAX_FILES_WALK = 10_000;
+    private static final int MAX_PREVIEW_LENGTH = 120;
+    private static final int HARD_LIMIT = 200;
+
+    /**
+     * Search file contents in the working directory.
+     */
+    @GetMapping("/search")
+    public SearchResponse searchFiles(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "") String path,
+            @RequestParam(defaultValue = "50") int limit
+    ) {
+        if (q == null || q.length() < 2) {
+            return new SearchResponse(q != null ? q : "", List.of(), false);
+        }
+
+        int cappedLimit = Math.min(Math.max(limit, 1), HARD_LIMIT);
+
+        Path base = workingDir;
+        if (!path.isBlank()) {
+            if (path.contains("..")) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
+            }
+            base = workingDir.resolve(path).normalize();
+            if (!base.startsWith(workingDir)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
+            }
+        }
+
+        List<SearchMatch> results = new ArrayList<>();
+        AtomicInteger fileCount = new AtomicInteger(0);
+        AtomicBoolean hasMore = new AtomicBoolean(false);
+
+        try (Stream<Path> stream = Files.walk(base, Integer.MAX_VALUE)) {
+            stream
+                    .filter(p -> {
+                        // Cap total files walked
+                        return fileCount.incrementAndGet() <= MAX_FILES_WALK;
+                    })
+                    .filter(p -> {
+                        // Skip noise directories
+                        Path relative = workingDir.relativize(p);
+                        String first = relative.getNameCount() > 0 ? relative.getName(0).toString() : "";
+                        return !SKIP_DIRS.contains(first);
+                    })
+                    .filter(Files::isRegularFile)
+                    .filter(p -> !isBinary(p))
+                    .forEach(p -> {
+                        if (results.size() >= cappedLimit) {
+                            hasMore.set(true);
+                            return;
+                        }
+                        String relative = workingDir.relativize(p).toString();
+                        searchInFile(p, relative, q.toLowerCase(), results, cappedLimit, hasMore);
+                    });
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to search files", e);
+        }
+
+        return new SearchResponse(q, results, hasMore.get());
+    }
+
+    private void searchInFile(Path file, String relativePath, String queryLower,
+                              List<SearchMatch> results, int limit, AtomicBoolean hasMore) {
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String line;
+            int lineNum = 0;
+            while ((line = reader.readLine()) != null) {
+                lineNum++;
+                if (results.size() >= limit) {
+                    hasMore.set(true);
+                    break;
+                }
+                if (line.toLowerCase().contains(queryLower)) {
+                    String preview = line.trim();
+                    if (preview.length() > MAX_PREVIEW_LENGTH) {
+                        preview = preview.substring(0, MAX_PREVIEW_LENGTH);
+                    }
+                    results.add(new SearchMatch(relativePath, lineNum, preview));
+                }
+            }
+        } catch (MalformedInputException e) {
+            // Skip non-UTF-8 files
+        } catch (IOException ignored) {
+            // Skip files that can't be read
+        }
+    }
+
+    private boolean isBinary(Path file) {
+        try (var is = Files.newInputStream(file)) {
+            byte[] header = is.readNBytes(512);
+            for (byte b : header) {
+                if (b == 0) return true;
+            }
+            return false;
+        } catch (IOException e) {
+            return true;
+        }
     }
 
     private static final long MAX_FILE_SIZE = 100_000;

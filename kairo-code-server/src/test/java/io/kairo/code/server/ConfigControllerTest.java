@@ -36,7 +36,7 @@ class ConfigControllerTest {
         ServerProperties props = new ServerProperties(
                 "openai", "gpt-4o", tempDir.toString(),
                 "https://api.openai.com", "sk-test");
-        controller = new ConfigController(props, null);
+        controller = new ConfigController(props, null, null);
     }
 
     @Test

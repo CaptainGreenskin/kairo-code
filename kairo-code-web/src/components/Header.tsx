@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface HeaderProps {
@@ -10,6 +10,7 @@ interface HeaderProps {
     onOpenSettings: () => void;
     onToggleFileTree: () => void;
     fileTreeOpen: boolean;
+    onOpenSearch: () => void;
 }
 
 function getUsageColor(ratio: number): string {
@@ -27,6 +28,7 @@ export function Header({
     onOpenSettings,
     onToggleFileTree,
     fileTreeOpen,
+    onOpenSearch,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -91,6 +93,15 @@ export function Header({
                         </div>
                     </div>
                 )}
+
+                <button
+                    onClick={onOpenSearch}
+                    className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                    aria-label="Search workspace"
+                    title="Search workspace (Cmd+Shift+F)"
+                >
+                    <Search size={18} />
+                </button>
 
                 <button
                     onClick={onOpenSettings}

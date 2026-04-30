@@ -122,3 +122,15 @@ export interface FileContentResponse {
     content: string;
     language: string;
 }
+
+export interface SearchMatch {
+    file: string;
+    line: number;
+    preview: string;
+}
+
+export interface SearchResponse {
+    query: string;
+    matches: SearchMatch[];
+    truncated: boolean;
+}
