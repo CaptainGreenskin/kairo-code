@@ -8,7 +8,9 @@ import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
 import { DiffBlock } from './DiffBlock';
 import { ErrorMessage } from './ErrorMessage';
+import { MarkdownTableView } from './MarkdownTableView';
 import { inferErrorType } from '@utils/errorType';
+import { parseMarkdownContent } from '@utils/markdownTable';
 import { streamingStore } from '@store/streamingStore';
 import { formatRelativeTime, formatAbsoluteTime } from '@utils/formatTime';
 import { useDebounce } from '@hooks/useDebounce';
@@ -159,6 +161,15 @@ function ThinkBlock({ content }: { content: string }) {
                 </div>
             )}
         </div>
+    );
+}
+
+function renderWithTables(content: string, mkComponents: React.ComponentProps<typeof Markdown>['components']) {
+    const segs = parseMarkdownContent(content);
+    return segs.map((seg, i) =>
+        seg.type === 'table'
+            ? <MarkdownTableView key={i} table={seg.table} />
+            : <Markdown key={i} components={mkComponents}>{seg.content}</Markdown>
     );
 }
 
@@ -315,43 +326,39 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
 
                     {hasContent && (
                         <div className="prose prose-sm dark:prose-invert max-w-none">
-                            <Markdown
-                                components={{
-                                    code(props) {
-                                        const { className, children, ...rest } = props as {
-                                            className?: string;
-                                            children: React.ReactNode;
-                                        } & Record<string, unknown>;
-                                        const propsRecord = props as Record<string, unknown>;
-                                        const match = /language-(\w+)/.exec(className || '');
-                                        const lang = match ? match[1] : '';
-                                        const content = String(children).replace(/\n$/, '');
-                                        if (!propsRecord.inline && content) {
-                                            // Detect unified diff: explicit diff/patch lang or --- + +++ markers
-                                            if (lang === 'diff' || lang === 'patch' ||
-                                                (content.includes('\n--- ') && content.includes('\n+++ '))) {
-                                                return <DiffBlock content={content} />;
-                                            }
-                                            return (
-                                                <CodeBlock
-                                                    language={lang}
-                                                    content={content}
-                                                    meta={propsRecord.meta as string | undefined}
-                                                    onInsertToChat={onInsertToChat}
-                                                    onApplyToFile={onApplyToFile}
-                                                />
-                                            );
+                            {renderWithTables(mainContent, {
+                                code(props) {
+                                    const { className, children, ...rest } = props as {
+                                        className?: string;
+                                        children: React.ReactNode;
+                                    } & Record<string, unknown>;
+                                    const propsRecord = props as Record<string, unknown>;
+                                    const match = /language-(\w+)/.exec(className || '');
+                                    const lang = match ? match[1] : '';
+                                    const content = String(children).replace(/\n$/, '');
+                                    if (!propsRecord.inline && content) {
+                                        // Detect unified diff: explicit diff/patch lang or --- + +++ markers
+                                        if (lang === 'diff' || lang === 'patch' ||
+                                            (content.includes('\n--- ') && content.includes('\n+++ '))) {
+                                            return <DiffBlock content={content} />;
                                         }
                                         return (
-                                            <code className={className} {...rest}>
-                                                {children}
-                                            </code>
+                                            <CodeBlock
+                                                language={lang}
+                                                content={content}
+                                                meta={propsRecord.meta as string | undefined}
+                                                onInsertToChat={onInsertToChat}
+                                                onApplyToFile={onApplyToFile}
+                                            />
                                         );
-                                    },
-                                }}
-                            >
-                                {mainContent}
-                            </Markdown>
+                                    }
+                                    return (
+                                        <code className={className} {...rest}>
+                                            {children}
+                                        </code>
+                                    );
+                                },
+                            })}
                         </div>
                     )}
 
