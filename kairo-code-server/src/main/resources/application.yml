@@ -1,0 +1,10 @@
+server:
+  port: 8080
+
+kairo:
+  code:
+    working-dir: ${KAIRO_WORKING_DIR:${user.home}/kairo-workspace}
+    api-key: ${KAIRO_CODE_API_KEY:}
+    model: ${KAIRO_MODEL:gpt-4o}
+    provider: ${KAIRO_PROVIDER:openai}
+    base-url: ${KAIRO_BASE_URL:https://api.openai.com}
