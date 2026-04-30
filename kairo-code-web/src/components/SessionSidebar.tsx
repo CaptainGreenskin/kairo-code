@@ -13,6 +13,7 @@ interface SessionSidebarProps {
     onDeleteSession: (id: string) => void;
     onNewSession: (info: { sessionId: string; model: string }) => void;
     onCreateSession: (workingDir: string, model: string) => Promise<{ sessionId: string }>;
+    onSessionsChange?: (sessions: SessionInfo[]) => void;
 }
 
 interface SessionItemProps {
@@ -123,24 +124,30 @@ export function SessionSidebar({
     onDeleteSession,
     onNewSession,
     onCreateSession,
+    onSessionsChange,
 }: SessionSidebarProps) {
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showNewDialog, setShowNewDialog] = useState(false);
 
+    const updateSessions = useCallback((newSessions: SessionInfo[]) => {
+        setSessions(newSessions);
+        onSessionsChange?.(newSessions);
+    }, [onSessionsChange]);
+
     const fetchSessions = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
             const data = await listSessions();
-            setSessions(data);
+            updateSessions(data);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load sessions');
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [updateSessions]);
 
     const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -167,7 +174,8 @@ export function SessionSidebar({
         if (!confirm('Delete this session?')) return;
         try {
             await apiDeleteSession(id);
-            setSessions((prev) => prev.filter((s) => s.sessionId !== id));
+            const remaining = sessions.filter((s) => s.sessionId !== id);
+            updateSessions(remaining);
             removeSessionName(id);
             onDeleteSession(id);
         } catch (err) {
