@@ -383,6 +383,8 @@ function App() {
 
     const handleSend = useCallback(
         (text: string) => {
+            if (isMobile) setSidebarOpen(false);
+
             // Add user message to store
             addMessage({
                 id: generateId(),
@@ -418,7 +420,7 @@ function App() {
                 sendMessage(sessionId, text);
             }
         },
-        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage],
+        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile],
     );
 
     const handleStop = useCallback(() => {
