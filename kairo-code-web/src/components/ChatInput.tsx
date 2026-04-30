@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Square } from 'lucide-react';
 import { FilePicker } from './FilePicker';
+import { AutocompleteDropdown } from './AutocompleteDropdown';
+import { parseAutocompleteState, filterCommands, applyAutocomplete, SLASH_COMMANDS, type AutocompleteState } from '@utils/autocomplete';
 import { getHistory, pushHistory } from '@utils/inputHistory';
 import { saveDraft, clearDraft } from '@utils/inputDraft';
 import { readFile, formatFileBlock } from '@utils/fileReader';
+import { listFiles } from '@api/config';
+import type { FileEntry } from '@/types/agent';
 
 interface ChatInputProps {
     onSend: (text: string) => void;
@@ -31,9 +35,28 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
     const draftRef = useRef('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+    // Autocomplete state
+    const [acState, setAcState] = useState<AutocompleteState>({ type: 'none', query: '', startIndex: -1 });
+    const [acSelectedIndex, setAcSelectedIndex] = useState(0);
+    const [fileSuggestions, setFileSuggestions] = useState<FileEntry[]>([]);
+    const prevAcQueryRef = useRef('');
+
     useEffect(() => {
         textareaRef.current?.focus();
     }, []);
+
+    // Fetch file suggestions when @mention query changes
+    useEffect(() => {
+        if (acState.type === 'mention') {
+            const queryKey = acState.query;
+            if (queryKey === prevAcQueryRef.current) return;
+            prevAcQueryRef.current = queryKey;
+            fetchFileSuggestions(queryKey).then(setFileSuggestions);
+        } else {
+            prevAcQueryRef.current = '';
+            setFileSuggestions([]);
+        }
+    }, [acState.type, acState.query]);
 
     // Reset history navigation when sessionId changes
     useEffect(() => {
@@ -82,7 +105,90 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
         }
     }, [text]);
 
+    // Autocomplete: fetch file suggestions for @mention
+    async function fetchFileSuggestions(query: string): Promise<FileEntry[]> {
+        try {
+            // Parse query to determine directory and filter
+            const lastSlash = query.lastIndexOf('/');
+            const dir = lastSlash >= 0 ? query.substring(0, lastSlash) : '';
+            const nameFilter = lastSlash >= 0 ? query.substring(lastSlash + 1) : query;
+
+            const entries = await listFiles(dir || undefined);
+            if (nameFilter) {
+                return entries.filter(e => e.name.toLowerCase().startsWith(nameFilter.toLowerCase()));
+            }
+            return entries;
+        } catch {
+            return [];
+        }
+    }
+
+    // Autocomplete: get items for current autocomplete state
+    function getAcItems() {
+        if (acState.type === 'slash') {
+            return filterCommands(SLASH_COMMANDS, acState.query).map(c => ({
+                label: '/' + c.name,
+                description: c.description,
+                value: '/' + c.name + ' ',
+            }));
+        }
+        if (acState.type === 'mention') {
+            return fileSuggestions.slice(0, 10).map(entry => ({
+                label: entry.name,
+                description: entry.path,
+                value: '@' + entry.path + ' ',
+            }));
+        }
+        return [];
+    }
+
+    // Autocomplete: handle selecting an item
+    function handleAcSelect(item: { label: string; value: string; description?: string }) {
+        const cursor = textareaRef.current?.selectionStart ?? text.length;
+        const { newValue, newCursorPos } = applyAutocomplete(text, cursor, acState, item.value);
+        setText(newValue);
+        setAcState({ type: 'none', query: '', startIndex: -1 });
+        // Restore cursor position after React re-render
+        setTimeout(() => {
+            if (textareaRef.current) {
+                textareaRef.current.selectionStart = newCursorPos;
+                textareaRef.current.selectionEnd = newCursorPos;
+                textareaRef.current.focus();
+            }
+        }, 0);
+    }
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        // Autocomplete navigation (take priority when active)
+        if (acState.type !== 'none') {
+            const items = getAcItems();
+            if (e.key === 'ArrowUp' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                setAcSelectedIndex(i => Math.max(0, i - 1));
+                return;
+            }
+            if (e.key === 'ArrowDown' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                setAcSelectedIndex(i => Math.min(items.length - 1, i + 1));
+                return;
+            }
+            if (e.key === 'Enter' && items.length > 0 && !e.shiftKey) {
+                e.preventDefault();
+                handleAcSelect(items[acSelectedIndex]);
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setAcState({ type: 'none', query: '', startIndex: -1 });
+                return;
+            }
+            if (e.key === 'Tab' && items.length > 0) {
+                e.preventDefault();
+                handleAcSelect(items[0]);
+                return;
+            }
+        }
+
         // History navigation: Cmd+ArrowUp / Ctrl+ArrowUp
         if (e.key === 'ArrowUp' && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
@@ -222,6 +328,15 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
         setShowFilePicker(false);
     }, []);
 
+    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        setText(e.target.value);
+        // Re-parse autocomplete state after text change
+        const cursor = e.target.selectionStart ?? 0;
+        const newAcState = parseAutocompleteState(e.target.value, cursor);
+        setAcState(newAcState);
+        setAcSelectedIndex(0);
+    };
+
     return (
         <div
             className={`border-t border-[var(--border)] bg-[var(--bg-secondary)] p-4 transition-all ${
@@ -239,7 +354,7 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
                         <textarea
                             ref={textareaRef}
                             value={text}
-                            onChange={(e) => setText(e.target.value)}
+                            onChange={handleChange}
                             onKeyDown={handleKeyDown}
                             onPaste={handlePaste}
                             placeholder={historyIndexRef.current !== null ? 'Cmd+↑/↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
@@ -248,6 +363,14 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
                             className="w-full resize-none overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] disabled:opacity-50"
                             style={{ maxHeight: '200px', minHeight: '40px' }}
                         />
+                        {acState.type !== 'none' && (
+                            <AutocompleteDropdown
+                                items={getAcItems()}
+                                selectedIndex={acSelectedIndex}
+                                type={acState.type}
+                                onSelect={handleAcSelect}
+                            />
+                        )}
                         {text.length > CHAR_WARN_THRESHOLD && (
                             <div className={`absolute bottom-2 right-12 text-[10px] font-mono ${
                                 text.length > CHAR_MAX * 0.9
