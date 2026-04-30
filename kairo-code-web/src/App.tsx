@@ -8,6 +8,7 @@ import { Header } from '@components/Header';
 import { SearchBar } from '@components/SearchBar';
 import { ChatMessage } from '@components/ChatMessage';
 import { ThinkingIndicator } from '@components/ThinkingIndicator';
+import { LastToolDisplay } from '@components/LastToolDisplay';
 import type { Phase } from '@components/ThinkingIndicator';
 import { ChatInput } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
@@ -59,6 +60,29 @@ function App() {
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const [agentPhase, setAgentPhase] = useState<Phase>('thinking');
     const [currentToolName, setCurrentToolName] = useState<string | undefined>(undefined);
+
+    // Tool execution timing
+    const toolStartTimeRef = useRef<number | null>(null);
+    const [toolElapsed, setToolElapsed] = useState(0);
+    const [lastTool, setLastTool] = useState<{ name: string; elapsed: number } | null>(null);
+
+    useEffect(() => {
+        if (agentPhase === 'tool') {
+            toolStartTimeRef.current = Date.now();
+            const timer = setInterval(() => {
+                setToolElapsed(Date.now() - (toolStartTimeRef.current ?? Date.now()));
+            }, 100);
+            return () => clearInterval(timer);
+        } else {
+            if (toolStartTimeRef.current) {
+                const elapsed = Date.now() - toolStartTimeRef.current;
+                setLastTool({ name: currentToolName || 'tool', elapsed });
+                setTimeout(() => setLastTool(null), 2000);
+            }
+            toolStartTimeRef.current = null;
+            setToolElapsed(0);
+        }
+    }, [agentPhase, currentToolName]);
     const [showSettings, setShowSettings] = useState(false);
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
     const [fileTreeOpen, setFileTreeOpen] = useState(() => prefs.fileTreeOpen ?? false);
@@ -844,7 +868,11 @@ function App() {
                                                 isVisible={true}
                                                 phase={agentPhase}
                                                 toolName={currentToolName}
+                                                toolElapsed={toolElapsed}
                                             />
+                                            {lastTool && (
+                                                <LastToolDisplay name={lastTool.name} elapsed={lastTool.elapsed} />
+                                            )}
                                         </div>
                                     ) : null,
                             }}

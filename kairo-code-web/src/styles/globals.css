@@ -137,6 +137,16 @@ body {
     50% { opacity: 0; }
 }
 
+@keyframes fade-out {
+    0% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+.animate-fade-out {
+    animation: fade-out 2s ease forwards;
+}
+
 .typing-cursor {
     display: inline-block;
     width: 2px;
