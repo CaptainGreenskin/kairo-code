@@ -652,6 +652,13 @@ function App() {
 
     const estimatedTokens = useMemo(() => estimateMessagesTokens(messages), [messages]);
 
+    const sessionStats = useMemo(() => {
+        const userMessages = messages.filter(m => m.role === 'user').length;
+        const assistantMessages = messages.filter(m => m.role === 'assistant').length;
+        const toolCalls = messages.reduce((sum, m) => sum + m.toolCalls.length, 0);
+        return { userMessages, assistantMessages, toolCalls, estimatedTokens };
+    }, [messages]);
+
     const handleExport = useCallback(() => {
         exportChatAsMarkdown(messages, sessionId);
     }, [messages, sessionId]);
@@ -754,8 +761,7 @@ function App() {
                 onOpenShortcuts={handleOpenShortcuts}
                 messagesCount={messages.length}
                 onExport={handleExport}
-                tokenCount={estimatedTokens}
-                contextLimit={128000}
+                sessionStats={sessionStats}
                 models={serverConfig?.availableModels ?? []}
                 onModelChange={handleModelChange}
                 isThinking={isThinking}
