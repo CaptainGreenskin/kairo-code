@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, Download } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -20,9 +20,10 @@ import { ShortcutsModal } from '@components/ShortcutsModal';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
+import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
-import { exportChatAsMarkdown } from '@utils/exportChat';
+import { exportAndDownload } from '@utils/exportSession';
 import { estimateMessagesTokens } from '@utils/tokenCount';
 import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
@@ -659,8 +660,9 @@ function App() {
         return { userMessages, assistantMessages, toolCalls, estimatedTokens };
     }, [messages]);
 
-    const handleExport = useCallback(() => {
-        exportChatAsMarkdown(messages, sessionId);
+    const handleExport = useCallback((format: 'markdown' | 'json') => {
+        const name = (sessionId ? getSessionName(sessionId) : null) ?? `session-${sessionId?.slice(0, 8) ?? 'new'}`;
+        exportAndDownload(messages, name, format);
     }, [messages, sessionId]);
 
     const handleInsertFile = useCallback((path: string, content: string, language: string) => {
@@ -741,8 +743,8 @@ function App() {
             id: 'export-chat',
             label: 'Export Chat',
             description: 'Download as Markdown',
-            icon: <Download size={16} />,
-            action: () => { handleExport(); setShowCommandPalette(false); },
+            icon: <FileText size={16} />,
+            action: () => { handleExport('markdown'); setShowCommandPalette(false); },
         }] : []),
     ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, messages.length]);
 
@@ -759,8 +761,12 @@ function App() {
                 searchActive={showSearch}
                 onOpenSearch={handleOpenSearch}
                 onOpenShortcuts={handleOpenShortcuts}
-                messagesCount={messages.length}
-                onExport={handleExport}
+                exportAction={
+                    <ExportMenu
+                        onExport={handleExport}
+                        disabled={messages.length === 0}
+                    />
+                }
                 sessionStats={sessionStats}
                 models={serverConfig?.availableModels ?? []}
                 onModelChange={handleModelChange}

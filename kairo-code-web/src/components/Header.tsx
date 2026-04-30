@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download, Menu } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { StatsPopover } from './StatsPopover';
@@ -15,8 +15,7 @@ interface HeaderProps {
     fileTreeOpen: boolean;
     onOpenSearch: () => void;
     onOpenShortcuts?: () => void;
-    onExport?: () => void;
-    messagesCount?: number;
+    exportAction?: React.ReactNode;
     searchActive?: boolean;
     sessionStats?: {
         userMessages: number;
@@ -63,8 +62,7 @@ export const Header = React.memo(function Header({
     fileTreeOpen,
     onOpenSearch,
     onOpenShortcuts,
-    onExport,
-    messagesCount,
+    exportAction,
     searchActive,
     sessionStats,
     models,
@@ -178,16 +176,7 @@ export const Header = React.memo(function Header({
 
                 {sessionStats && <StatsPopover stats={sessionStats} />}
 
-                {(messagesCount ?? 0) > 0 && onExport && (
-                    <button
-                        onClick={onExport}
-                        className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                        title="Export chat (Markdown)"
-                        aria-label="Export chat (Markdown)"
-                    >
-                        <Download size={16} />
-                    </button>
-                )}
+                {exportAction}
 
                 <button
                     onClick={onOpenSettings}
