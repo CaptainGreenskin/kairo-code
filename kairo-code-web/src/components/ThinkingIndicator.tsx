@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 
 export type Phase = 'thinking' | 'tool' | 'writing';
 
@@ -7,14 +7,14 @@ interface ThinkingIndicatorProps {
     toolName?: string;
     phase?: Phase;
     toolElapsed?: number; // ms
-}
+};
 
 const formatElapsed = (ms: number): string => {
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(1)}s`;
 };
 
-export function ThinkingIndicator({ isVisible, toolName, phase = 'thinking', toolElapsed }: ThinkingIndicatorProps) {
+function ThinkingIndicatorInner({ isVisible, toolName, phase = 'thinking', toolElapsed }: ThinkingIndicatorProps) {
     const [dots, setDots] = useState('');
 
     useEffect(() => {
@@ -67,3 +67,5 @@ export function ThinkingIndicator({ isVisible, toolName, phase = 'thinking', too
         </div>
     );
 }
+
+export const ThinkingIndicator = memo(ThinkingIndicatorInner);

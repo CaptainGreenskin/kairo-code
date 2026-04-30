@@ -610,6 +610,17 @@ function App() {
         savePref('model', cfg.defaultModel);
     }, [setCurrentModel]);
 
+    const handleOpenSearch = useCallback(() => {
+        setShowSearch(v => {
+            if (!v) setSearchQuery('');
+            return !v;
+        });
+    }, []);
+
+    const handleOpenShortcuts = useCallback(() => setShowShortcuts(true), []);
+
+    const handleMenuClick = useCallback(() => setSidebarOpen(v => !v), []);
+
     const handleModelChange = useCallback((m: string) => {
         setCurrentModel(m);
         savePref('model', m);
@@ -663,6 +674,20 @@ function App() {
         const instruction = `Please write the following content to \`${filename}\`:\n\`\`\`\n${content}\n\`\`\``;
         handleSend(instruction);
     }, [handleSend]);
+
+    // Stable callbacks for SessionSidebar (prevents memo-busting re-renders)
+    const handleCreateSession = useCallback(async (workingDir: string, model: string) => {
+        connect();
+        const newId = await createSession(workingDir, model);
+        return { sessionId: newId };
+    }, [connect, createSession]);
+
+    const handleNewSessionFromSidebar = useCallback(({ sessionId: newId }: { sessionId: string }) => {
+        setSessionId(newId);
+        clearMessages();
+        assistantMsgRef.current = null;
+        connect();
+    }, [setSessionId, clearMessages, connect]);
 
     // Command palette commands
     const commands: Command[] = useMemo(() => [
@@ -725,8 +750,8 @@ function App() {
                 onToggleFileTree={handleToggleFileTree}
                 fileTreeOpen={fileTreeOpen}
                 searchActive={showSearch}
-                onOpenSearch={() => { setShowSearch(v => !v); if (!showSearch) setSearchQuery(''); }}
-                onOpenShortcuts={() => setShowShortcuts(true)}
+                onOpenSearch={handleOpenSearch}
+                onOpenShortcuts={handleOpenShortcuts}
                 messagesCount={messages.length}
                 onExport={handleExport}
                 tokenCount={estimatedTokens}
@@ -735,7 +760,7 @@ function App() {
                 onModelChange={handleModelChange}
                 isThinking={isThinking}
                 isMobile={isMobile}
-                onMenuClick={() => setSidebarOpen(v => !v)}
+                onMenuClick={handleMenuClick}
                 connectionStatus={connectionStatus}
             />
 
@@ -765,17 +790,8 @@ function App() {
                                 loadingSessionId={loadingSessionId}
                                 onSelectSession={(id) => { handleSelectSession(id); setSidebarOpen(false); }}
                                 onDeleteSession={handleDeleteSession}
-                                onCreateSession={async (workingDir, model) => {
-                                    connect();
-                                    const newId = await createSession(workingDir, model);
-                                    return { sessionId: newId };
-                                }}
-                                onNewSession={({ sessionId: newId }) => {
-                                    setSessionId(newId);
-                                    clearMessages();
-                                    assistantMsgRef.current = null;
-                                    connect();
-                                }}
+                                onCreateSession={handleCreateSession}
+                                onNewSession={handleNewSessionFromSidebar}
                                 onSessionsChange={setSidebarSessions}
                             />
                         </div>
@@ -786,17 +802,8 @@ function App() {
                         loadingSessionId={loadingSessionId}
                         onSelectSession={handleSelectSession}
                         onDeleteSession={handleDeleteSession}
-                        onCreateSession={async (workingDir, model) => {
-                            connect();
-                            const newId = await createSession(workingDir, model);
-                            return { sessionId: newId };
-                        }}
-                        onNewSession={({ sessionId: newId }) => {
-                            setSessionId(newId);
-                            clearMessages();
-                            assistantMsgRef.current = null;
-                            connect();
-                        }}
+                        onCreateSession={handleCreateSession}
+                        onNewSession={handleNewSessionFromSidebar}
                         onSessionsChange={setSidebarSessions}
                     />
                 )}

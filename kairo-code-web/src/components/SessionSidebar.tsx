@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React from 'react';
 import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, X } from 'lucide-react';
 import { listSessions, deleteSession as apiDeleteSession } from '@api/config';
 import type { SessionInfo } from '@/types/agent';
@@ -246,7 +247,7 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
     );
 }
 
-export function SessionSidebar({
+export const SessionSidebar = React.memo(function SessionSidebar({
     activeSessionId,
     loadingSessionId,
     onSelectSession,
@@ -588,4 +589,4 @@ export function SessionSidebar({
             )}
         </>
     );
-}
+});
