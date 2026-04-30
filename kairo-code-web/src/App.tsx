@@ -425,6 +425,18 @@ function App() {
         if (sessionId) stopAgent(sessionId);
     }, [stopAgent, sessionId]);
 
+    const handleInterruptAndSend = useCallback(
+        (text: string) => {
+            if (isThinking) {
+                handleStop();
+                setTimeout(() => handleSend(text), 300);
+            } else {
+                handleSend(text);
+            }
+        },
+        [isThinking, handleStop, handleSend],
+    );
+
     const handleApproveTool = useCallback(
         (toolCallId: string, approved: boolean) => {
             if (sessionId) approveTool(sessionId, toolCallId, approved);
@@ -872,6 +884,7 @@ function App() {
                     <ChatInput
                         sessionId={sessionId ?? undefined}
                         onSend={handleSend}
+                        onInterruptAndSend={handleInterruptAndSend}
                         onStop={handleStop}
                         disabled={false}
                         isThinking={isThinking}

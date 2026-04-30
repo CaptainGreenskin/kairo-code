@@ -5,6 +5,7 @@ import { loadHistory, pushHistory } from '@utils/inputHistory';
 
 interface ChatInputProps {
     onSend: (text: string) => void;
+    onInterruptAndSend?: (text: string) => void;
     onStop: () => void;
     disabled: boolean;
     isThinking: boolean;
@@ -17,7 +18,7 @@ const AT_RE = /@([^\s]*)$/;
 const CHAR_WARN_THRESHOLD = 2000;
 const CHAR_MAX = 4000;
 
-export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sessionId }: ChatInputProps) {
+export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sessionId }: ChatInputProps) {
     const [text, setText] = useState('');
     const [dragging, setDragging] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
@@ -120,6 +121,20 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
             e.preventDefault();
             historyIndexRef.current = null;
             setText(draftRef.current);
+            return;
+        }
+
+        // Cmd+Enter / Ctrl+Enter: interrupt and send
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            const trimmed = text.trim();
+            if (trimmed) {
+                historyIndexRef.current = null;
+                draftRef.current = '';
+                setText('');
+                setShowFilePicker(false);
+                onInterruptAndSend?.(trimmed);
+            }
             return;
         }
 
