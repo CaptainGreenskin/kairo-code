@@ -70,3 +70,7 @@ KAIRO_SESSION_RESULT.json
 .dispatcher/eval/
 .dispatcher/_archive/
 .dispatcher/ata/
+
+# Node.js
+node_modules/
+package-lock.json
