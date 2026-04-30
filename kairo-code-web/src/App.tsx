@@ -17,6 +17,7 @@ import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent'
 import { getConfig } from '@api/config';
 import { exportChatAsMarkdown } from '@utils/exportChat';
 import { Virtuoso } from 'react-virtuoso';
+import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
 
 function generateId(): string {
     return crypto.randomUUID();
@@ -248,10 +249,23 @@ function App() {
     useEffect(() => {
         const savedId = sessionStorage.getItem('kairo-code-session-id');
         if (savedId) {
+            // 立即从缓存恢复，让用户看到消息，不用等 WebSocket
+            const cached = loadMessages(savedId);
+            if (cached.length > 0) {
+                setSessionId(savedId);
+                setMessages(cached);
+            }
             connect();
         }
         // onConnect auto-detects the session and sends bind-session
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Snapshot messages to sessionStorage on change
+    useEffect(() => {
+        if (sessionId && messages.length > 0) {
+            saveMessages(sessionId, messages);
+        }
+    }, [sessionId, messages]);
 
     // Global keyboard shortcut: Cmd+Shift+F opens search
     useEffect(() => {
@@ -365,6 +379,7 @@ function App() {
     }, [messages.length]);
 
     const handleNewSession = useCallback(() => {
+        if (sessionId) clearCachedMessages(sessionId);
         disconnect();
         setSessionId(null);
         clearMessages();
@@ -373,7 +388,7 @@ function App() {
         setTokenUsage({ input: 0, output: 0 });
         setEstimatedCost(0);
         sessionStorage.removeItem('kairo-code-session-id');
-    }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost]);
+    }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost, sessionId]);
 
     const handleSelectSession = useCallback(
         (id: string) => {
@@ -381,7 +396,13 @@ function App() {
             setLoadingSessionId(id);
             disconnect();
             setSessionId(id);
-            clearMessages();
+            // 立即从缓存恢复
+            const cached = loadMessages(id);
+            if (cached.length > 0) {
+                setMessages(cached);
+            } else {
+                clearMessages();
+            }
             assistantMsgRef.current = null;
             setStreamingMsgId(null);
             connect();
@@ -391,6 +412,7 @@ function App() {
 
     const handleDeleteSession = useCallback(
         (id: string) => {
+            clearCachedMessages(id);
             if (id === sessionId) {
                 handleNewSession();
             }
