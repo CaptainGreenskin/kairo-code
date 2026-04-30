@@ -1,16 +1,10 @@
 package io.kairo.code.server.controller;
 
-import io.kairo.api.agent.Agent;
-import io.kairo.api.exception.AgentInterruptedException;
-import io.kairo.api.message.Msg;
-import io.kairo.api.message.MsgRole;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.service.AgentEvent;
+import io.kairo.code.service.AgentService;
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.dto.*;
-import io.kairo.code.server.session.AgentSessionManager;
-import io.kairo.code.server.session.AgentSessionManager.SessionEntry;
-import io.kairo.code.server.session.WebSocketApprovalHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
@@ -19,13 +13,8 @@ import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-
 /**
- * STOMP message controller that handles agent session operations
- * over WebSocket.
+ * STOMP message controller — thin adapter over {@link AgentService}.
  *
  * <p>Endpoints (all under /app prefix):
  * <ul>
@@ -43,14 +32,14 @@ public class AgentController {
     private static final Logger log = LoggerFactory.getLogger(AgentController.class);
 
     private final SimpMessagingTemplate messagingTemplate;
-    private final AgentSessionManager sessionManager;
+    private final AgentService agentService;
     private final ServerProperties serverProperties;
 
     public AgentController(SimpMessagingTemplate messagingTemplate,
-                           AgentSessionManager sessionManager,
+                           AgentService agentService,
                            @Lazy ServerProperties serverProperties) {
         this.messagingTemplate = messagingTemplate;
-        this.sessionManager = sessionManager;
+        this.agentService = agentService;
         this.serverProperties = serverProperties;
     }
 
@@ -75,8 +64,7 @@ public class AgentController {
                 0
         );
 
-        WebSocketApprovalHandler approvalHandler = new WebSocketApprovalHandler();
-        String sessionId = sessionManager.createSession(config, approvalHandler);
+        String sessionId = agentService.createSession(config);
 
         CreateSessionResponse response = new CreateSessionResponse(
                 sessionId, config.workingDir(), config.modelName());
@@ -86,71 +74,16 @@ public class AgentController {
     }
 
     /**
-     * Send a user message to an agent session. The agent runs asynchronously
-     * and events are pushed to the session topic.
+     * Send a user message to an agent session. Events are streamed
+     * to the session topic via Flux subscription.
      */
     @MessageMapping("/agent/message")
     public void sendMessage(@Payload AgentMessageRequest request) {
-        SessionEntry entry = sessionManager.getSession(request.sessionId())
-                .orElse(null);
-        if (entry == null) {
-            pushError(request.sessionId(), "Session not found: " + request.sessionId(), "SESSION_NOT_FOUND");
-            return;
-        }
-
-        if (sessionManager.isRunning(request.sessionId())) {
-            pushError(request.sessionId(), "Session is already running", "SESSION_BUSY");
-            return;
-        }
-
-        // Mark session as running
-        sessionManager.setRunning(request.sessionId(), true);
-
-        Agent agent = entry.session().agent();
-        Msg userMsg = Msg.of(MsgRole.USER, request.message());
-
-        // Push thinking event
-        messagingTemplate.convertAndSend("/topic/session/" + request.sessionId(),
-                AgentEvent.thinking(request.sessionId()));
-
-        // Subscribe to the agent call and stream events
-        AtomicBoolean completed = new AtomicBoolean(false);
-
-        agent.call(userMsg)
-                .doFinally(signal -> {
-                    sessionManager.setRunning(request.sessionId(), false);
-                    if (!completed.get()) {
-                        // Agent was cancelled or errored without completing
-                        if (signal == reactor.core.publisher.SignalType.ON_ERROR) {
-                            // Error handled in onError
-                        } else {
-                            messagingTemplate.convertAndSend("/topic/session/" + request.sessionId(),
-                                    AgentEvent.done(request.sessionId(), 0, 0.0));
-                        }
-                    }
-                })
+        agentService.sendMessage(request.sessionId(), request.message())
                 .subscribe(
-                        responseMsg -> {
-                            completed.set(true);
-                            // Extract token usage from the response
-                            long tokens = 0;
-                            double cost = 0.0;
-                            // Token usage is not directly available on Msg;
-                            // we report 0 for now. A future enhancement would
-                            // capture usage from the hook events.
-                            messagingTemplate.convertAndSend("/topic/session/" + request.sessionId(),
-                                    AgentEvent.done(request.sessionId(), tokens, cost));
-                        },
-                        error -> {
-                            completed.set(true);
-                            String errorMsg = error.getMessage();
-                            String errorType = error.getClass().getSimpleName();
-                            if (error instanceof AgentInterruptedException) {
-                                errorType = "INTERRUPTED";
-                                errorMsg = "Agent execution was interrupted";
-                            }
-                            pushError(request.sessionId(), errorMsg, errorType);
-                        }
+                        event -> messagingTemplate.convertAndSend(
+                                "/topic/session/" + request.sessionId(), event),
+                        error -> log.error("Error in session {} message stream", request.sessionId(), error)
                 );
 
         log.info("Message sent to session {}", request.sessionId());
@@ -161,19 +94,11 @@ public class AgentController {
      */
     @MessageMapping("/agent/approve")
     public void approveTool(@Payload ToolApprovalRequest request) {
-        SessionEntry entry = sessionManager.getSession(request.sessionId())
-                .orElse(null);
-        if (entry == null) {
-            pushError(request.sessionId(), "Session not found", "SESSION_NOT_FOUND");
-            return;
-        }
-
-        boolean resolved = entry.approvalHandler().resolveApproval(
+        boolean resolved = agentService.approveTool(
+                request.sessionId(),
                 request.toolCallId(),
-                request.approved()
-                        ? io.kairo.api.tool.ApprovalResult.allow()
-                        : io.kairo.api.tool.ApprovalResult.denied(
-                                request.reason() != null ? request.reason() : "User denied"));
+                request.approved(),
+                request.reason());
 
         if (!resolved) {
             pushError(request.sessionId(),
@@ -192,22 +117,8 @@ public class AgentController {
      */
     @MessageMapping("/agent/stop")
     public void stopAgent(@Payload AgentMessageRequest request) {
-        SessionEntry entry = sessionManager.getSession(request.sessionId())
-                .orElse(null);
-        if (entry == null) {
-            pushError(request.sessionId(), "Session not found", "SESSION_NOT_FOUND");
-            return;
-        }
-
-        try {
-            entry.session().agent().interrupt();
-            sessionManager.setRunning(request.sessionId(), false);
-            messagingTemplate.convertAndSend("/topic/session/" + request.sessionId(),
-                    AgentEvent.done(request.sessionId(), 0, 0.0));
-            log.info("Session {} stopped", request.sessionId());
-        } catch (Exception e) {
-            log.warn("Error stopping session {}", request.sessionId(), e);
-        }
+        agentService.stopAgent(request.sessionId());
+        log.info("Stop requested for session {}", request.sessionId());
     }
 
     // -- Private helpers --
@@ -229,8 +140,6 @@ public class AgentController {
     }
 
     private String resolveApiKey() {
-        // API key should come from server config.
-        // In production, this is set via KAIRO_CODE_API_KEY env var.
         return serverProperties.apiKey();
     }
 }

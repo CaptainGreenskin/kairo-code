@@ -2,8 +2,8 @@ package io.kairo.code.server.controller;
 
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.dto.ServerConfigResponse;
+import io.kairo.code.service.AgentService;
 import io.kairo.code.service.SessionInfo;
-import io.kairo.code.server.session.AgentSessionManager;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,12 +17,12 @@ import java.util.List;
 public class ConfigController {
 
     private final ServerProperties serverProperties;
-    private final AgentSessionManager sessionManager;
+    private final AgentService agentService;
 
     public ConfigController(ServerProperties serverProperties,
-                            AgentSessionManager sessionManager) {
+                            AgentService agentService) {
         this.serverProperties = serverProperties;
-        this.sessionManager = sessionManager;
+        this.agentService = agentService;
     }
 
     /**
@@ -56,7 +56,7 @@ public class ConfigController {
      */
     @GetMapping("/sessions")
     public List<SessionInfo> getSessions() {
-        return sessionManager.listSessions();
+        return agentService.listSessions();
     }
 
     /**
@@ -64,7 +64,7 @@ public class ConfigController {
      */
     @DeleteMapping("/sessions/{id}")
     public ResponseEntity<Void> destroySession(@PathVariable String id) {
-        boolean destroyed = sessionManager.destroySession(id);
+        boolean destroyed = agentService.destroySession(id);
         return destroyed ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 }
