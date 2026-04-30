@@ -5,6 +5,7 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Loader2, Copy, Check } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
+import { ToolCallGroup } from './ToolCallGroup';
 import { streamingStore } from '@store/streamingStore';
 
 interface ChatMessageProps {
@@ -129,15 +130,20 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId }: 
                     )}
 
                     {hasToolCalls && (
-                        <div className="mt-2 space-y-2">
-                            {message.toolCalls.map((tc) => (
+                        message.toolCalls.length === 1 ? (
+                            <div className="mt-2">
                                 <ToolCallCard
-                                    key={tc.id}
-                                    toolCall={tc}
+                                    toolCall={message.toolCalls[0]}
                                     onApprove={onApproveTool}
                                 />
-                            ))}
-                        </div>
+                            </div>
+                        ) : (
+                            <ToolCallGroup
+                                toolCalls={message.toolCalls}
+                                onApprove={onApproveTool}
+                                isStreaming={isStreaming}
+                            />
+                        )
                     )}
 
                     {/* Character count */}
