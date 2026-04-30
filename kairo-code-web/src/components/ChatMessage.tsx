@@ -6,6 +6,7 @@ import { Copy, Check, RefreshCw, Pencil } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
+import { DiffBlock } from './DiffBlock';
 import { streamingStore } from '@store/streamingStore';
 
 interface ChatMessageProps {
@@ -223,10 +224,16 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                         } & Record<string, unknown>;
                                         const propsRecord = props as Record<string, unknown>;
                                         const match = /language-(\w+)/.exec(className || '');
+                                        const lang = match ? match[1] : '';
                                         const content = String(children).replace(/\n$/, '');
-                                        if (!propsRecord.inline && match && content) {
+                                        if (!propsRecord.inline && content) {
+                                            // Detect unified diff: explicit diff/patch lang or --- + +++ markers
+                                            if (lang === 'diff' || lang === 'patch' ||
+                                                (content.includes('\n--- ') && content.includes('\n+++ '))) {
+                                                return <DiffBlock content={content} />;
+                                            }
                                             return (
-                                                <CodeBlock language={match[1]} content={content} meta={propsRecord.meta as string | undefined} />
+                                                <CodeBlock language={lang} content={content} meta={propsRecord.meta as string | undefined} />
                                             );
                                         }
                                         return (
