@@ -8,6 +8,7 @@ import {
     ChevronDown,
     RefreshCw,
     Loader2,
+    AtSign,
 } from 'lucide-react';
 import { listFiles, getFileContent } from '@api/config';
 import type { FileEntry } from '@/types/agent';
@@ -16,6 +17,7 @@ interface FileTreePanelProps {
     isOpen: boolean;
     onToggle: () => void;
     onInsertFile: (path: string, content: string, language: string) => void;
+    onMentionFile?: (path: string) => void;
     width?: number;
 }
 
@@ -55,37 +57,55 @@ function TreeNodeItem({
     depth,
     onExpand,
     onSelect,
+    onMentionFile,
 }: {
     node: TreeNode;
     depth: number;
     onExpand: (path: string) => void;
     onSelect: (entry: FileEntry) => void;
+    onMentionFile?: (path: string) => void;
 }) {
     const { entry, children, loading, expanded } = node;
     const isDir = entry.isDir;
 
     return (
         <div>
-            <button
-                className={`w-full flex items-center gap-1.5 py-1 text-sm text-left hover:bg-[var(--bg-hover)] transition-colors truncate ${
-                    !isDir ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'
-                }`}
+            <div
+                className="group w-full flex items-center gap-1.5 py-1 text-sm text-left hover:bg-[var(--bg-hover)] transition-colors truncate"
                 style={{ paddingLeft: `${depth * 12 + 8}px` }}
-                onClick={() => {
-                    if (isDir) onExpand(entry.path);
-                    else onSelect(entry);
-                }}
-                title={entry.path}
             >
-                {isDir && (
-                    <span className="shrink-0 text-[var(--text-muted)]">
-                        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    </span>
+                <button
+                    className={`flex-1 flex items-center gap-1.5 min-w-0 text-left ${
+                        !isDir ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'
+                    }`}
+                    onClick={() => {
+                        if (isDir) onExpand(entry.path);
+                        else onSelect(entry);
+                    }}
+                    title={entry.path}
+                >
+                    {isDir && (
+                        <span className="shrink-0 text-[var(--text-muted)]">
+                            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        </span>
+                    )}
+                    {!isDir && <span className="w-3 shrink-0" />}
+                    <FileIcon name={entry.name} expanded={isDir ? expanded : undefined} />
+                    <span className="truncate">{entry.name}</span>
+                </button>
+                {!isDir && onMentionFile && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onMentionFile(entry.path);
+                        }}
+                        className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-opacity"
+                        title={`Mention @${entry.name}`}
+                    >
+                        <AtSign size={11} />
+                    </button>
                 )}
-                {!isDir && <span className="w-3 shrink-0" />}
-                <FileIcon name={entry.name} expanded={isDir ? expanded : undefined} />
-                <span className="truncate">{entry.name}</span>
-            </button>
+            </div>
             {isDir && expanded && (
                 <div className="transition-all" style={{ overflow: 'hidden' }}>
                     {loading && (
@@ -104,6 +124,7 @@ function TreeNodeItem({
                             depth={depth + 1}
                             onExpand={onExpand}
                             onSelect={onSelect}
+                            onMentionFile={onMentionFile}
                         />
                     ))}
                     {!loading && children && children.length === 0 && (
@@ -120,7 +141,7 @@ function TreeNodeItem({
     );
 }
 
-export function FileTreePanel({ isOpen, onToggle, onInsertFile, width = 240 }: FileTreePanelProps) {
+export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, width = 240 }: FileTreePanelProps) {
     const [rootNodes, setRootNodes] = useState<TreeNode[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -316,6 +337,7 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, width = 240 }: F
                             depth={0}
                             onExpand={handleExpand}
                             onSelect={handleSelectFile}
+                            onMentionFile={onMentionFile}
                         />
                     ))}
                     {insertingPath && (

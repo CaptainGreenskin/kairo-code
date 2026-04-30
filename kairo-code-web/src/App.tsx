@@ -616,6 +616,11 @@ function App() {
         setChatInputAppend(prev => (prev ? prev + '\n' + text : text));
     }, []);
 
+    const handleMentionFile = useCallback((path: string) => {
+        const mention = `@${path}`;
+        setChatInputAppend(prev => prev ? `${prev} ${mention}` : mention);
+    }, []);
+
     const handleApplyToFile = useCallback((filename: string, content: string) => {
         const instruction = `Please write the following content to \`${filename}\`:\n\`\`\`\n${content}\n\`\`\``;
         handleSend(instruction);
@@ -762,6 +767,7 @@ function App() {
                     isOpen={fileTreeOpen}
                     onToggle={handleToggleFileTree}
                     onInsertFile={handleInsertFile}
+                    onMentionFile={handleMentionFile}
                     width={isNarrow ? 200 : 240}
                 />
 
