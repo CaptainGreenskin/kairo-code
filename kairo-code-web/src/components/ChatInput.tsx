@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Square } from 'lucide-react';
 import { FilePicker } from './FilePicker';
+import { loadHistory, pushHistory } from '@utils/inputHistory';
 
 interface ChatInputProps {
     onSend: (text: string) => void;
@@ -9,26 +10,38 @@ interface ChatInputProps {
     isThinking: boolean;
     appendText?: string;
     onAppendConsumed?: () => void;
-    sentMessages?: string[];
+    sessionId?: string;
 }
 
 const AT_RE = /@([^\s]*)$/;
 const CHAR_WARN_THRESHOLD = 2000;
 const CHAR_MAX = 4000;
 
-export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sentMessages }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sessionId }: ChatInputProps) {
     const [text, setText] = useState('');
     const [dragging, setDragging] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
     const [showFilePicker, setShowFilePicker] = useState(false);
     const [atQuery, setAtQuery] = useState('');
-    const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-    const [draftText, setDraftText] = useState('');
+    const historyRef = useRef<string[]>([]);
+    const historyIndexRef = useRef<number | null>(null);
+    const draftRef = useRef('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
         textareaRef.current?.focus();
     }, []);
+
+    // Load history when sessionId changes
+    useEffect(() => {
+        if (sessionId) {
+            historyRef.current = loadHistory(sessionId);
+        } else {
+            historyRef.current = [];
+        }
+        historyIndexRef.current = null;
+        draftRef.current = '';
+    }, [sessionId]);
 
     // Auto-adjust textarea height
     useEffect(() => {
@@ -66,47 +79,47 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // History navigation: ArrowUp
-        if (e.key === 'ArrowUp' && !e.shiftKey && (sentMessages?.length ?? 0) > 0) {
+        if (e.key === 'ArrowUp' && !e.shiftKey && historyRef.current.length > 0) {
             const textarea = e.currentTarget;
             const firstNewline = textarea.value.indexOf('\n');
             const atFirstLine = firstNewline === -1 || textarea.selectionStart <= firstNewline;
             if (!atFirstLine) return;
 
             e.preventDefault();
-            const history = sentMessages!;
-            if (historyIndex === null) {
-                setDraftText(text);
+            const history = historyRef.current;
+            if (historyIndexRef.current === null) {
+                draftRef.current = text;
                 const newIndex = history.length - 1;
-                setHistoryIndex(newIndex);
+                historyIndexRef.current = newIndex;
                 setText(history[newIndex]);
-            } else if (historyIndex > 0) {
-                const newIndex = historyIndex - 1;
-                setHistoryIndex(newIndex);
+            } else if (historyIndexRef.current > 0) {
+                const newIndex = historyIndexRef.current - 1;
+                historyIndexRef.current = newIndex;
                 setText(history[newIndex]);
             }
             return;
         }
 
         // History navigation: ArrowDown
-        if (e.key === 'ArrowDown' && historyIndex !== null && !e.shiftKey) {
+        if (e.key === 'ArrowDown' && historyIndexRef.current !== null && !e.shiftKey) {
             e.preventDefault();
-            const history = sentMessages!;
-            if (historyIndex < history.length - 1) {
-                const newIndex = historyIndex + 1;
-                setHistoryIndex(newIndex);
+            const history = historyRef.current;
+            if (historyIndexRef.current < history.length - 1) {
+                const newIndex = historyIndexRef.current + 1;
+                historyIndexRef.current = newIndex;
                 setText(history[newIndex]);
             } else {
-                setHistoryIndex(null);
-                setText(draftText);
+                historyIndexRef.current = null;
+                setText(draftRef.current);
             }
             return;
         }
 
         // Exit history: Escape
-        if (e.key === 'Escape' && historyIndex !== null) {
+        if (e.key === 'Escape' && historyIndexRef.current !== null) {
             e.preventDefault();
-            setHistoryIndex(null);
-            setText(draftText);
+            historyIndexRef.current = null;
+            setText(draftRef.current);
             return;
         }
 
@@ -119,8 +132,9 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
     const handleSend = () => {
         const trimmed = text.trim();
         if (!trimmed || disabled) return;
-        setHistoryIndex(null);
-        setDraftText('');
+        if (sessionId) pushHistory(sessionId, trimmed);
+        historyIndexRef.current = null;
+        draftRef.current = '';
         onSend(trimmed);
         setText('');
         setShowFilePicker(false);
@@ -204,7 +218,7 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
                             value={text}
                             onChange={(e) => setText(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder={historyIndex !== null ? '↑↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
+                            placeholder={historyIndexRef.current !== null ? '↑↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
                             disabled={disabled && !isThinking}
                             rows={1}
                             className="w-full resize-none overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] disabled:opacity-50"
