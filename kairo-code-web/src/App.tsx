@@ -8,6 +8,7 @@ import { ChatInput } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
 import { SettingsModal } from '@components/SettingsModal';
 import { FileTreePanel } from '@components/FileTreePanel';
+import { SearchPanel } from '@components/SearchPanel';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
 import { Virtuoso } from 'react-virtuoso';
@@ -42,6 +43,7 @@ function App() {
     const [showSettings, setShowSettings] = useState(false);
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
     const [fileTreeOpen, setFileTreeOpen] = useState(false);
+    const [showSearch, setShowSearch] = useState(false);
     const [chatInputAppend, setChatInputAppend] = useState<string>('');
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
@@ -241,6 +243,18 @@ function App() {
         // onConnect auto-detects the session and sends bind-session
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Global keyboard shortcut: Cmd+Shift+F opens search
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
+                e.preventDefault();
+                setShowSearch(true);
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, []);
+
     const handleSend = useCallback(
         (text: string) => {
             // Add user message to store
@@ -345,6 +359,7 @@ function App() {
                 onOpenSettings={handleOpenSettings}
                 onToggleFileTree={handleToggleFileTree}
                 fileTreeOpen={fileTreeOpen}
+                onOpenSearch={() => setShowSearch(true)}
             />
 
             <div className="flex flex-1 overflow-hidden">
@@ -440,6 +455,12 @@ function App() {
                     onSaved={handleSettingsSaved}
                 />
             )}
+
+            <SearchPanel
+                isOpen={showSearch}
+                onClose={() => setShowSearch(false)}
+                onInsertResult={(text) => setChatInputAppend(text)}
+            />
         </div>
     );
 }

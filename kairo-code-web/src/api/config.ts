@@ -1,4 +1,4 @@
-import type { ServerConfig, SessionInfo, FileEntry, FileContentResponse } from '@/types/agent';
+import type { ServerConfig, SessionInfo, FileEntry, FileContentResponse, SearchResponse } from '@/types/agent';
 
 const API_BASE = '/api';
 
@@ -52,4 +52,18 @@ export async function updateConfig(req: UpdateConfigRequest): Promise<ServerConf
         method: 'POST',
         body: JSON.stringify(req),
     });
+}
+
+export interface SearchMatch {
+    file: string;
+    line: number;
+    preview: string;
+}
+
+export async function searchFiles(q: string, path?: string, limit?: number): Promise<SearchResponse> {
+    const params = new URLSearchParams();
+    params.set('q', q);
+    if (path) params.set('path', path);
+    if (limit) params.set('limit', String(limit));
+    return request<SearchResponse>(`/search?${params}`);
 }
