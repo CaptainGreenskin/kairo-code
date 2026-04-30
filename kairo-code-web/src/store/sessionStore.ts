@@ -10,7 +10,7 @@ interface SessionState {
     currentModel: string;
 
     // Actions
-    setSessionId: (id: string) => void;
+    setSessionId: (id: string | null) => void;
     addMessage: (message: Message) => void;
     appendChunk: (messageId: string, text: string) => void;
     addToolCall: (messageId: string, toolCall: ToolCall) => void;
@@ -20,10 +20,6 @@ interface SessionState {
     setEstimatedCost: (cost: number) => void;
     setCurrentModel: (model: string) => void;
     clearMessages: () => void;
-}
-
-function generateId(): string {
-    return crypto.randomUUID();
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
