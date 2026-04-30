@@ -9,6 +9,7 @@ import { ToolCallGroup } from './ToolCallGroup';
 import { DiffBlock } from './DiffBlock';
 import { streamingStore } from '@store/streamingStore';
 import { formatRelativeTime, formatAbsoluteTime } from '@utils/formatTime';
+import { useDebounce } from '@hooks/useDebounce';
 
 interface ChatMessageProps {
     message: Message;
@@ -168,6 +169,9 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
 
     const displayContent = isStreaming && sessionId ? streamingContent : message.content;
 
+    // Debounce streaming content to avoid per-token ReactMarkdown re-parse (CPU spike)
+    const debouncedContent = useDebounce(displayContent ?? '', isStreaming ? 80 : 0);
+
     if (message.role === 'user') {
         return (
             <div className="flex justify-end mb-4 animate-slide-up group">
@@ -247,7 +251,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
     }
 
     const hasToolCalls = message.toolCalls.length > 0;
-    const { think: thinkBlocks, rest: mainContent } = extractThinkBlocks(displayContent ?? '');
+    const { think: thinkBlocks, rest: mainContent } = extractThinkBlocks(debouncedContent);
     const hasContent = mainContent.length > 0;
 
     const handleCopyMessage = () => {
@@ -336,7 +340,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
 
                     {isStreaming && (
                         <span
-                            className="inline-block w-0.5 h-4 bg-[var(--text-primary)] ml-0.5 align-text-bottom animate-pulse"
+                            className="typing-cursor"
                         />
                     )}
 

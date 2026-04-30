@@ -74,6 +74,7 @@ export interface Message {
     content: string;
     toolCalls: ToolCall[];
     timestamp: number;
+    streaming?: boolean;
 }
 
 export interface ToolCall {
