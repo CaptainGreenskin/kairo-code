@@ -2,7 +2,7 @@ import { useSyncExternalStore, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, RefreshCw, Pencil } from 'lucide-react';
+import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
@@ -17,15 +17,19 @@ interface ChatMessageProps {
     sessionId?: string;
     onRegenerate?: (messageId: string) => void;
     onEditResend?: (messageId: string, newText: string) => void;
+    onInsertToChat?: (text: string) => void;
+    onApplyToFile?: (filename: string, content: string) => void;
 }
 
 interface CodeBlockProps {
     language: string;
     content: string;
     meta?: string;
+    onInsertToChat?: (text: string) => void;
+    onApplyToFile?: (filename: string, content: string) => void;
 }
 
-function CodeBlock({ language, content, meta }: CodeBlockProps) {
+function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFile }: CodeBlockProps) {
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -55,13 +59,34 @@ function CodeBlock({ language, content, meta }: CodeBlockProps) {
                         <span className="text-xs text-[var(--text-secondary)]">{title}</span>
                     )}
                 </div>
-                <button
-                    onClick={handleCopy}
-                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                >
-                    {copied ? <Check size={12} /> : <Copy size={12} />}
-                    <span>{copied ? 'Copied' : 'Copy'}</span>
-                </button>
+                <div className="flex items-center gap-3">
+                    {onInsertToChat && (
+                        <button
+                            onClick={() => onInsertToChat('```' + (language || '') + '\n' + content + '\n```')}
+                            className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                            title="Insert to chat"
+                        >
+                            <MessageSquarePlus size={12} />
+                        </button>
+                    )}
+                    {onApplyToFile && title && (
+                        <button
+                            onClick={() => onApplyToFile(title, content)}
+                            className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+                            title={`Apply to ${title}`}
+                        >
+                            <ArrowDownToLine size={12} />
+                            <span>Apply</span>
+                        </button>
+                    )}
+                    <button
+                        onClick={handleCopy}
+                        className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                    >
+                        {copied ? <Check size={12} /> : <Copy size={12} />}
+                        <span>{copied ? 'Copied' : 'Copy'}</span>
+                    </button>
+                </div>
             </div>
             {/* Code with line numbers */}
             <div className="flex overflow-x-auto bg-[var(--color-code-bg)]">
@@ -96,7 +121,7 @@ function CodeBlock({ language, content, meta }: CodeBlockProps) {
     );
 }
 
-export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
     const [editing, setEditing] = useState(false);
     const [editText, setEditText] = useState(message.content);
@@ -241,7 +266,13 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                                 return <DiffBlock content={content} />;
                                             }
                                             return (
-                                                <CodeBlock language={lang} content={content} meta={propsRecord.meta as string | undefined} />
+                                                <CodeBlock
+                                                    language={lang}
+                                                    content={content}
+                                                    meta={propsRecord.meta as string | undefined}
+                                                    onInsertToChat={onInsertToChat}
+                                                    onApplyToFile={onApplyToFile}
+                                                />
                                             );
                                         }
                                         return (
