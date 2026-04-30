@@ -1,5 +1,5 @@
 import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download, Menu } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { formatTokenCount } from '@utils/tokenCount';
 import { ModelSelector } from './ModelSelector';
 import type { ConnectionStatus } from '@/types/agent';
@@ -48,7 +48,7 @@ const statusLabelText: Record<ConnectionStatus, string> = {
     error: 'Connection error',
 };
 
-export function Header({
+export const Header = React.memo(function Header({
     currentModel,
     tokenUsage,
     estimatedCost,
@@ -236,4 +236,4 @@ export function Header({
             </div>
         </header>
     );
-}
+});
