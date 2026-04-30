@@ -8,6 +8,7 @@ import { formatRelativeTime } from '@utils/formatTime';
 import { getSessionName, setSessionName, removeSessionName } from '@utils/sessionNames';
 import { pinSession, unpinSession, isSessionPinned, getPinnedSessions } from '@utils/sessionPins';
 import { getSessionTags, addSessionTag, removeSessionTag, getAllTags } from '@utils/sessionTags';
+import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
 
 interface SessionSidebarProps {
     activeSessionId: string | null;
@@ -17,6 +18,8 @@ interface SessionSidebarProps {
     onNewSession: (info: { sessionId: string; model: string }) => void;
     onCreateSession: (workingDir: string, model: string) => Promise<{ sessionId: string }>;
     onSessionsChange?: (sessions: SessionInfo[]) => void;
+    sortOrder?: SessionSortOrder;
+    onSortChange?: (order: SessionSortOrder) => void;
 }
 
 interface SessionItemProps {
@@ -247,6 +250,33 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
     );
 }
 
+interface SessionSortControlProps {
+    value: SessionSortOrder;
+    onChange: (order: SessionSortOrder) => void;
+}
+
+function SessionSortControl({ value, onChange }: SessionSortControlProps) {
+    const options: { label: string; value: SessionSortOrder }[] = [
+        { label: 'Newest', value: 'date-desc' },
+        { label: 'Oldest', value: 'date-asc' },
+        { label: 'A → Z', value: 'name-asc' },
+        { label: 'Z → A', value: 'name-desc' },
+    ];
+
+    return (
+        <select
+            value={value}
+            onChange={e => onChange(e.target.value as SessionSortOrder)}
+            className="text-[10px] text-[var(--text-muted)] bg-transparent border border-[var(--border)] rounded px-1.5 py-0.5 cursor-pointer hover:border-[var(--accent)] transition-colors focus:outline-none focus:ring-0"
+            title="Sort sessions"
+        >
+            {options.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+        </select>
+    );
+}
+
 export const SessionSidebar = React.memo(function SessionSidebar({
     activeSessionId,
     loadingSessionId,
@@ -255,6 +285,8 @@ export const SessionSidebar = React.memo(function SessionSidebar({
     onNewSession,
     onCreateSession,
     onSessionsChange,
+    sortOrder = 'date-desc',
+    onSortChange,
 }: SessionSidebarProps) {
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
@@ -283,8 +315,20 @@ export const SessionSidebar = React.memo(function SessionSidebar({
         const unpinned = sessions.filter(s => !pinSet.has(s.sessionId));
         // pinned 按 pins 数组顺序排列
         pinned.sort((a, b) => pins.indexOf(a.sessionId) - pins.indexOf(b.sessionId));
-        return [...pinned, ...unpinned];
-    }, [sessions, pins]);
+        // unpinned sorted by sortOrder via sortSessions
+        const sortable = unpinned.map(s => ({
+            id: s.sessionId,
+            name: getSessionName(s.sessionId) ?? undefined,
+            createdAt: s.createdAt,
+        }));
+        const sortedIds = new Set(sortSessions(sortable, sortOrder).map(s => s.id));
+        const sortedUnpinned = [...unpinned].sort((a, b) => {
+            const ai = [...sortedIds].indexOf(a.sessionId);
+            const bi = [...sortedIds].indexOf(b.sessionId);
+            return ai - bi;
+        });
+        return [...pinned, ...sortedUnpinned];
+    }, [sessions, pins, sortOrder]);
 
     const displayedSessions = useMemo(() => {
         if (!activeTagFilter) return sortedSessions;
@@ -427,16 +471,21 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                         <Plus size={14} />
                         New Session
                     </button>
-                    <button
-                        onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
-                        className={`text-xs px-2 py-1 rounded transition-colors ${
-                            selectMode
-                                ? 'bg-[var(--accent)] text-white'
-                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                        }`}
-                    >
-                        {selectMode ? 'Cancel' : 'Select'}
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                        {onSortChange && (
+                            <SessionSortControl value={sortOrder} onChange={onSortChange} />
+                        )}
+                        <button
+                            onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+                            className={`text-xs px-2 py-1 rounded transition-colors ${
+                                selectMode
+                                    ? 'bg-[var(--accent)] text-white'
+                                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                            }`}
+                        >
+                            {selectMode ? 'Cancel' : 'Select'}
+                        </button>
+                    </div>
                 </div>
 
                 <div className="px-3 py-2">

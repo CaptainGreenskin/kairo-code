@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -36,6 +36,7 @@ import { setSessionName, getSessionName } from '@utils/sessionNames';
 import { loadPrefs, savePref } from '@utils/userPrefs';
 import { loadDraft } from '@utils/inputDraft';
 import { isCollapsible } from '@utils/messageCollapse';
+import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
 
 declare const __APP_VERSION__: string;
 
@@ -118,10 +119,23 @@ function App() {
     const [showCommandPalette, setShowCommandPalette] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [sidebarSessions, setSidebarSessions] = useState<Array<{ sessionId: string }>>([]);
+    const [sessionSortOrder, setSessionSortOrder] = useState<SessionSortOrder>('date-desc');
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
     const [atBottom, setAtBottom] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
     const prevMsgCount = useRef(messages.length);
+
+    // Sorted sessions for keyboard navigation (Cmd+[ / Cmd+])
+    const sortedSessions = useMemo(
+        () => sortSessions(
+            sidebarSessions.map(s => ({
+                id: s.sessionId,
+                name: getSessionName(s.sessionId) ?? undefined,
+            })),
+            sessionSortOrder,
+        ),
+        [sidebarSessions, sessionSortOrder],
+    );
 
     // Toast state
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -640,6 +654,20 @@ function App() {
                 }
             }
 
+            // Cmd+[ — switch to previous session
+            if ((e.metaKey || e.ctrlKey) && e.key === '[') {
+                e.preventDefault();
+                const idx = sortedSessions.findIndex(s => s.id === sessionId);
+                if (idx > 0) handleSelectSession(sortedSessions[idx - 1].id);
+            }
+
+            // Cmd+] — switch to next session
+            if ((e.metaKey || e.ctrlKey) && e.key === ']') {
+                e.preventDefault();
+                const idx = sortedSessions.findIndex(s => s.id === sessionId);
+                if (idx >= 0 && idx < sortedSessions.length - 1) handleSelectSession(sortedSessions[idx + 1].id);
+            }
+
             // Cmd+Shift+C — copy conversation as Markdown
             if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c') {
                 e.preventDefault();
@@ -649,7 +677,7 @@ function App() {
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [sessionId, sidebarSessions, handleNewSession, handleDeleteSession, handleSelectSession, handleCopyConversation]);
+    }, [sessionId, sidebarSessions, sortedSessions, handleNewSession, handleDeleteSession, handleSelectSession, handleCopyConversation]);
 
     // Global keyboard shortcut: y = approve / n = reject first pending tool call
     useEffect(() => {
@@ -883,6 +911,38 @@ function App() {
             icon: <HelpCircle size={16} />,
             action: () => { setShowShortcuts(true); setShowCommandPalette(false); },
         },
+        {
+            id: 'session-sort-newest',
+            label: 'Sort sessions: Newest first',
+            icon: <SortAsc size={16} />,
+            action: () => { setSessionSortOrder('date-desc'); setShowCommandPalette(false); },
+        },
+        {
+            id: 'session-sort-name',
+            label: 'Sort sessions: A → Z',
+            icon: <SortAsc size={16} />,
+            action: () => { setSessionSortOrder('name-asc'); setShowCommandPalette(false); },
+        },
+        {
+            id: 'session-prev',
+            label: 'Previous session',
+            shortcut: '⌘[',
+            icon: <ArrowLeft size={14} />,
+            action: () => {
+                const idx = sortedSessions.findIndex(s => s.id === sessionId);
+                if (idx > 0) { handleSelectSession(sortedSessions[idx - 1].id); setShowCommandPalette(false); }
+            },
+        },
+        {
+            id: 'session-next',
+            label: 'Next session',
+            shortcut: '⌘]',
+            icon: <ArrowRight size={14} />,
+            action: () => {
+                const idx = sortedSessions.findIndex(s => s.id === sessionId);
+                if (idx >= 0 && idx < sortedSessions.length - 1) { handleSelectSession(sortedSessions[idx + 1].id); setShowCommandPalette(false); }
+            },
+        },
         ...(messages.length > 0 ? [{
             id: 'export-chat',
             label: 'Export Chat',
@@ -896,7 +956,7 @@ function App() {
             shortcut: '⌘⇧C',
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, messages.length]);
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, messages.length, sortedSessions, sessionId, handleSelectSession]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -957,6 +1017,8 @@ function App() {
                                 onCreateSession={handleCreateSession}
                                 onNewSession={handleNewSessionFromSidebar}
                                 onSessionsChange={setSidebarSessions}
+                                sortOrder={sessionSortOrder}
+                                onSortChange={setSessionSortOrder}
                             />
                         </div>
                     </>
@@ -969,6 +1031,8 @@ function App() {
                         onCreateSession={handleCreateSession}
                         onNewSession={handleNewSessionFromSidebar}
                         onSessionsChange={setSidebarSessions}
+                        sortOrder={sessionSortOrder}
+                        onSortChange={setSessionSortOrder}
                     />
                 )}
 
