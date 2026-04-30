@@ -30,6 +30,8 @@ interface SessionItemProps {
     selectMode?: boolean;
     isSelected?: boolean;
     onToggleSelect?: (sessionId: string) => void;
+    isFocused?: boolean;
+    onFocus?: () => void;
 }
 
 function highlightMatch(text: string, query: string): React.ReactNode {
@@ -47,7 +49,7 @@ function highlightMatch(text: string, query: string): React.ReactNode {
     );
 }
 
-function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange, onTagsChange, searchQuery, selectMode, isSelected, onToggleSelect }: SessionItemProps) {
+function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange, onTagsChange, searchQuery, selectMode, isSelected, onToggleSelect, isFocused, onFocus }: SessionItemProps) {
     const [renaming, setRenaming] = useState(false);
     const [nameInput, setNameInput] = useState('');
     const [pinned, setPinned] = useState(() => isSessionPinned(session.sessionId));
@@ -106,7 +108,9 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
 
     return (
         <li
+            data-session-item
             tabIndex={0}
+            onMouseEnter={() => onFocus?.()}
             onKeyDown={(e) => {
                 if (e.key === 'F2' && isActive) {
                     e.preventDefault();
@@ -118,7 +122,7 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                 isActive
                     ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                     : 'hover:bg-[var(--bg-hover)]'
-            } ${isLoading ? 'opacity-60' : ''} ${selectMode && isSelected ? 'ring-1 ring-[var(--accent)]' : ''}`}
+            } ${isFocused && !isActive ? 'ring-1 ring-[var(--accent)] ring-inset' : ''} ${isLoading ? 'opacity-60' : ''} ${selectMode && isSelected ? 'ring-1 ring-[var(--accent)]' : ''}`}
             onClick={selectMode ? () => onToggleSelect?.(session.sessionId) : () => onSelect(session.sessionId)}
         >
             <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -262,6 +266,15 @@ export function SessionSidebar({
     const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
     const [sessionFilter, setSessionFilter] = useState('');
     const searchRef = useRef<HTMLInputElement>(null);
+    const sessionListRef = useRef<HTMLDivElement>(null);
+    const [focusedIndex, setFocusedIndex] = useState(-1);
+
+    // Auto-scroll to focused session item
+    useEffect(() => {
+        if (focusedIndex < 0) return;
+        const items = sessionListRef.current?.querySelectorAll('[data-session-item]');
+        items?.[focusedIndex]?.scrollIntoView({ block: 'nearest' });
+    }, [focusedIndex]);
 
     const sortedSessions = useMemo(() => {
         const pinSet = new Set(pins);
@@ -497,38 +510,65 @@ export function SessionSidebar({
                         </div>
                     ) : (
                         <>
-                            <ul className="p-2 space-y-1">
-                                {(() => {
-                                    const pinSet = new Set(pins);
-                                    const pinnedCount = filteredSessions.filter(s => pinSet.has(s.sessionId)).length;
+                            <div
+                                ref={sessionListRef}
+                                tabIndex={-1}
+                                onKeyDown={(e) => {
+                                    if (filteredSessions.length === 0) return;
 
-                                    return filteredSessions.map((session, index) => {
-                                        const isPinned = pinSet.has(session.sessionId);
-                                        const showDivider = isPinned && index === pinnedCount - 1 && pinnedCount < filteredSessions.length;
+                                    if (e.key === 'ArrowDown') {
+                                        e.preventDefault();
+                                        const next = e.metaKey || e.ctrlKey
+                                            ? filteredSessions.length - 1
+                                            : Math.min(focusedIndex + 1, filteredSessions.length - 1);
+                                        setFocusedIndex(next);
+                                    } else if (e.key === 'ArrowUp') {
+                                        e.preventDefault();
+                                        const prev = e.metaKey || e.ctrlKey
+                                            ? 0
+                                            : Math.max(focusedIndex - 1, 0);
+                                        setFocusedIndex(prev);
+                                    } else if (e.key === 'Enter' && focusedIndex >= 0) {
+                                        e.preventDefault();
+                                        onSelectSession(filteredSessions[focusedIndex].sessionId);
+                                    }
+                                }}
+                            >
+                                <ul className="p-2 space-y-1">
+                                    {(() => {
+                                        const pinSet = new Set(pins);
+                                        const pinnedCount = filteredSessions.filter(s => pinSet.has(s.sessionId)).length;
 
-                                        return (
-                                            <div key={session.sessionId}>
-                                                <SessionItem
-                                                    session={session}
-                                                    isActive={session.sessionId === activeSessionId}
-                                                    isLoading={session.sessionId === loadingSessionId}
-                                                    onSelect={onSelectSession}
-                                                    onDelete={handleDelete}
-                                                    onPinChange={handlePinChange}
-                                                    onTagsChange={handleTagsChange}
-                                                    searchQuery={sessionFilter}
-                                                    selectMode={selectMode}
-                                                    isSelected={selectedIds.has(session.sessionId)}
-                                                    onToggleSelect={toggleSelect}
-                                                />
-                                                {showDivider && (
-                                                    <div className="mx-3 my-1 border-t border-[var(--border)]" />
-                                                )}
-                                            </div>
-                                        );
-                                    });
-                                })()}
-                            </ul>
+                                        return filteredSessions.map((session, index) => {
+                                            const isPinned = pinSet.has(session.sessionId);
+                                            const showDivider = isPinned && index === pinnedCount - 1 && pinnedCount < filteredSessions.length;
+
+                                            return (
+                                                <div key={session.sessionId}>
+                                                    <SessionItem
+                                                        session={session}
+                                                        isActive={session.sessionId === activeSessionId}
+                                                        isLoading={session.sessionId === loadingSessionId}
+                                                        onSelect={onSelectSession}
+                                                        onDelete={handleDelete}
+                                                        onPinChange={handlePinChange}
+                                                        onTagsChange={handleTagsChange}
+                                                        searchQuery={sessionFilter}
+                                                        selectMode={selectMode}
+                                                        isSelected={selectedIds.has(session.sessionId)}
+                                                        onToggleSelect={toggleSelect}
+                                                        isFocused={index === focusedIndex}
+                                                        onFocus={() => setFocusedIndex(index)}
+                                                    />
+                                                    {showDivider && (
+                                                        <div className="mx-3 my-1 border-t border-[var(--border)]" />
+                                                    )}
+                                                </div>
+                                            );
+                                        });
+                                    })()}
+                                </ul>
+                            </div>
                             {filteredSessions.length === 0 && sessionFilter && (
                                 <div className="px-3 py-4 text-xs text-[var(--text-muted)] text-center">
                                     No sessions match &#8220;{sessionFilter}&#8221;
