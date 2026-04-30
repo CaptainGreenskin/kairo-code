@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface HeaderProps {
@@ -8,6 +8,8 @@ interface HeaderProps {
     tokenLimit?: number;
     onToggleTheme: () => void;
     onOpenSettings: () => void;
+    onToggleFileTree: () => void;
+    fileTreeOpen: boolean;
 }
 
 function getUsageColor(ratio: number): string {
@@ -23,6 +25,8 @@ export function Header({
     tokenLimit = 128000,
     onToggleTheme,
     onOpenSettings,
+    onToggleFileTree,
+    fileTreeOpen,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -46,6 +50,18 @@ export function Header({
     return (
         <header className="h-12 px-4 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
             <div className="flex items-center gap-3">
+                <button
+                    onClick={onToggleFileTree}
+                    className={`p-1.5 rounded transition-colors ${
+                        fileTreeOpen
+                            ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]'
+                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    }`}
+                    aria-label="Toggle file tree"
+                    title="Toggle file tree"
+                >
+                    <FolderTree size={18} />
+                </button>
                 <span className="font-semibold text-base text-[var(--text-primary)]">
                     kairo-code
                 </span>

@@ -7,6 +7,8 @@ interface ChatInputProps {
     onStop: () => void;
     disabled: boolean;
     isThinking: boolean;
+    appendText?: string;
+    onAppendConsumed?: () => void;
 }
 
 const AT_RE = /@([^\s]*)$/;
@@ -29,7 +31,7 @@ function inferLanguage(fileName: string): string {
     return map[ext] || '';
 }
 
-export function ChatInput({ onSend, onStop, disabled, isThinking }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, onAppendConsumed }: ChatInputProps) {
     const [text, setText] = useState('');
     const [dragging, setDragging] = useState(false);
     const [showFilePicker, setShowFilePicker] = useState(false);
@@ -39,6 +41,15 @@ export function ChatInput({ onSend, onStop, disabled, isThinking }: ChatInputPro
     useEffect(() => {
         textareaRef.current?.focus();
     }, []);
+
+    // Handle external text append (e.g. from file tree panel)
+    useEffect(() => {
+        if (appendText) {
+            setText(prev => prev + appendText);
+            onAppendConsumed?.();
+            textareaRef.current?.focus();
+        }
+    }, [appendText, onAppendConsumed]);
 
     // Detect @ trigger on text change
     useEffect(() => {

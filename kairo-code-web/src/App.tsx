@@ -7,6 +7,7 @@ import { ChatMessage, ThinkingIndicator } from '@components/ChatMessage';
 import { ChatInput } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
 import { SettingsModal } from '@components/SettingsModal';
+import { FileTreePanel } from '@components/FileTreePanel';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
 import { Virtuoso } from 'react-virtuoso';
@@ -40,6 +41,8 @@ function App() {
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
+    const [fileTreeOpen, setFileTreeOpen] = useState(false);
+    const [chatInputAppend, setChatInputAppend] = useState<string>('');
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
 
     const handleEvent = useCallback(
@@ -323,6 +326,15 @@ function App() {
         setCurrentModel(cfg.defaultModel);
     }, [setCurrentModel]);
 
+    const handleToggleFileTree = useCallback(() => {
+        setFileTreeOpen(prev => !prev);
+    }, []);
+
+    const handleInsertFile = useCallback((path: string, content: string, language: string) => {
+        const block = `\`\`\`${language}\n// ${path}\n${content}\n\`\`\`\n`;
+        setChatInputAppend(block);
+    }, []);
+
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
             <Header
@@ -331,6 +343,8 @@ function App() {
                 estimatedCost={estimatedCost}
                 onToggleTheme={handleToggleTheme}
                 onOpenSettings={handleOpenSettings}
+                onToggleFileTree={handleToggleFileTree}
+                fileTreeOpen={fileTreeOpen}
             />
 
             <div className="flex flex-1 overflow-hidden">
@@ -349,6 +363,12 @@ function App() {
                         assistantMsgRef.current = null;
                         connect();
                     }}
+                />
+
+                <FileTreePanel
+                    isOpen={fileTreeOpen}
+                    onToggle={handleToggleFileTree}
+                    onInsertFile={handleInsertFile}
                 />
 
                 <main className="flex-1 flex flex-col min-w-0">
@@ -405,6 +425,8 @@ function App() {
                         onStop={handleStop}
                         disabled={false}
                         isThinking={isThinking}
+                        appendText={chatInputAppend}
+                        onAppendConsumed={() => setChatInputAppend('')}
                     />
                 </main>
             </div>
