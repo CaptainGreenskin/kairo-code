@@ -599,6 +599,39 @@ function App() {
         return () => window.removeEventListener('keydown', handler);
     }, [sessionId, sidebarSessions, handleNewSession, handleDeleteSession, handleSelectSession]);
 
+    // Global keyboard shortcut: y = approve / n = reject first pending tool call
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            // Skip if typing in input/textarea/contenteditable
+            const tag = (e.target as HTMLElement)?.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+            // Skip if any modifier key is pressed
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+            if (e.key !== 'y' && e.key !== 'n') return;
+
+            // Find first pending tool call across all messages
+            let pendingToolCallId: string | null = null;
+            for (const msg of messages) {
+                const pending = msg.toolCalls?.find(tc => tc.status === 'pending');
+                if (pending) {
+                    pendingToolCallId = pending.id;
+                    break;
+                }
+            }
+            if (!pendingToolCallId) return;
+            e.preventDefault();
+
+            const approved = e.key === 'y';
+            handleApproveTool(pendingToolCallId, approved);
+            addToast(
+                approved ? 'success' : 'info',
+                approved ? 'Tool approved' : 'Tool rejected',
+            );
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [messages, handleApproveTool, addToast]);
+
     const handleToggleTheme = useCallback(() => {
         // Theme toggling is handled by the Header component via DOM classList
         // Save the inverted theme preference
