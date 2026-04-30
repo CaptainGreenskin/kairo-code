@@ -786,7 +786,7 @@ function App() {
                             ref={virtuosoRef}
                             className="flex-1 px-4 py-4"
                             data={filteredMessages}
-                            followOutput="smooth"
+                            followOutput={showSearch && searchQuery ? false : "smooth"}
                             atBottomStateChange={(bottom) => setAtBottom(bottom)}
                             itemContent={(index, msg) => {
                                 const msgObj = msg as Message;
