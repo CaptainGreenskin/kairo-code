@@ -26,7 +26,7 @@ interface SessionItemProps {
 function SessionItem({ session, isActive, isLoading, onSelect, onDelete }: SessionItemProps) {
     const [renaming, setRenaming] = useState(false);
     const [nameInput, setNameInput] = useState('');
-    const [customName, setCustomName] = useState(() => getSessionName(session.sessionId));
+    const customName = getSessionName(session.sessionId);
 
     const displayName = customName
         ? (customName.length > 20 ? customName.slice(0, 20) + '…' : customName)
@@ -42,10 +42,8 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete }: Sessi
         const trimmed = nameInput.trim();
         if (trimmed) {
             setSessionName(session.sessionId, trimmed);
-            setCustomName(trimmed);
         } else {
             removeSessionName(session.sessionId);
-            setCustomName(null);
         }
         setRenaming(false);
     };
