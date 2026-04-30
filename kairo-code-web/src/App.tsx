@@ -69,7 +69,6 @@ function App() {
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
     const [atBottom, setAtBottom] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
-    const [sentMessages, setSentMessages] = useState<string[]>([]);
     const prevMsgCount = useRef(messages.length);
 
     // Toast state
@@ -383,12 +382,6 @@ function App() {
                 timestamp: Date.now(),
             });
 
-            // Append to input history
-            setSentMessages(prev => {
-                const next = [...prev, text];
-                return next.slice(-50);
-            });
-
             // Create session if needed
             if (!sessionId) {
                 connect();
@@ -481,7 +474,6 @@ function App() {
         disconnect();
         setSessionId(null);
         clearMessages();
-        setSentMessages([]);
         assistantMsgRef.current = null;
         setStreamingMsgId(null);
         setAgentPhase('thinking');
@@ -497,7 +489,6 @@ function App() {
             setLoadingSessionId(id);
             disconnect();
             setSessionId(id);
-            setSentMessages([]);
             // 立即从缓存恢复
             const cached = loadMessages(id);
             if (cached.length > 0) {
@@ -852,13 +843,13 @@ function App() {
 
                     {/* Input */}
                     <ChatInput
+                        sessionId={sessionId ?? undefined}
                         onSend={handleSend}
                         onStop={handleStop}
                         disabled={false}
                         isThinking={isThinking}
                         appendText={chatInputAppend}
                         onAppendConsumed={() => setChatInputAppend('')}
-                        sentMessages={sentMessages}
                     />
                 </main>
             </div>
