@@ -5,13 +5,21 @@ interface HeaderProps {
     currentModel: string;
     tokenUsage: { input: number; output: number };
     estimatedCost: number;
+    tokenLimit?: number;
     onToggleTheme: () => void;
+}
+
+function getUsageColor(ratio: number): string {
+    if (ratio > 0.85) return 'bg-[var(--color-danger)]';
+    if (ratio > 0.70) return 'bg-[var(--color-warning)]';
+    return 'bg-[var(--color-success)]';
 }
 
 export function Header({
     currentModel,
     tokenUsage,
     estimatedCost,
+    tokenLimit = 128000,
     onToggleTheme,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
@@ -28,6 +36,9 @@ export function Header({
         onToggleTheme();
     };
 
+    const totalTokens = tokenUsage.input + tokenUsage.output;
+    const usageRatio = tokenLimit > 0 ? totalTokens / tokenLimit : 0;
+
     return (
         <header className="h-12 px-4 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
             <div className="flex items-center gap-3">
@@ -42,17 +53,22 @@ export function Header({
             </div>
 
             <div className="flex items-center gap-4">
-                {tokenUsage.input > 0 && (
-                    <div className="hidden sm:flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                        <span>
-                            In: {tokenUsage.input.toLocaleString()}
-                        </span>
-                        <span>
-                            Out: {tokenUsage.output.toLocaleString()}
-                        </span>
-                        <span className="font-medium text-[var(--color-success)]">
-                            ${estimatedCost.toFixed(4)}
-                        </span>
+                {totalTokens > 0 && (
+                    <div className="hidden sm:flex flex-col gap-1 max-w-48">
+                        <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)]">
+                            <span>
+                                {totalTokens.toLocaleString()} / {tokenLimit.toLocaleString()}
+                            </span>
+                            <span className="font-medium text-[var(--color-success)]">
+                                ${estimatedCost.toFixed(4)}
+                            </span>
+                        </div>
+                        <div className="h-1 w-full bg-[var(--bg-hover)] rounded-full overflow-hidden">
+                            <div
+                                className={`h-full rounded-full transition-all ${getUsageColor(usageRatio)}`}
+                                style={{ width: `${Math.min(usageRatio * 100, 100)}%` }}
+                            />
+                        </div>
                     </div>
                 )}
 

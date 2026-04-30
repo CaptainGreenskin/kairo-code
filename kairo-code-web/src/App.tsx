@@ -1,18 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '@store/sessionStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
 import { Header } from '@components/Header';
 import { ChatMessage, ThinkingIndicator } from '@components/ChatMessage';
 import { ChatInput } from '@components/ChatInput';
-import { Sidebar } from '@components/Sidebar';
-import type { AgentEvent, ToolCall } from '@/types/agent';
+import { SessionSidebar } from '@components/SessionSidebar';
+import type { AgentEvent, ToolCall, Message } from '@/types/agent';
 import { createSession as apiCreateSession, getConfig } from '@api/config';
-
-interface SessionItem {
-    id: string;
-    name: string;
-    createdAt: number;
-}
+import { Virtuoso } from 'react-virtuoso';
 
 function generateId(): string {
     return crypto.randomUUID();
@@ -38,8 +33,8 @@ function App() {
         clearMessages,
     } = useSessionStore();
 
-    const [sessions, setSessions] = useState<SessionItem[]>([]);
     const assistantMsgRef = useRef<string | null>(null);
+    const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
 
     const handleEvent = useCallback(
         (event: AgentEvent) => {
@@ -210,10 +205,6 @@ function App() {
                 apiCreateSession('.', currentModel || 'gpt-4')
                     .then(({ sessionId: newId }) => {
                         setSessionId(newId);
-                        setSessions((prev) => [
-                            ...prev,
-                            { id: newId, name: text.slice(0, 40), createdAt: Date.now() },
-                        ]);
                         connect(newId);
                         // Wait a tick for WS to connect, then send
                         setTimeout(() => sendMessage(text), 200);
@@ -262,7 +253,6 @@ function App() {
 
     const handleDeleteSession = useCallback(
         (id: string) => {
-            setSessions((prev) => prev.filter((s) => s.id !== id));
             if (id === sessionId) {
                 handleNewSession();
             }
@@ -274,12 +264,6 @@ function App() {
         // Theme toggling is handled by the Header component via DOM classList
     }, []);
 
-    // Scroll to bottom on new messages
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
-
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
             <Header
@@ -290,45 +274,56 @@ function App() {
             />
 
             <div className="flex flex-1 overflow-hidden">
-                <Sidebar
-                    sessions={sessions}
+                <SessionSidebar
                     activeSessionId={sessionId}
                     onSelectSession={handleSelectSession}
                     onDeleteSession={handleDeleteSession}
-                    onNewSession={handleNewSession}
+                    onNewSession={({ sessionId: newId }) => {
+                        setSessionId(newId);
+                        clearMessages();
+                        assistantMsgRef.current = null;
+                        connect(newId);
+                    }}
                 />
 
                 <main className="flex-1 flex flex-col min-w-0">
                     {/* Chat area */}
-                    <div className="flex-1 overflow-y-auto px-4 py-4">
-                        {messages.length === 0 ? (
-                            <div className="h-full flex items-center justify-center text-[var(--text-muted)]">
-                                <div className="text-center">
-                                    <div className="text-4xl mb-3">&#128172;</div>
-                                    <div className="text-lg font-medium text-[var(--text-primary)]">
-                                        Start a conversation
-                                    </div>
-                                    <div className="text-sm mt-2">
-                                        Type a message to begin
-                                    </div>
+                    {messages.length === 0 ? (
+                        <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
+                            <div className="text-center">
+                                <div className="text-4xl mb-3">&#128172;</div>
+                                <div className="text-lg font-medium text-[var(--text-primary)]">
+                                    Start a conversation
+                                </div>
+                                <div className="text-sm mt-2">
+                                    Type a message to begin
                                 </div>
                             </div>
-                        ) : (
-                            <div className="max-w-3xl mx-auto">
-                                {messages.map((msg) => (
+                        </div>
+                    ) : (
+                        <Virtuoso
+                            ref={virtuosoRef}
+                            className="flex-1 px-4 py-4"
+                            data={messages}
+                            followOutput="smooth"
+                            itemContent={(_index, msg) => (
+                                <div className="max-w-3xl mx-auto">
                                     <ChatMessage
-                                        key={msg.id}
-                                        message={msg}
+                                        message={msg as Message}
                                         onApproveTool={handleApproveTool}
                                     />
-                                ))}
-                                {isThinking && !messages[messages.length - 1]?.content && (
-                                    <ThinkingIndicator />
-                                )}
-                                <div ref={messagesEndRef} />
-                            </div>
-                        )}
-                    </div>
+                                </div>
+                            )}
+                            components={{
+                                Footer: () =>
+                                    isThinking ? (
+                                        <div className="max-w-3xl mx-auto">
+                                            <ThinkingIndicator />
+                                        </div>
+                                    ) : null,
+                            }}
+                        />
+                    )}
 
                     {/* Connection status bar */}
                     {sessionId && !isConnected && (

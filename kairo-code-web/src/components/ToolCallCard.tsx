@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Check, X, Loader2, AlertCircle } from 'lucide-react';
 import type { ToolCall } from '@/types/agent';
+import { TerminalOutput } from './TerminalOutput';
+import { FileDiffView } from './FileDiffView';
 
 interface ToolCallCardProps {
     toolCall: ToolCall;
@@ -34,6 +36,54 @@ const statusConfig: Record<ToolCall['status'], { label: string; color: string; i
         icon: <AlertCircle size={14} />,
     },
 };
+
+/**
+ * Extract original content from unified diff: lines starting with '-' (excluding '---').
+ */
+function extractOriginal(diff: string): string {
+    const lines = diff.split('\n');
+    const original: string[] = [];
+    let inHunk = false;
+    for (const line of lines) {
+        if (line.startsWith('@@')) {
+            inHunk = true;
+            continue;
+        }
+        if (inHunk) {
+            if (line.startsWith('---') || line.startsWith('+++')) continue;
+            if (line.startsWith('-')) {
+                original.push(line.slice(1));
+            } else if (line.startsWith(' ')) {
+                original.push(line.slice(1));
+            }
+        }
+    }
+    return original.length > 0 ? original.join('\n') : '';
+}
+
+/**
+ * Extract modified content from unified diff: lines starting with '+' (excluding '+++').
+ */
+function extractModified(diff: string): string {
+    const lines = diff.split('\n');
+    const modified: string[] = [];
+    let inHunk = false;
+    for (const line of lines) {
+        if (line.startsWith('@@')) {
+            inHunk = true;
+            continue;
+        }
+        if (inHunk) {
+            if (line.startsWith('---') || line.startsWith('+++')) continue;
+            if (line.startsWith('+')) {
+                modified.push(line.slice(1));
+            } else if (line.startsWith(' ')) {
+                modified.push(line.slice(1));
+            }
+        }
+    }
+    return modified.length > 0 ? modified.join('\n') : '';
+}
 
 export function ToolCallCard({ toolCall, onApprove }: ToolCallCardProps) {
     const config = statusConfig[toolCall.status];
@@ -72,9 +122,28 @@ export function ToolCallCard({ toolCall, onApprove }: ToolCallCardProps) {
             )}
 
             {toolCall.result && toolCall.status === 'done' && (
-                <pre className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] border-t border-[var(--border)] max-h-48">
-                    {toolCall.result}
-                </pre>
+                <div className="border-t border-[var(--border)]">
+                    {toolCall.toolName === 'bash' ? (
+                        <TerminalOutput output={toolCall.result} />
+                    ) : toolCall.toolName === 'write_file' ? (
+                        <FileDiffView
+                            fileName={(toolCall.input as { path?: string })?.path || 'file'}
+                            original=""
+                            modified={toolCall.result}
+                            mode="preview"
+                        />
+                    ) : toolCall.toolName === 'patch_apply' ? (
+                        <FileDiffView
+                            fileName={(toolCall.input as { path?: string })?.path || 'file'}
+                            original={extractOriginal(toolCall.result)}
+                            modified={extractModified(toolCall.result)}
+                        />
+                    ) : (
+                        <pre className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] max-h-48">
+                            {toolCall.result}
+                        </pre>
+                    )}
+                </div>
             )}
 
             {toolCall.requiresApproval && toolCall.status === 'pending' && onApprove && (
