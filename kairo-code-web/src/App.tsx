@@ -556,12 +556,14 @@ function App() {
 
     const handleDeleteSession = useCallback(
         (id: string) => {
+            const name = getSessionName(id) ?? id.slice(0, 8);
+            addToast('info', `Session deleted: ${name}`);
             clearCachedMessages(id);
             if (id === sessionId) {
                 handleNewSession();
             }
         },
-        [sessionId, handleNewSession],
+        [sessionId, handleNewSession, addToast],
     );
 
     // Global keyboard shortcut: Cmd+N new session, Cmd+W close session, Cmd+1-9 switch session
@@ -665,6 +667,10 @@ function App() {
         exportAndDownload(messages, name, format);
     }, [messages, sessionId]);
 
+    const handleExportSuccess = useCallback((format: 'markdown' | 'json') => {
+        addToast('success', format === 'markdown' ? 'Exported as Markdown' : 'Exported as JSON');
+    }, [addToast]);
+
     const handleInsertFile = useCallback((path: string, content: string, language: string) => {
         const block = `\`\`\`${language}\n// ${path}\n${content}\n\`\`\`\n`;
         setChatInputAppend(block);
@@ -764,6 +770,7 @@ function App() {
                 exportAction={
                     <ExportMenu
                         onExport={handleExport}
+                        onExportSuccess={handleExportSuccess}
                         disabled={messages.length === 0}
                     />
                 }
