@@ -16,6 +16,7 @@ interface FileTreePanelProps {
     isOpen: boolean;
     onToggle: () => void;
     onInsertFile: (path: string, content: string, language: string) => void;
+    width?: number;
 }
 
 type TreeNode = {
@@ -119,7 +120,7 @@ function TreeNodeItem({
     );
 }
 
-export function FileTreePanel({ isOpen, onToggle, onInsertFile }: FileTreePanelProps) {
+export function FileTreePanel({ isOpen, onToggle, onInsertFile, width = 240 }: FileTreePanelProps) {
     const [rootNodes, setRootNodes] = useState<TreeNode[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -273,7 +274,7 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile }: FileTreePanelP
             {/* Panel */}
             <div
                 className="shrink-0 flex flex-col border-r border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden transition-all duration-150"
-                style={{ width: isOpen ? '240px' : '0px' }}
+                style={{ width: isOpen ? `${width}px` : '0px' }}
             >
                 {/* Header */}
                 <div className="h-9 px-3 flex items-center justify-between border-b border-[var(--border)] shrink-0">

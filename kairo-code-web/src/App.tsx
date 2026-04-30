@@ -3,6 +3,7 @@ import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, Downlo
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
+import { useBreakpoint } from '@hooks/useBreakpoint';
 import { Header } from '@components/Header';
 import { SearchBar } from '@components/SearchBar';
 import { ChatMessage } from '@components/ChatMessage';
@@ -73,6 +74,17 @@ function App() {
 
     // Toast state
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+    // Responsive layout
+    const breakpoint = useBreakpoint();
+    const isMobile = breakpoint === 'xs' || breakpoint === 'sm';
+    const isNarrow = isMobile || breakpoint === 'md';
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
+    // Narrow screen: force close FileTreePanel
+    useEffect(() => {
+        if (isNarrow && fileTreeOpen) setFileTreeOpen(false);
+    }, [isNarrow]);
 
     const addToast = useCallback((type: ToastMessage['type'], message: string, duration?: number) => {
         const id = Math.random().toString(36).slice(2);
@@ -643,6 +655,8 @@ function App() {
                 models={serverConfig?.availableModels ?? []}
                 onModelChange={setCurrentModel}
                 isThinking={isThinking}
+                isMobile={isMobile}
+                onMenuClick={() => setSidebarOpen(v => !v)}
             />
 
             <SearchBar
@@ -654,29 +668,64 @@ function App() {
             />
 
             <div className="flex flex-1 overflow-hidden">
-                <SessionSidebar
-                    activeSessionId={sessionId}
-                    loadingSessionId={loadingSessionId}
-                    onSelectSession={handleSelectSession}
-                    onDeleteSession={handleDeleteSession}
-                    onCreateSession={async (workingDir, model) => {
-                        connect();
-                        const newId = await createSession(workingDir, model);
-                        return { sessionId: newId };
-                    }}
-                    onNewSession={({ sessionId: newId }) => {
-                        setSessionId(newId);
-                        clearMessages();
-                        assistantMsgRef.current = null;
-                        connect();
-                    }}
-                    onSessionsChange={setSidebarSessions}
-                />
+                {/* SessionSidebar: overlay on mobile, inline on desktop */}
+                {isMobile ? (
+                    <>
+                        {sidebarOpen && (
+                            <div
+                                className="fixed inset-0 bg-black/40 z-30"
+                                onClick={() => setSidebarOpen(false)}
+                            />
+                        )}
+                        <div className={`fixed left-0 top-0 h-full z-40 transition-transform duration-200 ${
+                            sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                        }`}>
+                            <SessionSidebar
+                                activeSessionId={sessionId}
+                                loadingSessionId={loadingSessionId}
+                                onSelectSession={(id) => { handleSelectSession(id); setSidebarOpen(false); }}
+                                onDeleteSession={handleDeleteSession}
+                                onCreateSession={async (workingDir, model) => {
+                                    connect();
+                                    const newId = await createSession(workingDir, model);
+                                    return { sessionId: newId };
+                                }}
+                                onNewSession={({ sessionId: newId }) => {
+                                    setSessionId(newId);
+                                    clearMessages();
+                                    assistantMsgRef.current = null;
+                                    connect();
+                                }}
+                                onSessionsChange={setSidebarSessions}
+                            />
+                        </div>
+                    </>
+                ) : (
+                    <SessionSidebar
+                        activeSessionId={sessionId}
+                        loadingSessionId={loadingSessionId}
+                        onSelectSession={handleSelectSession}
+                        onDeleteSession={handleDeleteSession}
+                        onCreateSession={async (workingDir, model) => {
+                            connect();
+                            const newId = await createSession(workingDir, model);
+                            return { sessionId: newId };
+                        }}
+                        onNewSession={({ sessionId: newId }) => {
+                            setSessionId(newId);
+                            clearMessages();
+                            assistantMsgRef.current = null;
+                            connect();
+                        }}
+                        onSessionsChange={setSidebarSessions}
+                    />
+                )}
 
                 <FileTreePanel
                     isOpen={fileTreeOpen}
                     onToggle={handleToggleFileTree}
                     onInsertFile={handleInsertFile}
+                    width={isNarrow ? 200 : 240}
                 />
 
                 <main className="relative flex-1 flex flex-col min-w-0">
