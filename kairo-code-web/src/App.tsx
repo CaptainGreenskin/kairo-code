@@ -640,6 +640,9 @@ function App() {
                 onExport={handleExport}
                 tokenCount={estimatedTokens}
                 contextLimit={128000}
+                models={serverConfig?.availableModels ?? []}
+                onModelChange={setCurrentModel}
+                isThinking={isThinking}
             />
 
             <SearchBar

@@ -1,6 +1,7 @@
 import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { formatTokenCount } from '@utils/tokenCount';
+import { ModelSelector } from './ModelSelector';
 
 interface HeaderProps {
     currentModel: string;
@@ -18,6 +19,9 @@ interface HeaderProps {
     searchActive?: boolean;
     tokenCount?: number;
     contextLimit?: number;
+    models?: string[];
+    onModelChange?: (model: string) => void;
+    isThinking?: boolean;
 }
 
 function getUsageColor(ratio: number): string {
@@ -42,6 +46,9 @@ export function Header({
     searchActive,
     tokenCount,
     contextLimit,
+    models,
+    onModelChange,
+    isThinking,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -80,10 +87,13 @@ export function Header({
                 <span className="font-semibold text-base text-[var(--text-primary)]">
                     kairo-code
                 </span>
-                {currentModel && (
-                    <span className="text-xs px-2 py-0.5 rounded bg-[var(--color-info-bg)] text-[var(--color-info)] font-mono">
-                        {currentModel}
-                    </span>
+                {(models?.length ?? 0) > 0 && (
+                    <ModelSelector
+                        models={models!}
+                        currentModel={currentModel || null}
+                        onChange={onModelChange ?? (() => {})}
+                        disabled={isThinking}
+                    />
                 )}
             </div>
 
