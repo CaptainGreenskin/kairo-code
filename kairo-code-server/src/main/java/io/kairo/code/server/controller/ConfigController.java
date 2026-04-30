@@ -300,6 +300,24 @@ public class ConfigController {
         return new FileContentResponse(path, content, inferLanguage(resolved.getFileName().toString()));
     }
 
+    /**
+     * Write file content (strict workingDir boundary check).
+     */
+    @PutMapping("/files/content")
+    public Map<String, String> putFileContent(
+            @RequestParam String path,
+            @RequestBody String content) {
+        Path resolved = resolvePath(path);
+
+        try {
+            Files.createDirectories(resolved.getParent());
+            Files.writeString(resolved, content, StandardCharsets.UTF_8);
+            return Map.of("path", path, "status", "ok");
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to write file", e);
+        }
+    }
+
     private Path resolvePath(String path) {
         if (path.contains("..")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");

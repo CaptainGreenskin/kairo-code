@@ -135,4 +135,38 @@ class ConfigControllerTest {
                     assertThat(ex.getStatusCode().value()).isEqualTo(404);
                 });
     }
+
+    @Test
+    void putFileContent_writesFileSuccessfully() throws IOException {
+        String testPath = "test-memory.md";
+        String testContent = "# Test Memory\n\nHello world";
+
+        var result = controller.putFileContent(testPath, testContent);
+
+        assertThat(result.get("status")).isEqualTo("ok");
+
+        Path written = tempDir.resolve(testPath);
+        assertThat(Files.readString(written)).isEqualTo(testContent);
+    }
+
+    @Test
+    void putFileContent_createsParentDirectories() throws IOException {
+        String testPath = "nested/dir/memory.md";
+        String testContent = "# Nested";
+
+        controller.putFileContent(testPath, testContent);
+
+        Path written = tempDir.resolve(testPath);
+        assertThat(Files.readString(written)).isEqualTo(testContent);
+    }
+
+    @Test
+    void putFileContent_preventsPathTraversal() {
+        assertThatThrownBy(() -> controller.putFileContent("../../etc/passwd", "bad content"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> {
+                    var ex = (ResponseStatusException) e;
+                    assertThat(ex.getStatusCode().value()).isEqualTo(400);
+                });
+    }
 }
