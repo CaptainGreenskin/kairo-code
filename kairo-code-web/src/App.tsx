@@ -15,6 +15,8 @@ import { FileTreePanel } from '@components/FileTreePanel';
 import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
+import { ErrorBoundary } from '@components/ErrorBoundary';
+import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -67,6 +69,18 @@ function App() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [sentMessages, setSentMessages] = useState<string[]>([]);
     const prevMsgCount = useRef(messages.length);
+
+    // Toast state
+    const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+    const addToast = useCallback((type: ToastMessage['type'], message: string, duration?: number) => {
+        const id = Math.random().toString(36).slice(2);
+        setToasts(prev => [...prev, { id, type, message, duration }]);
+    }, []);
+
+    const dismissToast = useCallback((id: string) => {
+        setToasts(prev => prev.filter(t => t.id !== id));
+    }, []);
 
     const handleEvent = useCallback(
         (event: AgentEvent) => {
@@ -193,6 +207,7 @@ function App() {
                     setAgentPhase('thinking');
                     setCurrentToolName(undefined);
                     setLoadingSessionId(null);
+                    addToast('error', payload.message);
                     addMessage({
                         id: generateId(),
                         role: 'assistant',
@@ -235,6 +250,7 @@ function App() {
             setEstimatedCost,
             restoreSession,
             setLoadingSessionId,
+            addToast,
         ],
     );
 
@@ -253,6 +269,15 @@ function App() {
     useEffect(() => {
         setThinking(wsThinking);
     }, [wsThinking, setThinking]);
+
+    // Toast on connection loss
+    const wasConnected = useRef(isConnected);
+    useEffect(() => {
+        if (wasConnected.current && !isConnected && sessionId) {
+            addToast('warning', 'Connection lost. Reconnecting...');
+        }
+        wasConnected.current = isConnected;
+    }, [isConnected, sessionId, addToast]);
 
     // Load config on mount
     useEffect(() => {
@@ -632,6 +657,7 @@ function App() {
                         </div>
                     ) : (
                         <>
+                        <ErrorBoundary>
                         <Virtuoso
                             ref={virtuosoRef}
                             className="flex-1 px-4 py-4"
@@ -663,6 +689,7 @@ function App() {
                                     ) : null,
                             }}
                         />
+                        </ErrorBoundary>
 
                         {/* Scroll to bottom button */}
                         {!atBottom && (
@@ -730,6 +757,8 @@ function App() {
             />
 
             <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+
+            <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         </div>
     );
 }
