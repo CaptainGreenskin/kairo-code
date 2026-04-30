@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download, Menu } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { formatTokenCount } from '@utils/tokenCount';
 import { ModelSelector } from './ModelSelector';
@@ -22,6 +22,8 @@ interface HeaderProps {
     models?: string[];
     onModelChange?: (model: string) => void;
     isThinking?: boolean;
+    isMobile?: boolean;
+    onMenuClick?: () => void;
 }
 
 function getUsageColor(ratio: number): string {
@@ -49,6 +51,8 @@ export function Header({
     models,
     onModelChange,
     isThinking,
+    isMobile,
+    onMenuClick,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -72,6 +76,15 @@ export function Header({
     return (
         <header className="h-12 px-4 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
             <div className="flex items-center gap-3">
+                {isMobile && onMenuClick && (
+                    <button
+                        onClick={onMenuClick}
+                        className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                        aria-label="Open sidebar"
+                    >
+                        <Menu size={18} />
+                    </button>
+                )}
                 <button
                     onClick={onToggleFileTree}
                     className={`p-1.5 rounded transition-colors ${
