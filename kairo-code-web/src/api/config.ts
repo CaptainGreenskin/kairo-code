@@ -1,4 +1,4 @@
-import type { ServerConfig, SessionInfo } from '@/types/agent';
+import type { ServerConfig, SessionInfo, FileEntry, FileContentResponse } from '@/types/agent';
 
 const API_BASE = '/api';
 
@@ -27,4 +27,13 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 export async function listSessions(): Promise<SessionInfo[]> {
     return request<SessionInfo[]>('/sessions');
+}
+
+export async function listFiles(path?: string): Promise<FileEntry[]> {
+    const query = path ? `?path=${encodeURIComponent(path)}` : '';
+    return request<FileEntry[]>(`/files${query}`);
+}
+
+export async function getFileContent(path: string): Promise<FileContentResponse> {
+    return request<FileContentResponse>(`/files/content?path=${encodeURIComponent(path)}`);
 }
