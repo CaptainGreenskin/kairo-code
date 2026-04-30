@@ -599,6 +599,15 @@ function App() {
         setChatInputAppend(block);
     }, []);
 
+    const handleInsertToChat = useCallback((text: string) => {
+        setChatInputAppend(prev => (prev ? prev + '\n' + text : text));
+    }, []);
+
+    const handleApplyToFile = useCallback((filename: string, content: string) => {
+        const instruction = `Please write the following content to \`${filename}\`:\n\`\`\`\n${content}\n\`\`\``;
+        handleSend(instruction);
+    }, [handleSend]);
+
     // Command palette commands
     const commands: Command[] = useMemo(() => [
         {
@@ -787,6 +796,8 @@ function App() {
                                             sessionId={sessionId ?? undefined}
                                             onRegenerate={handleRegenerate}
                                             onEditResend={handleEditResend}
+                                            onInsertToChat={handleInsertToChat}
+                                            onApplyToFile={handleApplyToFile}
                                         />
                                     </div>
                                 );
