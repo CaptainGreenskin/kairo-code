@@ -270,6 +270,7 @@ function App() {
     const {
         isConnected,
         isThinking: wsThinking,
+        connectionStatus,
         connect,
         disconnect,
         sendMessage,
@@ -283,14 +284,14 @@ function App() {
         setThinking(wsThinking);
     }, [wsThinking, setThinking]);
 
-    // Toast on connection loss
-    const wasConnected = useRef(isConnected);
+    // Toast on connection status changes
     useEffect(() => {
-        if (wasConnected.current && !isConnected && sessionId) {
-            addToast('warning', 'Connection lost. Reconnecting...');
+        if (connectionStatus === 'disconnected') {
+            addToast('warning', 'Connection lost. Reconnecting…', 0); // persistent
+        } else if (connectionStatus === 'connected') {
+            setToasts(prev => prev.filter(t => t.type !== 'warning'));
         }
-        wasConnected.current = isConnected;
-    }, [isConnected, sessionId, addToast]);
+    }, [connectionStatus, addToast]);
 
     // Load config on mount
     useEffect(() => {
@@ -680,6 +681,7 @@ function App() {
                 isThinking={isThinking}
                 isMobile={isMobile}
                 onMenuClick={() => setSidebarOpen(v => !v)}
+                connectionStatus={connectionStatus}
             />
 
             <SearchBar

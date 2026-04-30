@@ -2,6 +2,7 @@ import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Download, 
 import { useState, useEffect } from 'react';
 import { formatTokenCount } from '@utils/tokenCount';
 import { ModelSelector } from './ModelSelector';
+import type { ConnectionStatus } from '@/types/agent';
 
 interface HeaderProps {
     currentModel: string;
@@ -24,6 +25,7 @@ interface HeaderProps {
     isThinking?: boolean;
     isMobile?: boolean;
     onMenuClick?: () => void;
+    connectionStatus?: ConnectionStatus;
 }
 
 function getUsageColor(ratio: number): string {
@@ -31,6 +33,20 @@ function getUsageColor(ratio: number): string {
     if (ratio > 0.70) return 'bg-[var(--color-warning)]';
     return 'bg-[var(--color-success)]';
 }
+
+const statusDotClass: Record<ConnectionStatus, string> = {
+    connected: 'bg-green-500',
+    connecting: 'bg-yellow-500 animate-pulse',
+    disconnected: 'bg-gray-400',
+    error: 'bg-red-500',
+};
+
+const statusLabelText: Record<ConnectionStatus, string> = {
+    connected: 'Connected',
+    connecting: 'Connecting…',
+    disconnected: 'Disconnected',
+    error: 'Connection error',
+};
 
 export function Header({
     currentModel,
@@ -53,6 +69,7 @@ export function Header({
     isThinking,
     isMobile,
     onMenuClick,
+    connectionStatus,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -100,6 +117,19 @@ export function Header({
                 <span className="font-semibold text-base text-[var(--text-primary)]">
                     kairo-code
                 </span>
+                {connectionStatus && (
+                    <div
+                        className="flex items-center gap-1.5 ml-2"
+                        title={statusLabelText[connectionStatus]}
+                    >
+                        <span className={`w-2 h-2 rounded-full ${statusDotClass[connectionStatus]}`} />
+                        {connectionStatus !== 'connected' && (
+                            <span className="text-[10px] text-[var(--text-muted)]">
+                                {statusLabelText[connectionStatus]}
+                            </span>
+                        )}
+                    </div>
+                )}
                 {(models?.length ?? 0) > 0 && (
                     <ModelSelector
                         models={models!}
