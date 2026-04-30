@@ -30,11 +30,13 @@ public class ConfigController {
 
     private final ServerProperties serverProperties;
     private final AgentService agentService;
+    private final Path workingDir;
 
     public ConfigController(ServerProperties serverProperties,
                             AgentService agentService) {
         this.serverProperties = serverProperties;
         this.agentService = agentService;
+        this.workingDir = Paths.get(serverProperties.workingDir());
     }
 
     /**
@@ -210,6 +212,4 @@ public class ConfigController {
             default -> "";
         };
     }
-
-    private final Path workingDir = Paths.get(serverProperties.workingDir());
 }
