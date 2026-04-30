@@ -21,16 +21,6 @@ export async function getModels(): Promise<string[]> {
     return request<string[]>('/models');
 }
 
-export async function createSession(
-    workingDir: string,
-    model: string,
-): Promise<{ sessionId: string }> {
-    return request<{ sessionId: string }>('/sessions', {
-        method: 'POST',
-        body: JSON.stringify({ workingDir, model }),
-    });
-}
-
 export async function deleteSession(sessionId: string): Promise<void> {
     return request<void>(`/sessions/${sessionId}`, { method: 'DELETE' });
 }

@@ -7,7 +7,6 @@ import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.dto.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -37,7 +36,7 @@ public class AgentController {
 
     public AgentController(SimpMessagingTemplate messagingTemplate,
                            AgentService agentService,
-                           @Lazy ServerProperties serverProperties) {
+                           ServerProperties serverProperties) {
         this.messagingTemplate = messagingTemplate;
         this.agentService = agentService;
         this.serverProperties = serverProperties;
@@ -69,6 +68,7 @@ public class AgentController {
         CreateSessionResponse response = new CreateSessionResponse(
                 sessionId, config.workingDir(), config.modelName());
         messagingTemplate.convertAndSend("/topic/session/" + sessionId, response);
+        messagingTemplate.convertAndSend("/topic/session/created", response);
 
         log.info("Session {} created via WebSocket", sessionId);
     }

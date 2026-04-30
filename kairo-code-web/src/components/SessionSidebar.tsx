@@ -9,6 +9,7 @@ interface SessionSidebarProps {
     onSelectSession: (id: string) => void;
     onDeleteSession: (id: string) => void;
     onNewSession: (info: { sessionId: string; model: string }) => void;
+    onCreateSession: (workingDir: string, model: string) => Promise<{ sessionId: string }>;
 }
 
 export function SessionSidebar({
@@ -16,6 +17,7 @@ export function SessionSidebar({
     onSelectSession,
     onDeleteSession,
     onNewSession,
+    onCreateSession,
 }: SessionSidebarProps) {
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
@@ -127,6 +129,7 @@ export function SessionSidebar({
                 <NewSessionDialog
                     onClose={() => setShowNewDialog(false)}
                     onCreate={handleCreate}
+                    onCreateSession={onCreateSession}
                 />
             )}
         </>

@@ -6,7 +6,7 @@ import { ChatMessage, ThinkingIndicator } from '@components/ChatMessage';
 import { ChatInput } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
 import type { AgentEvent, ToolCall, Message } from '@/types/agent';
-import { createSession as apiCreateSession, getConfig } from '@api/config';
+import { getConfig } from '@api/config';
 import { Virtuoso } from 'react-virtuoso';
 
 function generateId(): string {
@@ -171,6 +171,7 @@ function App() {
         sendMessage,
         approveTool,
         stopAgent,
+        createSession,
     } = useAgentWebSocket(handleEvent);
 
     // Override store's isThinking with WS state
@@ -202,32 +203,31 @@ function App() {
 
             // Create session if needed
             if (!sessionId) {
-                apiCreateSession('.', currentModel || 'gpt-4')
-                    .then(({ sessionId: newId }) => {
+                connect();
+                createSession('.', currentModel || 'gpt-4')
+                    .then((newId) => {
                         setSessionId(newId);
-                        connect(newId);
-                        // Wait a tick for WS to connect, then send
-                        setTimeout(() => sendMessage(text), 200);
+                        sendMessage(newId, text);
                     })
                     .catch((err) => {
                         console.error('[App] Failed to create session:', err);
                     });
             } else {
-                sendMessage(text);
+                sendMessage(sessionId, text);
             }
         },
-        [sessionId, currentModel, addMessage, setSessionId, connect, sendMessage],
+        [sessionId, currentModel, addMessage, setSessionId, connect, createSession, sendMessage],
     );
 
     const handleStop = useCallback(() => {
-        stopAgent();
-    }, [stopAgent]);
+        if (sessionId) stopAgent(sessionId);
+    }, [stopAgent, sessionId]);
 
     const handleApproveTool = useCallback(
         (toolCallId: string, approved: boolean) => {
-            approveTool(toolCallId, approved);
+            if (sessionId) approveTool(sessionId, toolCallId, approved);
         },
-        [approveTool],
+        [approveTool, sessionId],
     );
 
     const handleNewSession = useCallback(() => {
@@ -246,7 +246,7 @@ function App() {
             setSessionId(id);
             clearMessages();
             assistantMsgRef.current = null;
-            connect(id);
+            connect();
         },
         [sessionId, disconnect, setSessionId, clearMessages, connect],
     );
@@ -278,11 +278,16 @@ function App() {
                     activeSessionId={sessionId}
                     onSelectSession={handleSelectSession}
                     onDeleteSession={handleDeleteSession}
+                    onCreateSession={async (workingDir, model) => {
+                        connect();
+                        const newId = await createSession(workingDir, model);
+                        return { sessionId: newId };
+                    }}
                     onNewSession={({ sessionId: newId }) => {
                         setSessionId(newId);
                         clearMessages();
                         assistantMsgRef.current = null;
-                        connect(newId);
+                        connect();
                     }}
                 />
 

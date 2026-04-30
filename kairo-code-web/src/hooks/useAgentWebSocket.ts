@@ -6,10 +6,10 @@ import type { AgentEvent } from '@/types/agent';
 const WS_ENDPOINT = '/ws';
 const SUBSCRIBE_PREFIX = '/topic/session';
 const SEND_DESTINATIONS = {
-    chat: '/app/chat',
-    approve: '/app/approve',
-    stop: '/app/stop',
-    bindSession: '/app/bind-session',
+    message: '/app/agent/message',
+    approve: '/app/agent/approve',
+    stop: '/app/agent/stop',
+    create: '/app/agent/create',
 } as const;
 
 const MAX_RECONNECT_ATTEMPTS = 3;
@@ -18,12 +18,12 @@ const INITIAL_RECONNECT_DELAY = 1000;
 interface UseAgentWebSocketReturn {
     isConnected: boolean;
     isThinking: boolean;
-    connect: (sessionId: string) => void;
+    connect: () => void;
     disconnect: () => void;
-    sendMessage: (text: string) => void;
-    approveTool: (toolCallId: string, approved: boolean) => void;
-    stopAgent: () => void;
-    bindSession: (sessionId: string) => void;
+    sendMessage: (sessionId: string, text: string) => void;
+    approveTool: (sessionId: string, toolCallId: string, approved: boolean) => void;
+    stopAgent: (sessionId: string) => void;
+    createSession: (workingDir: string, model: string) => Promise<string>;
 }
 
 export function useAgentWebSocket(
@@ -58,25 +58,37 @@ export function useAgentWebSocket(
         reconnectAttemptsRef.current = 0;
     }, []);
 
-    const createConnection = useCallback(
-        (sessionId: string) => {
+    const createConnection = useCallback(() => {
             cleanup();
-            sessionIdRef.current = sessionId;
 
-            const url = `${WS_ENDPOINT}/${sessionId}`;
             const client = new Client({
-                webSocketFactory: () => new SockJS(url),
+                webSocketFactory: () => new SockJS(WS_ENDPOINT),
                 reconnectDelay: 0,
                 heartbeatIncoming: 10000,
                 heartbeatOutgoing: 10000,
                 onConnect: () => {
                     setIsConnected(true);
                     reconnectAttemptsRef.current = 0;
+                    const sid = sessionIdRef.current;
+                    if (!sid) return;
                     subscriptionRef.current = client.subscribe(
-                        `${SUBSCRIBE_PREFIX}/${sessionId}`,
+                        `${SUBSCRIBE_PREFIX}/${sid}`,
                         (message: IMessage) => {
                             try {
-                                const event = JSON.parse(message.body) as AgentEvent;
+                                const raw = JSON.parse(message.body);
+                                // CreateSessionResponse also arrives on this topic
+                                if ('workingDir' in raw && 'model' in raw && !('type' in raw)) {
+                                    const resp = raw as { sessionId: string };
+                                    sessionIdRef.current = resp.sessionId;
+                                    onEventRef.current({
+                                        type: 'AGENT_THINKING',
+                                        sessionId: resp.sessionId,
+                                        payload: { isThinking: false },
+                                        timestamp: Date.now(),
+                                    } as AgentEvent);
+                                    return;
+                                }
+                                const event = raw as AgentEvent;
                                 if (event.type === 'AGENT_THINKING') {
                                     const payload = event.payload as {
                                         isThinking: boolean;
@@ -109,7 +121,7 @@ export function useAgentWebSocket(
                             Math.pow(2, reconnectAttemptsRef.current);
                         reconnectAttemptsRef.current += 1;
                         reconnectTimerRef.current = setTimeout(() => {
-                            createConnection(sessionIdRef.current!);
+                            createConnection();
                         }, delay);
                     }
                 },
@@ -146,28 +158,59 @@ export function useAgentWebSocket(
     );
 
     const sendMessage = useCallback(
-        (text: string) => {
-            publish(SEND_DESTINATIONS.chat, { text });
+        (sessionId: string, text: string) => {
+            publish(SEND_DESTINATIONS.message, { sessionId, message: text });
         },
         [publish],
     );
 
     const approveTool = useCallback(
-        (toolCallId: string, approved: boolean) => {
-            publish(SEND_DESTINATIONS.approve, { toolCallId, approved });
+        (sessionId: string, toolCallId: string, approved: boolean) => {
+            publish(SEND_DESTINATIONS.approve, { sessionId, toolCallId, approved });
         },
         [publish],
     );
 
-    const stopAgent = useCallback(() => {
-        publish(SEND_DESTINATIONS.stop, {});
-    }, [publish]);
-
-    const bindSession = useCallback(
+    const stopAgent = useCallback(
         (sessionId: string) => {
-            publish(SEND_DESTINATIONS.bindSession, { sessionId });
+            publish(SEND_DESTINATIONS.stop, { sessionId });
         },
         [publish],
+    );
+
+    const createSession = useCallback(
+        (workingDir: string, model: string): Promise<string> => {
+            return new Promise((resolve, reject) => {
+                if (!clientRef.current?.connected) {
+                    reject(new Error('[WebSocket] Not connected'));
+                    return;
+                }
+                const timeout = setTimeout(() => {
+                    sub?.unsubscribe();
+                    reject(new Error('[WebSocket] createSession timeout'));
+                }, 10000);
+                const sub = clientRef.current!.subscribe('/topic/session/created', (message: IMessage) => {
+                    try {
+                        const resp = JSON.parse(message.body) as {
+                            sessionId: string;
+                        };
+                        sub.unsubscribe();
+                        clearTimeout(timeout);
+                        sessionIdRef.current = resp.sessionId;
+                        resolve(resp.sessionId);
+                    } catch (e) {
+                        sub.unsubscribe();
+                        clearTimeout(timeout);
+                        reject(e);
+                    }
+                });
+                clientRef.current!.publish({
+                    destination: SEND_DESTINATIONS.create,
+                    body: JSON.stringify({ workingDir, model }),
+                });
+            });
+        },
+        [],
     );
 
     useEffect(() => {
@@ -182,6 +225,6 @@ export function useAgentWebSocket(
         sendMessage,
         approveTool,
         stopAgent,
-        bindSession,
+        createSession,
     };
 }

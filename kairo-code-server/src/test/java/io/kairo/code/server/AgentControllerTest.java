@@ -38,7 +38,7 @@ class AgentControllerTest {
         CreateSessionRequest request = new CreateSessionRequest("/workspace", null, null, null);
         controller.createSession(request);
 
-        assertThat(messagingTemplate.sentMessages).hasSize(1);
+        assertThat(messagingTemplate.sentMessages).hasSize(2);
         CapturingMessagingTemplate.SentMessage sent = messagingTemplate.sentMessages.get(0);
         CreateSessionResponse resp = (CreateSessionResponse) sent.payload;
         assertThat(resp.sessionId()).isNotBlank();
@@ -53,7 +53,7 @@ class AgentControllerTest {
                 "/workspace", "anthropic", "claude-sonnet-4", "sk-custom-key");
         controller.createSession(request);
 
-        assertThat(messagingTemplate.sentMessages).hasSize(1);
+        assertThat(messagingTemplate.sentMessages).hasSize(2);
         CreateSessionResponse resp = (CreateSessionResponse) messagingTemplate.sentMessages.get(0).payload;
         assertThat(resp.sessionId()).isNotBlank();
 

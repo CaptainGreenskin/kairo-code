@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { getModels, createSession } from '@api/config';
+import { getModels } from '@api/config';
 
 interface NewSessionDialogProps {
     onClose: () => void;
     onCreate: (info: { sessionId: string; model: string }) => void;
+    onCreateSession: (workingDir: string, model: string) => Promise<{ sessionId: string }>;
 }
 
 type Provider = 'openai' | 'anthropic' | 'qianwen';
 
-export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
+export function NewSessionDialog({ onClose, onCreate, onCreateSession }: NewSessionDialogProps) {
     const [workingDir, setWorkingDir] = useState('.');
     const [provider, setProvider] = useState<Provider>('openai');
     const [model, setModel] = useState('');
@@ -39,7 +40,7 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
         setLoading(true);
         setError(null);
         try {
-            const result = await createSession(workingDir.trim(), model);
+            const result = await onCreateSession(workingDir.trim(), model);
             onCreate({ sessionId: result.sessionId, model });
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to create session');
