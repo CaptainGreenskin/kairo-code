@@ -2,6 +2,7 @@
   "devDependencies": {
     "happy-dom": "^20.9.0",
     "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
     "vitest": "^3.2.4"
   }
 }

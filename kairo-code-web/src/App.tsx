@@ -18,6 +18,7 @@ import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
 import { PendingApprovalBanner } from '@components/PendingApprovalBanner';
+import { WelcomeScreen } from '@components/WelcomeScreen';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
@@ -31,6 +32,8 @@ import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from
 import { setSessionName, getSessionName } from '@utils/sessionNames';
 import { loadPrefs, savePref } from '@utils/userPrefs';
 import { loadDraft } from '@utils/inputDraft';
+
+declare const __APP_VERSION__: string;
 
 function generateId(): string {
     return crypto.randomUUID();
@@ -917,17 +920,14 @@ function App() {
 
                 <main className="relative flex-1 flex flex-col min-w-0">
                     {/* Chat area */}
-                    {messages.length === 0 ? (
+                    {messages.length === 0 && connectionStatus !== 'connecting' ? (
+                        <WelcomeScreen
+                            onSelectPrompt={handleSend}
+                            appVersion={__APP_VERSION__}
+                        />
+                    ) : messages.length === 0 ? (
                         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-                            <div className="text-center">
-                                <div className="text-4xl mb-3">&#128172;</div>
-                                <div className="text-lg font-medium text-[var(--text-primary)]">
-                                    Start a conversation
-                                </div>
-                                <div className="text-sm mt-2">
-                                    Type a message to begin
-                                </div>
-                            </div>
+                            <div className="text-sm">Connecting…</div>
                         </div>
                     ) : (
                         <>
