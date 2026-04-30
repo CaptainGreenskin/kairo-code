@@ -1,9 +1,11 @@
 package io.kairo.code.server.controller;
 
+import io.kairo.code.server.config.ConfigPersistenceService;
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.dto.FileContentResponse;
 import io.kairo.code.server.dto.FileEntry;
 import io.kairo.code.server.dto.ServerConfigResponse;
+import io.kairo.code.server.dto.UpdateConfigRequest;
 import io.kairo.code.service.AgentService;
 import io.kairo.code.service.SessionInfo;
 import org.springframework.http.HttpStatus;
@@ -18,7 +20,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /**
@@ -30,12 +34,15 @@ public class ConfigController {
 
     private final ServerProperties serverProperties;
     private final AgentService agentService;
+    private final ConfigPersistenceService persistenceService;
     private final Path workingDir;
 
     public ConfigController(ServerProperties serverProperties,
-                            AgentService agentService) {
+                            AgentService agentService,
+                            ConfigPersistenceService persistenceService) {
         this.serverProperties = serverProperties;
         this.agentService = agentService;
+        this.persistenceService = persistenceService;
         this.workingDir = Paths.get(serverProperties.workingDir());
     }
 
@@ -44,10 +51,39 @@ public class ConfigController {
      */
     @GetMapping("/config")
     public ServerConfigResponse getConfig() {
-        return new ServerConfigResponse(
-                serverProperties.provider(),
+        return buildConfigResponse();
+    }
+
+    /**
+     * Update server configuration (partial update, persisted + hot-updated).
+     */
+    @PostMapping("/config")
+    public ServerConfigResponse updateConfig(@RequestBody UpdateConfigRequest request) throws IOException {
+        Map<String, String> current = new HashMap<>(persistenceService.load());
+
+        if (request.apiKey() != null) current.put("apiKey", request.apiKey());
+        if (request.model() != null) current.put("model", request.model());
+        if (request.provider() != null) current.put("provider", request.provider());
+        if (request.baseUrl() != null) current.put("baseUrl", request.baseUrl());
+        if (request.workingDir() != null) current.put("workingDir", request.workingDir());
+
+        persistenceService.save(current);
+
+        if (request.provider() != null) serverProperties.setProvider(request.provider());
+        if (request.model() != null) serverProperties.setModel(request.model());
+        if (request.baseUrl() != null) serverProperties.setBaseUrl(request.baseUrl());
+        if (request.workingDir() != null) serverProperties.setWorkingDir(request.workingDir());
+        if (request.apiKey() != null) serverProperties.setApiKey(request.apiKey());
+
+        agentService.updateDefaultConfig(
+                serverProperties.apiKey(),
                 serverProperties.model(),
-                serverProperties.workingDir());
+                serverProperties.provider(),
+                serverProperties.baseUrl(),
+                serverProperties.workingDir()
+        );
+
+        return buildConfigResponse();
     }
 
     /**
@@ -89,10 +125,8 @@ public class ConfigController {
      */
     @GetMapping("/files")
     public List<FileEntry> listFiles(@RequestParam(defaultValue = "") String path) {
-        Path resolved = resolvePath(path);
         Path dir = workingDir.resolve(path.isBlank() ? "" : path).normalize();
 
-        // Path traversal protection
         if (!dir.startsWith(workingDir)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
         }
@@ -127,11 +161,6 @@ public class ConfigController {
     public FileContentResponse getFileContent(@RequestParam String path) {
         Path resolved = resolvePath(path);
 
-        // Path traversal protection
-        if (!resolved.startsWith(workingDir)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
-        }
-
         if (!Files.exists(resolved) || Files.isDirectory(resolved)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found: " + path);
         }
@@ -157,13 +186,9 @@ public class ConfigController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to read file", e);
         }
 
-        String language = inferLanguage(resolved.getFileName().toString());
-        return new FileContentResponse(path, content, language);
+        return new FileContentResponse(path, content, inferLanguage(resolved.getFileName().toString()));
     }
 
-    /**
-     * Resolve a relative path against the working directory, with path traversal checks.
-     */
     private Path resolvePath(String path) {
         if (path.contains("..")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
@@ -175,9 +200,16 @@ public class ConfigController {
         return target;
     }
 
-    /**
-     * Infer code language from file extension.
-     */
+    private ServerConfigResponse buildConfigResponse() {
+        return new ServerConfigResponse(
+                serverProperties.provider(),
+                serverProperties.model(),
+                serverProperties.workingDir(),
+                serverProperties.baseUrl(),
+                serverProperties.apiKey() != null && !serverProperties.apiKey().isBlank()
+        );
+    }
+
     private static String inferLanguage(String fileName) {
         int dot = fileName.lastIndexOf('.');
         if (dot < 0) return "";

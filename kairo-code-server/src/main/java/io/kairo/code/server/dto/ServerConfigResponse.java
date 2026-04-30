@@ -6,5 +6,7 @@ package io.kairo.code.server.dto;
 public record ServerConfigResponse(
         String provider,
         String model,
-        String workingDir
+        String workingDir,
+        String baseUrl,
+        boolean apiKeySet
 ) {}

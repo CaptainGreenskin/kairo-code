@@ -6,7 +6,8 @@ import { Header } from '@components/Header';
 import { ChatMessage, ThinkingIndicator } from '@components/ChatMessage';
 import { ChatInput } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
-import type { AgentEvent, ToolCall, Message } from '@/types/agent';
+import { SettingsModal } from '@components/SettingsModal';
+import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
 import { Virtuoso } from 'react-virtuoso';
 
@@ -37,6 +38,8 @@ function App() {
 
     const assistantMsgRef = useRef<string | null>(null);
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
+    const [showSettings, setShowSettings] = useState(false);
+    const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
 
     const handleEvent = useCallback(
@@ -216,6 +219,7 @@ function App() {
         getConfig()
             .then((config) => {
                 setCurrentModel(config.defaultModel);
+                setServerConfig(config);
             })
             .catch(() => {
                 // Backend not running yet
@@ -312,6 +316,13 @@ function App() {
         // Theme toggling is handled by the Header component via DOM classList
     }, []);
 
+    const handleOpenSettings = useCallback(() => setShowSettings(true), []);
+    const handleCloseSettings = useCallback(() => setShowSettings(false), []);
+    const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
+        setServerConfig(cfg);
+        setCurrentModel(cfg.defaultModel);
+    }, [setCurrentModel]);
+
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
             <Header
@@ -319,6 +330,7 @@ function App() {
                 tokenUsage={tokenUsage}
                 estimatedCost={estimatedCost}
                 onToggleTheme={handleToggleTheme}
+                onOpenSettings={handleOpenSettings}
             />
 
             <div className="flex flex-1 overflow-hidden">
@@ -396,6 +408,15 @@ function App() {
                     />
                 </main>
             </div>
+
+            {showSettings && serverConfig && (
+                <SettingsModal
+                    isOpen={showSettings}
+                    onClose={handleCloseSettings}
+                    config={serverConfig}
+                    onSaved={handleSettingsSaved}
+                />
+            )}
         </div>
     );
 }

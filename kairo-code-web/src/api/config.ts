@@ -8,7 +8,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         ...options,
     });
     if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const text = await response.text();
+        throw new Error(`HTTP ${response.status}: ${text || response.statusText}`);
     }
     return response.json() as Promise<T>;
 }
@@ -36,4 +37,19 @@ export async function listFiles(path?: string): Promise<FileEntry[]> {
 
 export async function getFileContent(path: string): Promise<FileContentResponse> {
     return request<FileContentResponse>(`/files/content?path=${encodeURIComponent(path)}`);
+}
+
+export interface UpdateConfigRequest {
+    apiKey?: string;
+    model?: string;
+    provider?: string;
+    baseUrl?: string;
+    workingDir?: string;
+}
+
+export async function updateConfig(req: UpdateConfigRequest): Promise<ServerConfig> {
+    return request<ServerConfig>('/config', {
+        method: 'POST',
+        body: JSON.stringify(req),
+    });
 }

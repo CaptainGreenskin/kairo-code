@@ -1,4 +1,4 @@
-import { Moon, Sun, Github } from 'lucide-react';
+import { Moon, Sun, Github, Settings } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface HeaderProps {
@@ -7,6 +7,7 @@ interface HeaderProps {
     estimatedCost: number;
     tokenLimit?: number;
     onToggleTheme: () => void;
+    onOpenSettings: () => void;
 }
 
 function getUsageColor(ratio: number): string {
@@ -21,6 +22,7 @@ export function Header({
     estimatedCost,
     tokenLimit = 128000,
     onToggleTheme,
+    onOpenSettings,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -73,6 +75,14 @@ export function Header({
                         </div>
                     </div>
                 )}
+
+                <button
+                    onClick={onOpenSettings}
+                    className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                    aria-label="Settings"
+                >
+                    <Settings size={18} />
+                </button>
 
                 <a
                     href="https://github.com/kairo-code/kairo-code"
