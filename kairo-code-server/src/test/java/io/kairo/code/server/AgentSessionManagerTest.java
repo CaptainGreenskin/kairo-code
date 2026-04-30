@@ -9,6 +9,7 @@ import io.kairo.api.model.ModelResponse;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.server.dto.*;
+import io.kairo.code.service.SessionInfo;
 import io.kairo.code.server.session.AgentSessionManager;
 import io.kairo.code.server.session.WebSocketApprovalHandler;
 import org.junit.jupiter.api.BeforeEach;

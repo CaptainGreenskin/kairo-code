@@ -1,4 +1,4 @@
-package io.kairo.code.server.dto;
+package io.kairo.code.service;
 
 /**
  * Summary info about an active session.

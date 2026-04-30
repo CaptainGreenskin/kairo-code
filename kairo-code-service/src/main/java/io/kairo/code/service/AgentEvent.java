@@ -1,9 +1,9 @@
-package io.kairo.code.server.dto;
+package io.kairo.code.service;
 
 import java.util.Map;
 
 /**
- * Event pushed to the client via STOMP topic `/topic/session/{sessionId}`.
+ * Event pushed to the client via any transport (STOMP / SSE / CLI).
  */
 public record AgentEvent(
         EventType type,
