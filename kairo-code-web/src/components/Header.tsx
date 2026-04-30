@@ -2,6 +2,7 @@ import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu, Star
 import React, { useState, useEffect } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { StatsPopover } from './StatsPopover';
+import { TokenUsageBar } from './TokenUsageBar';
 import type { ConnectionStatus } from '@/types/agent';
 
 interface HeaderProps {
@@ -33,12 +34,6 @@ interface HeaderProps {
     onToggleBookmarks?: () => void;
 }
 
-function getUsageColor(ratio: number): string {
-    if (ratio > 0.85) return 'bg-[var(--color-danger)]';
-    if (ratio > 0.70) return 'bg-[var(--color-warning)]';
-    return 'bg-[var(--color-success)]';
-}
-
 const statusDotClass: Record<ConnectionStatus, string> = {
     connected: 'bg-green-500',
     connecting: 'bg-yellow-500 animate-pulse',
@@ -57,7 +52,7 @@ export const Header = React.memo(function Header({
     currentModel,
     tokenUsage,
     estimatedCost,
-    tokenLimit = 128000,
+    tokenLimit: _tokenLimit = 128000,
     onToggleTheme,
     onOpenSettings,
     onToggleFileTree,
@@ -91,9 +86,6 @@ export const Header = React.memo(function Header({
         localStorage.setItem('kairo-theme', newIsDark ? 'dark' : 'light');
         onToggleTheme();
     };
-
-    const totalTokens = tokenUsage.input + tokenUsage.output;
-    const usageRatio = tokenLimit > 0 ? totalTokens / tokenLimit : 0;
 
     return (
         <header className="h-12 px-4 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
@@ -146,24 +138,12 @@ export const Header = React.memo(function Header({
             </div>
 
             <div className="flex items-center gap-4">
-                {totalTokens > 0 && (
-                    <div className="hidden sm:flex flex-col gap-1 max-w-48">
-                        <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)]">
-                            <span>
-                                {totalTokens.toLocaleString()} / {tokenLimit.toLocaleString()}
-                            </span>
-                            <span className="font-medium text-[var(--color-success)]">
-                                ${estimatedCost.toFixed(4)}
-                            </span>
-                        </div>
-                        <div className="h-1 w-full bg-[var(--bg-hover)] rounded-full overflow-hidden">
-                            <div
-                                className={`h-full rounded-full transition-all ${getUsageColor(usageRatio)}`}
-                                style={{ width: `${Math.min(usageRatio * 100, 100)}%` }}
-                            />
-                        </div>
-                    </div>
-                )}
+                <TokenUsageBar
+                    inputTokens={tokenUsage.input}
+                    outputTokens={tokenUsage.output}
+                    estimatedCost={estimatedCost}
+                    model={currentModel ?? ''}
+                />
 
                 <button
                     onClick={onOpenSearch}
