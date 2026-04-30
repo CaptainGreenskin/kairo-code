@@ -2,7 +2,7 @@ package io.kairo.code.server.controller;
 
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.dto.ServerConfigResponse;
-import io.kairo.code.server.dto.SessionInfo;
+import io.kairo.code.service.SessionInfo;
 import io.kairo.code.server.session.AgentSessionManager;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;

@@ -1,6 +1,8 @@
 package io.kairo.code.server;
 
 import io.kairo.code.server.dto.*;
+import io.kairo.code.service.AgentEvent;
+import io.kairo.code.service.SessionInfo;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;

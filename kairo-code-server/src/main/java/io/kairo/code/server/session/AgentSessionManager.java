@@ -5,7 +5,7 @@ import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
-import io.kairo.code.server.dto.SessionInfo;
+import io.kairo.code.service.SessionInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;

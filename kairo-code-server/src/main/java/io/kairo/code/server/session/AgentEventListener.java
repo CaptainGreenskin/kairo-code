@@ -8,7 +8,7 @@ import io.kairo.api.hook.PostReasoningEvent;
 import io.kairo.api.hook.ToolResultEvent;
 import io.kairo.api.message.Content;
 import io.kairo.api.tool.ToolCallRequest;
-import io.kairo.code.server.dto.AgentEvent;
+import io.kairo.code.service.AgentEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;

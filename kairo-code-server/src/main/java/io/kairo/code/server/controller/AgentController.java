@@ -5,6 +5,7 @@ import io.kairo.api.exception.AgentInterruptedException;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.code.core.CodeAgentConfig;
+import io.kairo.code.service.AgentEvent;
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.dto.*;
 import io.kairo.code.server.session.AgentSessionManager;

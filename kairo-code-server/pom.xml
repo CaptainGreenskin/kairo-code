@@ -19,6 +19,11 @@
     <dependencies>
         <dependency>
             <groupId>io.kairo.code</groupId>
+            <artifactId>kairo-code-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.kairo.code</groupId>
             <artifactId>kairo-code-core</artifactId>
             <version>${project.version}</version>
         </dependency>

@@ -21,6 +21,7 @@
 
     <modules>
         <module>kairo-code-core</module>
+        <module>kairo-code-service</module>
         <module>kairo-code-cli</module>
         <module>kairo-code-server</module>
         <module>kairo-code-examples</module>
