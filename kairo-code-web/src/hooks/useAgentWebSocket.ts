@@ -10,7 +10,84 @@ const SEND_DESTINATIONS = {
     approve: '/app/agent/approve',
     stop: '/app/agent/stop',
     create: '/app/agent/create',
+    bindSession: '/app/agent/bind-session',
 } as const;
+
+const SESSION_STORAGE_KEY = 'kairo-code-session-id';
+
+/**
+ * Transform backend AgentEvent record (flat fields) to frontend AgentEvent (payload-based).
+ *
+ * Backend record: {type, sessionId, content, toolName, toolInput, requiresApproval,
+ *                  toolCallId, toolResult, tokenUsage, cost, errorMessage, errorType, timestamp}
+ * Frontend type:  {type, sessionId, payload, timestamp}
+ */
+function transformEvent(raw: Record<string, unknown>): AgentEvent {
+    const type = raw.type as string;
+    const sessionId = raw.sessionId as string;
+    const ts = (raw.timestamp as number) ?? Date.now();
+
+    switch (type) {
+        case 'TEXT_CHUNK':
+            return { type: 'TEXT_CHUNK', sessionId, payload: { text: (raw.content as string) ?? '' }, timestamp: ts };
+        case 'TOOL_CALL':
+            return {
+                type: 'TOOL_CALL', sessionId, timestamp: ts,
+                payload: {
+                    toolCallId: (raw.toolCallId as string) ?? '',
+                    toolName: (raw.toolName as string) ?? '',
+                    input: (raw.toolInput as Record<string, unknown>) ?? {},
+                    requiresApproval: (raw.requiresApproval as boolean) ?? false,
+                },
+            };
+        case 'TOOL_RESULT':
+            return {
+                type: 'TOOL_RESULT', sessionId, timestamp: ts,
+                payload: {
+                    toolCallId: (raw.toolCallId as string) ?? '',
+                    result: (raw.toolResult as string) ?? '',
+                    isError: false,
+                    durationMs: 0,
+                },
+            };
+        case 'AGENT_DONE':
+            return {
+                type: 'AGENT_DONE', sessionId, timestamp: ts,
+                payload: {
+                    inputTokens: (raw.tokenUsage as number) ?? 0,
+                    outputTokens: 0,
+                },
+            };
+        case 'AGENT_ERROR':
+            return {
+                type: 'AGENT_ERROR', sessionId, timestamp: ts,
+                payload: {
+                    message: (raw.errorMessage as string) ?? 'Unknown error',
+                },
+            };
+        case 'AGENT_THINKING':
+            return {
+                type: 'AGENT_THINKING', sessionId, timestamp: ts,
+                payload: { isThinking: true },
+            };
+        case 'SESSION_RESTORED': {
+            // content field holds JSON: {messages: [...], running: boolean}
+            const content = raw.content as string;
+            let parsed: { messages: unknown[]; running: boolean };
+            try {
+                parsed = JSON.parse(content);
+            } catch {
+                parsed = { messages: [], running: false };
+            }
+            return {
+                type: 'SESSION_RESTORED', sessionId, timestamp: ts,
+                payload: parsed as import('@/types/agent').SessionRestoredPayload,
+            };
+        }
+        default:
+            return { type: 'AGENT_ERROR', sessionId, timestamp: ts, payload: { message: `Unknown event type: ${type}` } };
+    }
+}
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const INITIAL_RECONNECT_DELAY = 1000;
@@ -24,6 +101,7 @@ interface UseAgentWebSocketReturn {
     approveTool: (sessionId: string, toolCallId: string, approved: boolean) => void;
     stopAgent: (sessionId: string) => void;
     createSession: (workingDir: string, model: string) => Promise<string>;
+    bindSession: (sessionId: string) => void;
 }
 
 export function useAgentWebSocket(
@@ -88,7 +166,7 @@ export function useAgentWebSocket(
                                     } as AgentEvent);
                                     return;
                                 }
-                                const event = raw as AgentEvent;
+                                const event = transformEvent(raw);
                                 if (event.type === 'AGENT_THINKING') {
                                     const payload = event.payload as {
                                         isThinking: boolean;
@@ -138,6 +216,7 @@ export function useAgentWebSocket(
 
     const disconnect = useCallback(() => {
         sessionIdRef.current = null;
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
         cleanup();
         setIsConnected(false);
         setIsThinking(false);
@@ -197,6 +276,7 @@ export function useAgentWebSocket(
                         sub.unsubscribe();
                         clearTimeout(timeout);
                         sessionIdRef.current = resp.sessionId;
+                        sessionStorage.setItem(SESSION_STORAGE_KEY, resp.sessionId);
                         resolve(resp.sessionId);
                     } catch (e) {
                         sub.unsubscribe();
@@ -213,6 +293,15 @@ export function useAgentWebSocket(
         [],
     );
 
+    const bindSession = useCallback(
+        (sessionId: string) => {
+            sessionIdRef.current = sessionId;
+            sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+            publish(SEND_DESTINATIONS.bindSession, { sessionId });
+        },
+        [publish],
+    );
+
     useEffect(() => {
         return cleanup;
     }, [cleanup]);
@@ -226,5 +315,6 @@ export function useAgentWebSocket(
         approveTool,
         stopAgent,
         createSession,
+        bindSession,
     };
 }

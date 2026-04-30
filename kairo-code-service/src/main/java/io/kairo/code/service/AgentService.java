@@ -16,11 +16,16 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Transport-agnostic agent service bridge.
@@ -200,6 +205,129 @@ public class AgentService {
             log.debug("Error interrupting agent for session {}", sessionId, e);
         }
         return true;
+    }
+
+    /**
+     * Bind to an existing session and return its history for client-side restore.
+     * Reads the checkpoint.json file to reconstruct the conversation.
+     *
+     * @return an AgentEvent of type SESSION_RESTORED with messages as JSON array in content,
+     *         or null if session not found.
+     */
+    public AgentEvent bindSession(String sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) {
+            log.warn("bindSession: session {} not found", sessionId);
+            return null;
+        }
+
+        boolean running = isRunning(sessionId);
+        List<Map<String, Object>> messages = readCheckpointMessages(entry);
+        String messagesJson;
+        try {
+            messagesJson = new ObjectMapper().writeValueAsString(messages);
+        } catch (IOException e) {
+            log.error("Failed to serialize messages for session {}", sessionId, e);
+            messagesJson = "[]";
+        }
+
+        log.info("Session {} bound: {} messages, running={}", sessionId, messages.size(), running);
+        return AgentEvent.sessionRestored(sessionId, messagesJson, running);
+    }
+
+    private List<Map<String, Object>> readCheckpointMessages(SessionEntry entry) {
+        Path workingDir = Path.of(entry.config().workingDir());
+        Path checkpointPath = workingDir.resolve(".kairo-session").resolve("checkpoint.json");
+        if (!Files.exists(checkpointPath)) {
+            return List.of();
+        }
+
+        try {
+            String json = Files.readString(checkpointPath);
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = mapper.readTree(json);
+            JsonNode messagesNode = root.get("messages");
+            if (messagesNode == null || !messagesNode.isArray()) {
+                return List.of();
+            }
+
+            // Convert checkpoint messages to frontend-friendly format.
+            // Skip tool-result messages (role=tool) — they're embedded in assistant toolCalls.
+            List<Map<String, Object>> result = new java.util.ArrayList<>();
+            String currentAssistantId = null;
+            Map<String, Object> currentAssistant = null;
+            List<Map<String, Object>> currentToolCalls = null;
+
+            for (JsonNode msg : messagesNode) {
+                String role = msg.has("role") ? msg.get("role").asText() : "";
+                String content = msg.has("content") ? msg.get("content").asText("") : "";
+
+                if ("user".equals(role)) {
+                    // Flush any pending assistant message
+                    if (currentAssistant != null) {
+                        if (currentToolCalls != null && !currentToolCalls.isEmpty()) {
+                            currentAssistant.put("toolCalls", currentToolCalls);
+                        }
+                        result.add(currentAssistant);
+                    }
+                    currentAssistant = null;
+                    currentToolCalls = null;
+
+                    Map<String, Object> userMsg = new java.util.LinkedHashMap<>();
+                    userMsg.put("id", java.util.UUID.randomUUID().toString());
+                    userMsg.put("role", "user");
+                    userMsg.put("content", content);
+                    userMsg.put("toolCalls", List.of());
+                    userMsg.put("timestamp", System.currentTimeMillis());
+                    result.add(userMsg);
+                } else if ("assistant".equals(role)) {
+                    // Flush previous assistant message
+                    if (currentAssistant != null) {
+                        if (currentToolCalls != null && !currentToolCalls.isEmpty()) {
+                            currentAssistant.put("toolCalls", currentToolCalls);
+                        }
+                        result.add(currentAssistant);
+                    }
+
+                    currentAssistantId = java.util.UUID.randomUUID().toString();
+                    currentAssistant = new java.util.LinkedHashMap<>();
+                    currentAssistant.put("id", currentAssistantId);
+                    currentAssistant.put("role", "assistant");
+                    currentAssistant.put("content", content);
+                    currentToolCalls = new java.util.ArrayList<>();
+
+                    // Extract toolCalls from the message
+                    JsonNode tcNode = msg.get("toolCalls");
+                    if (tcNode != null && tcNode.isArray()) {
+                        for (JsonNode tc : tcNode) {
+                            Map<String, Object> toolCall = new java.util.LinkedHashMap<>();
+                            toolCall.put("id", tc.has("id") ? tc.get("id").asText() : "");
+                            toolCall.put("toolName", tc.has("name") ? tc.get("name").asText() : "");
+                            toolCall.put("input", tc.has("input") ? mapper.convertValue(tc.get("input"), Map.class) : Map.of());
+                            toolCall.put("status", "done");
+                            toolCall.put("requiresApproval", false);
+                            currentToolCalls.add(toolCall);
+                        }
+                    }
+                }
+                // Skip "tool" role messages — results are in toolCalls above
+            }
+
+            // Flush last assistant message
+            if (currentAssistant != null) {
+                if (currentToolCalls != null && !currentToolCalls.isEmpty()) {
+                    currentAssistant.put("toolCalls", currentToolCalls);
+                }
+                result.add(currentAssistant);
+            }
+
+            // Return last 50 messages to avoid overwhelming the client
+            int start = Math.max(0, result.size() - 50);
+            return result.subList(start, result.size());
+        } catch (IOException e) {
+            log.warn("Failed to read checkpoint for session {}: {}", entry.sessionId(), e.getMessage());
+            return List.of();
+        }
     }
 
     /**

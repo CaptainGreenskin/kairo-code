@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Check, X, Loader2, AlertCircle } from 'lucide-react';
 import type { ToolCall } from '@/types/agent';
 import { TerminalOutput } from './TerminalOutput';
@@ -7,6 +7,8 @@ import { FileDiffView } from './FileDiffView';
 interface ToolCallCardProps {
     toolCall: ToolCall;
     onApprove?: (toolCallId: string, approved: boolean) => void;
+    /** Timeout in seconds before auto-reject. Default: 120. */
+    approvalTimeout?: number;
 }
 
 const statusConfig: Record<ToolCall['status'], { label: string; color: string; icon: React.ReactNode }> = {
@@ -85,9 +87,71 @@ function extractModified(diff: string): string {
     return modified.length > 0 ? modified.join('\n') : '';
 }
 
-export function ToolCallCard({ toolCall, onApprove }: ToolCallCardProps) {
+export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: ToolCallCardProps) {
     const config = statusConfig[toolCall.status];
     const [expanded, setExpanded] = useState(false);
+
+    // Timeout countdown for pending tool calls
+    const [timeRemaining, setTimeRemaining] = useState(approvalTimeout);
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const isPending = toolCall.requiresApproval && toolCall.status === 'pending';
+
+    // Start countdown when the card is pending
+    useEffect(() => {
+        if (!isPending) return;
+        setTimeRemaining(approvalTimeout);
+        timerRef.current = setInterval(() => {
+            setTimeRemaining((prev) => {
+                if (prev <= 1) {
+                    if (timerRef.current) clearInterval(timerRef.current);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        return () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
+    }, [isPending, approvalTimeout]);
+
+    // Auto-reject on timeout
+    const hasTimedOut = timeRemaining === 0 && isPending;
+    useEffect(() => {
+        if (hasTimedOut && onApprove) {
+            onApprove(toolCall.id, false);
+        }
+    }, [hasTimedOut, onApprove, toolCall.id]);
+
+    // Keyboard shortcuts: y = approve, n = reject
+    const handleKeyDown = useCallback(
+        (e: KeyboardEvent) => {
+            if (!isPending || !onApprove) return;
+            if (e.key === 'y' || e.key === 'Y') {
+                e.preventDefault();
+                onApprove(toolCall.id, true);
+            } else if (e.key === 'n' || e.key === 'N') {
+                e.preventDefault();
+                onApprove(toolCall.id, false);
+            }
+        },
+        [isPending, onApprove, toolCall.id],
+    );
+
+    useEffect(() => {
+        if (!isPending) return;
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isPending, handleKeyDown]);
+
+    // Progress percentage
+    const progressPct = isPending ? ((approvalTimeout - timeRemaining) / approvalTimeout) * 100 : 0;
+
+    // Format remaining time
+    const formatTime = (seconds: number): string => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`;
+    };
 
     return (
         <div className="my-2 border border-[var(--border)] rounded-lg overflow-hidden bg-[var(--bg-secondary)]">
@@ -146,22 +210,43 @@ export function ToolCallCard({ toolCall, onApprove }: ToolCallCardProps) {
                 </div>
             )}
 
-            {toolCall.requiresApproval && toolCall.status === 'pending' && onApprove && (
-                <div className="px-3 py-2 flex items-center gap-2 border-t border-[var(--border)]">
-                    <button
-                        onClick={() => onApprove(toolCall.id, true)}
-                        className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-[var(--color-success)] hover:bg-[var(--color-success)]/90 rounded transition-colors"
-                    >
-                        <Check size={12} />
-                        Approve
-                    </button>
-                    <button
-                        onClick={() => onApprove(toolCall.id, false)}
-                        className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-[var(--color-danger)] hover:bg-[var(--color-danger)]/90 rounded transition-colors"
-                    >
-                        <X size={12} />
-                        Reject
-                    </button>
+            {isPending && onApprove && (
+                <div className="px-3 py-2 border-t border-[var(--border)]">
+                    <div className="flex items-center gap-2 mb-2">
+                        <button
+                            onClick={() => onApprove(toolCall.id, true)}
+                            className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-[var(--color-success)] hover:bg-[var(--color-success)]/90 rounded transition-colors"
+                        >
+                            <Check size={12} />
+                            Approve
+                        </button>
+                        <button
+                            onClick={() => onApprove(toolCall.id, false)}
+                            className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-[var(--color-danger)] hover:bg-[var(--color-danger)]/90 rounded transition-colors"
+                        >
+                            <X size={12} />
+                            Reject
+                        </button>
+                        {/* Timeout countdown */}
+                        <div className="ml-auto flex items-center gap-2">
+                            <span className="text-xs text-[var(--text-muted)] font-mono">
+                                {formatTime(timeRemaining)}
+                            </span>
+                            <div className="w-20 h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-[var(--color-warning)] transition-all duration-1000"
+                                    style={{ width: `${100 - progressPct}%` }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    {/* Keyboard shortcut hints */}
+                    <div className="text-[10px] text-[var(--text-muted)]">
+                        <kbd className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded text-[10px]">y</kbd>
+                        {' '}approve{' · '}
+                        <kbd className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded text-[10px]">n</kbd>
+                        {' '}reject
+                    </div>
                 </div>
             )}
         </div>

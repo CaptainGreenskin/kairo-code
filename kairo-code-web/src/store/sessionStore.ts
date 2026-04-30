@@ -12,6 +12,7 @@ interface SessionState {
     // Actions
     setSessionId: (id: string | null) => void;
     addMessage: (message: Message) => void;
+    setMessages: (messages: Message[]) => void;
     appendChunk: (messageId: string, text: string) => void;
     addToolCall: (messageId: string, toolCall: ToolCall) => void;
     updateToolCall: (messageId: string, toolCallId: string, updates: Partial<ToolCall>) => void;
@@ -20,6 +21,7 @@ interface SessionState {
     setEstimatedCost: (cost: number) => void;
     setCurrentModel: (model: string) => void;
     clearMessages: () => void;
+    restoreSession: (id: string, messages: Message[], running: boolean) => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -34,6 +36,8 @@ export const useSessionStore = create<SessionState>((set) => ({
 
     addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
+
+    setMessages: (messages) => set({ messages }),
 
     appendChunk: (messageId, text) =>
         set((state) => ({
@@ -74,4 +78,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     setCurrentModel: (model) => set({ currentModel: model }),
 
     clearMessages: () => set({ messages: [] }),
+
+    restoreSession: (id, messages, running) =>
+        set({ sessionId: id, messages, isThinking: running }),
 }));

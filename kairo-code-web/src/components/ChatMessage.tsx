@@ -1,16 +1,28 @@
+import { useSyncExternalStore } from 'react';
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Loader2 } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
+import { streamingStore } from '@store/streamingStore';
 
 interface ChatMessageProps {
     message: Message;
     onApproveTool?: (toolCallId: string, approved: boolean) => void;
+    isStreaming?: boolean;
+    sessionId?: string;
 }
 
-export function ChatMessage({ message, onApproveTool }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId }: ChatMessageProps) {
+    // Use external streaming store for active streaming messages
+    const streamingContent = useSyncExternalStore(
+        streamingStore.subscribe,
+        () => (sessionId ? streamingStore.getContent(sessionId) : ''),
+    );
+
+    const displayContent = isStreaming && sessionId ? streamingContent : message.content;
+
     if (message.role === 'user') {
         return (
             <div className="flex justify-end mb-4 animate-slide-up">
@@ -63,7 +75,7 @@ export function ChatMessage({ message, onApproveTool }: ChatMessageProps) {
                                     },
                                 }}
                             >
-                                {message.content}
+                                {displayContent}
                             </Markdown>
                         </div>
                     )}
