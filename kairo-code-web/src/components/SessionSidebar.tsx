@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { MessageSquare, Trash2, Plus } from 'lucide-react';
+import { MessageSquare, Trash2, Plus, Loader } from 'lucide-react';
 import { listSessions, deleteSession as apiDeleteSession } from '@api/config';
 import type { SessionInfo } from '@/types/agent';
 import { NewSessionDialog } from './NewSessionDialog';
+import { formatRelativeTime } from '@utils/formatTime';
 
 interface SessionSidebarProps {
     activeSessionId: string | null;
+    loadingSessionId?: string | null;
     onSelectSession: (id: string) => void;
     onDeleteSession: (id: string) => void;
     onNewSession: (info: { sessionId: string; model: string }) => void;
@@ -14,6 +16,7 @@ interface SessionSidebarProps {
 
 export function SessionSidebar({
     activeSessionId,
+    loadingSessionId,
     onSelectSession,
     onDeleteSession,
     onNewSession,
@@ -97,15 +100,21 @@ export function SessionSidebar({
                                         session.sessionId === activeSessionId
                                             ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                                             : 'hover:bg-[var(--bg-hover)]'
-                                    }`}
+                                    } ${session.sessionId === loadingSessionId ? 'opacity-60' : ''}`}
                                     onClick={() => onSelectSession(session.sessionId)}
                                 >
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-mono truncate">
-                                            {session.model}
-                                        </p>
+                                        <div className="flex items-center gap-1">
+                                            <p className="text-sm font-mono truncate">
+                                                {session.model}
+                                            </p>
+                                            {session.sessionId === loadingSessionId && (
+                                                <Loader size={12} className="animate-spin shrink-0 text-[var(--color-primary)]" />
+                                            )}
+                                        </div>
                                         <p className="text-[10px] text-[var(--text-muted)]">
-                                            {new Date(session.createdAt).toLocaleString()}
+                                            {formatRelativeTime(session.createdAt)}
+                                            {session.running && ' · 运行中'}
                                         </p>
                                     </div>
                                     <button

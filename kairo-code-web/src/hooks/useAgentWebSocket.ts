@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 import type { AgentEvent } from '@/types/agent';
+import { useSessionStore } from '@store/sessionStore';
 
 const WS_ENDPOINT = '/ws';
 const SUBSCRIBE_PREFIX = '/topic/session';
@@ -147,8 +148,25 @@ export function useAgentWebSocket(
                 onConnect: () => {
                     setIsConnected(true);
                     reconnectAttemptsRef.current = 0;
-                    const sid = sessionIdRef.current;
+
+                    // Resolve session ID from cascading sources:
+                    // 1. Already-bound ref (e.g., after createSession)
+                    // 2. Zustand store (e.g., after handleSelectSession set the new ID)
+                    // 3. sessionStorage (e.g., after page reload)
+                    let sid = sessionIdRef.current;
+                    if (!sid) {
+                        sid = useSessionStore.getState().sessionId;
+                    }
+                    if (!sid) {
+                        sid = sessionStorage.getItem(SESSION_STORAGE_KEY);
+                    }
+
                     if (!sid) return;
+
+                    // Persist resolved session ID
+                    sessionIdRef.current = sid;
+                    sessionStorage.setItem(SESSION_STORAGE_KEY, sid);
+
                     subscriptionRef.current = client.subscribe(
                         `${SUBSCRIBE_PREFIX}/${sid}`,
                         (message: IMessage) => {
@@ -182,6 +200,13 @@ export function useAgentWebSocket(
                             }
                         },
                     );
+
+                    // Publish bind-session to request history restore.
+                    // Safe to call even for fresh sessions (backend returns empty messages).
+                    client.publish({
+                        destination: SEND_DESTINATIONS.bindSession,
+                        body: JSON.stringify({ sessionId: sid }),
+                    });
                 },
                 onStompError: (frame) => {
                     console.error('[WebSocket] STOMP error:', frame);
