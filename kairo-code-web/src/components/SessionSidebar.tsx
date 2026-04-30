@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag } from 'lucide-react';
+import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, X } from 'lucide-react';
 import { listSessions, deleteSession as apiDeleteSession } from '@api/config';
 import type { SessionInfo } from '@/types/agent';
 import { NewSessionDialog } from './NewSessionDialog';
@@ -26,9 +26,25 @@ interface SessionItemProps {
     onDelete: (id: string) => void;
     onPinChange?: () => void;
     onTagsChange?: () => void;
+    searchQuery?: string;
 }
 
-function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange, onTagsChange }: SessionItemProps) {
+function highlightMatch(text: string, query: string): React.ReactNode {
+    if (!query) return text;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    return (
+        <>
+            {text.slice(0, idx)}
+            <mark className="bg-[var(--accent)]/30 text-[var(--text-primary)] rounded-sm not-italic">
+                {text.slice(idx, idx + query.length)}
+            </mark>
+            {text.slice(idx + query.length)}
+        </>
+    );
+}
+
+function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange, onTagsChange, searchQuery }: SessionItemProps) {
     const [renaming, setRenaming] = useState(false);
     const [nameInput, setNameInput] = useState('');
     const [pinned, setPinned] = useState(() => isSessionPinned(session.sessionId));
@@ -118,7 +134,7 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                                 onDoubleClick={startRename}
                                 title={customName ?? session.sessionId}
                             >
-                                {displayName}
+                                {highlightMatch(displayName, searchQuery ?? '')}
                             </span>
                         </>
                     )}
@@ -219,6 +235,8 @@ export function SessionSidebar({
     const [pins, setPins] = useState<string[]>(() => getPinnedSessions());
     const [allTags, setAllTags] = useState<string[]>(() => getAllTags());
     const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+    const [sessionFilter, setSessionFilter] = useState('');
+    const searchRef = useRef<HTMLInputElement>(null);
 
     const sortedSessions = useMemo(() => {
         const pinSet = new Set(pins);
@@ -235,6 +253,16 @@ export function SessionSidebar({
             getSessionTags(s.sessionId).includes(activeTagFilter)
         );
     }, [sortedSessions, activeTagFilter]);
+
+    const filteredSessions = useMemo(() => {
+        if (!sessionFilter.trim()) return displayedSessions;
+        const q = sessionFilter.toLowerCase();
+        return displayedSessions.filter(s => {
+            const name = getSessionName(s.sessionId) ?? `session ${s.sessionId.slice(0, 8)}`;
+            return name.toLowerCase().includes(q) ||
+                s.sessionId.toLowerCase().startsWith(q);
+        });
+    }, [displayedSessions, sessionFilter]);
 
     const handlePinChange = useCallback(() => {
         setPins(getPinnedSessions());
@@ -283,6 +311,18 @@ export function SessionSidebar({
         fetchSessions();
     }, [fetchSessions]);
 
+    // Cmd+Shift+S to focus sidebar search
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'S') {
+                e.preventDefault();
+                searchRef.current?.focus();
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, []);
+
     const handleDelete = async (id: string) => {
         if (!confirm('Delete this session?')) return;
         try {
@@ -320,6 +360,29 @@ export function SessionSidebar({
                     </button>
                 </div>
 
+                <div className="px-3 py-2">
+                    <div className="relative">
+                        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                        <input
+                            ref={searchRef}
+                            type="text"
+                            value={sessionFilter}
+                            onChange={e => setSessionFilter(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Escape') setSessionFilter(''); }}
+                            placeholder="Filter sessions…"
+                            className="w-full pl-6 pr-2 py-1 text-xs rounded bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                        />
+                        {sessionFilter && (
+                            <button
+                                onClick={() => setSessionFilter('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                            >
+                                <X size={10} />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
                 {allTags.length > 0 && (
                     <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-[var(--border)]">
                         {allTags.map(tag => (
@@ -353,34 +416,42 @@ export function SessionSidebar({
                             No sessions yet
                         </div>
                     ) : (
-                        <ul className="p-2 space-y-1">
-                            {(() => {
-                                const pinSet = new Set(pins);
-                                const pinnedCount = displayedSessions.filter(s => pinSet.has(s.sessionId)).length;
+                        <>
+                            <ul className="p-2 space-y-1">
+                                {(() => {
+                                    const pinSet = new Set(pins);
+                                    const pinnedCount = filteredSessions.filter(s => pinSet.has(s.sessionId)).length;
 
-                                return displayedSessions.map((session, index) => {
-                                    const isPinned = pinSet.has(session.sessionId);
-                                    const showDivider = isPinned && index === pinnedCount - 1 && pinnedCount < displayedSessions.length;
+                                    return filteredSessions.map((session, index) => {
+                                        const isPinned = pinSet.has(session.sessionId);
+                                        const showDivider = isPinned && index === pinnedCount - 1 && pinnedCount < filteredSessions.length;
 
-                                    return (
-                                        <div key={session.sessionId}>
-                                            <SessionItem
-                                                session={session}
-                                                isActive={session.sessionId === activeSessionId}
-                                                isLoading={session.sessionId === loadingSessionId}
-                                                onSelect={onSelectSession}
-                                                onDelete={handleDelete}
-                                                onPinChange={handlePinChange}
-                                                onTagsChange={handleTagsChange}
-                                            />
-                                            {showDivider && (
-                                                <div className="mx-3 my-1 border-t border-[var(--border)]" />
-                                            )}
-                                        </div>
-                                    );
-                                });
-                            })()}
-                        </ul>
+                                        return (
+                                            <div key={session.sessionId}>
+                                                <SessionItem
+                                                    session={session}
+                                                    isActive={session.sessionId === activeSessionId}
+                                                    isLoading={session.sessionId === loadingSessionId}
+                                                    onSelect={onSelectSession}
+                                                    onDelete={handleDelete}
+                                                    onPinChange={handlePinChange}
+                                                    onTagsChange={handleTagsChange}
+                                                    searchQuery={sessionFilter}
+                                                />
+                                                {showDivider && (
+                                                    <div className="mx-3 my-1 border-t border-[var(--border)]" />
+                                                )}
+                                            </div>
+                                        );
+                                    });
+                                })()}
+                            </ul>
+                            {filteredSessions.length === 0 && sessionFilter && (
+                                <div className="px-3 py-4 text-xs text-[var(--text-muted)] text-center">
+                                    No sessions match &#8220;{sessionFilter}&#8221;
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             </aside>
