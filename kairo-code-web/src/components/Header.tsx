@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu, Star } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { StatsPopover } from './StatsPopover';
@@ -29,6 +29,8 @@ interface HeaderProps {
     isMobile?: boolean;
     onMenuClick?: () => void;
     connectionStatus?: ConnectionStatus;
+    bookmarksActive?: boolean;
+    onToggleBookmarks?: () => void;
 }
 
 function getUsageColor(ratio: number): string {
@@ -71,6 +73,8 @@ export const Header = React.memo(function Header({
     isMobile,
     onMenuClick,
     connectionStatus,
+    bookmarksActive,
+    onToggleBookmarks,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -173,6 +177,21 @@ export const Header = React.memo(function Header({
                 >
                     <Search size={16} />
                 </button>
+
+                {onToggleBookmarks && (
+                    <button
+                        onClick={onToggleBookmarks}
+                        className={`p-1.5 rounded transition-colors ${
+                            bookmarksActive
+                                ? 'text-amber-400 bg-amber-400/10'
+                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                        }`}
+                        aria-label="Toggle bookmarks"
+                        title="Bookmarks"
+                    >
+                        <Star size={16} fill={bookmarksActive ? 'currentColor' : 'none'} />
+                    </button>
+                )}
 
                 {sessionStats && <StatsPopover stats={sessionStats} />}
 

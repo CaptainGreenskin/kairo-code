@@ -2,7 +2,7 @@ import { useSyncExternalStore, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus, Brain, ChevronDown } from 'lucide-react';
+import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus, Brain, ChevronDown, Star } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
@@ -27,6 +27,8 @@ interface ChatMessageProps {
     onRetry?: () => void;
     searchHighlight?: boolean;
     isCurrentMatch?: boolean;
+    isBookmarked?: boolean;
+    onToggleBookmark?: (messageId: string) => void;
 }
 
 interface CodeBlockProps {
@@ -173,7 +175,7 @@ function renderWithTables(content: string, mkComponents: React.ComponentProps<ty
     );
 }
 
-export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch, isBookmarked, onToggleBookmark }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
     const [editing, setEditing] = useState(false);
     const [editText, setEditText] = useState(message.content);
@@ -310,6 +312,19 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                 title="Regenerate response"
                             >
                                 <RefreshCw size={14} />
+                            </button>
+                        )}
+                        {onToggleBookmark && (
+                            <button
+                                onClick={() => onToggleBookmark(message.id)}
+                                className={`flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-tertiary)] transition-colors ${
+                                    isBookmarked
+                                        ? 'text-amber-400 hover:text-amber-300'
+                                        : 'text-[var(--text-muted)] hover:text-amber-400'
+                                }`}
+                                title={isBookmarked ? 'Remove bookmark' : 'Bookmark message'}
+                            >
+                                <Star size={14} fill={isBookmarked ? 'currentColor' : 'none'} />
                             </button>
                         )}
                         <button
