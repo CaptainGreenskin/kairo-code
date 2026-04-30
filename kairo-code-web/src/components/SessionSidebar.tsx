@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { MessageSquare, Trash2, Plus, Loader, Pencil } from 'lucide-react';
 import { listSessions, deleteSession as apiDeleteSession } from '@api/config';
 import type { SessionInfo } from '@/types/agent';
@@ -141,6 +141,23 @@ export function SessionSidebar({
             setLoading(false);
         }
     }, []);
+
+    const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const scheduleFetch = useCallback(() => {
+        if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+        fetchTimeoutRef.current = setTimeout(fetchSessions, 300);
+    }, [fetchSessions]);
+
+    useEffect(() => {
+        const handleStorage = (e: StorageEvent) => {
+            if (e.key === 'kairo-session-names') {
+                scheduleFetch();
+            }
+        };
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, [scheduleFetch]);
 
     useEffect(() => {
         fetchSessions();
