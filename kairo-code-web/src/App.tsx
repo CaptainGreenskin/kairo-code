@@ -18,6 +18,7 @@ import { getConfig } from '@api/config';
 import { exportChatAsMarkdown } from '@utils/exportChat';
 import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
+import { setSessionName, getSessionName } from '@utils/sessionNames';
 
 function generateId(): string {
     return crypto.randomUUID();
@@ -322,16 +323,27 @@ function App() {
                 createSession('.', currentModel || 'gpt-4')
                     .then((newId) => {
                         setSessionId(newId);
+                        // Auto-title: set session name from first user message if not yet named
+                        if (!getSessionName(newId)) {
+                            const autoTitle = text.trim().slice(0, 40).replace(/\n/g, ' ');
+                            if (autoTitle.length > 0) setSessionName(newId, autoTitle);
+                        }
                         sendMessage(newId, text);
                     })
                     .catch((err) => {
                         console.error('[App] Failed to create session:', err);
                     });
             } else {
+                // Auto-title: set session name from first user message if not yet named
+                const userMsgCount = messages.filter(m => m.role === 'user').length;
+                if (userMsgCount === 0 && !getSessionName(sessionId)) {
+                    const autoTitle = text.trim().slice(0, 40).replace(/\n/g, ' ');
+                    if (autoTitle.length > 0) setSessionName(sessionId, autoTitle);
+                }
                 sendMessage(sessionId, text);
             }
         },
-        [sessionId, currentModel, addMessage, setSessionId, connect, createSession, sendMessage],
+        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage],
     );
 
     const handleStop = useCallback(() => {
