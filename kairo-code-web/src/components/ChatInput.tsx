@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Square } from 'lucide-react';
 import { FilePicker } from './FilePicker';
-import { loadHistory, pushHistory } from '@utils/inputHistory';
+import { getHistory, pushHistory } from '@utils/inputHistory';
 import { saveDraft, clearDraft } from '@utils/inputDraft';
 
 interface ChatInputProps {
@@ -26,7 +26,6 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
     const [isDragOver, setIsDragOver] = useState(false);
     const [showFilePicker, setShowFilePicker] = useState(false);
     const [atQuery, setAtQuery] = useState('');
-    const historyRef = useRef<string[]>([]);
     const historyIndexRef = useRef<number | null>(null);
     const draftRef = useRef('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -35,13 +34,8 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
         textareaRef.current?.focus();
     }, []);
 
-    // Load history when sessionId changes
+    // Reset history navigation when sessionId changes
     useEffect(() => {
-        if (sessionId) {
-            historyRef.current = loadHistory(sessionId);
-        } else {
-            historyRef.current = [];
-        }
         historyIndexRef.current = null;
         draftRef.current = '';
     }, [sessionId]);
@@ -88,15 +82,12 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
     }, [text]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // History navigation: ArrowUp
-        if (e.key === 'ArrowUp' && !e.shiftKey && historyRef.current.length > 0) {
-            const textarea = e.currentTarget;
-            const firstNewline = textarea.value.indexOf('\n');
-            const atFirstLine = firstNewline === -1 || textarea.selectionStart <= firstNewline;
-            if (!atFirstLine) return;
-
+        // History navigation: Cmd+ArrowUp / Ctrl+ArrowUp
+        if (e.key === 'ArrowUp' && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            const history = historyRef.current;
+            if (!sessionId) return;
+            const history = getHistory(sessionId);
+            if (history.length === 0) return;
             if (historyIndexRef.current === null) {
                 draftRef.current = text;
                 const newIndex = history.length - 1;
@@ -110,10 +101,11 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
             return;
         }
 
-        // History navigation: ArrowDown
-        if (e.key === 'ArrowDown' && historyIndexRef.current !== null && !e.shiftKey) {
+        // History navigation: Cmd+ArrowDown / Ctrl+ArrowDown
+        if (e.key === 'ArrowDown' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            const history = historyRef.current;
+            if (historyIndexRef.current === null || !sessionId) return;
+            const history = getHistory(sessionId);
             if (historyIndexRef.current < history.length - 1) {
                 const newIndex = historyIndexRef.current + 1;
                 historyIndexRef.current = newIndex;
@@ -243,7 +235,7 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
                             value={text}
                             onChange={(e) => setText(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder={historyIndexRef.current !== null ? '↑↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
+                            placeholder={historyIndexRef.current !== null ? 'Cmd+↑/↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
                             disabled={disabled && !isThinking}
                             rows={1}
                             className="w-full resize-none overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] disabled:opacity-50"

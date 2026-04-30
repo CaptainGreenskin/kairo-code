@@ -1,58 +1,52 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { loadHistory, pushHistory, clearHistory } from '../inputHistory';
+import { getHistory, pushHistory, clearHistory } from '../inputHistory';
 
 describe('inputHistory', () => {
     beforeEach(() => localStorage.clear());
 
-    it('returns empty array initially', () => {
-        expect(loadHistory('s1')).toEqual([]);
+    it('returns empty array for new session', () => {
+        expect(getHistory('s1')).toHaveLength(0);
     });
 
-    it('pushes and loads history', () => {
+    it('pushes entry to history', () => {
         pushHistory('s1', 'hello');
-        expect(loadHistory('s1')).toEqual(['hello']);
+        expect(getHistory('s1')).toEqual(['hello']);
     });
 
-    it('prepends (newest first)', () => {
-        pushHistory('s1', 'first');
-        pushHistory('s1', 'second');
-        expect(loadHistory('s1')[0]).toBe('second');
-    });
-
-    it('deduplicates — moves existing entry to front', () => {
-        pushHistory('s1', 'a');
-        pushHistory('s1', 'b');
-        pushHistory('s1', 'a');
-        const h = loadHistory('s1');
-        expect(h[0]).toBe('a');
-        expect(h.filter(x => x === 'a').length).toBe(1);
-    });
-
-    it('ignores empty text', () => {
+    it('does not push empty string', () => {
         pushHistory('s1', '');
-        expect(loadHistory('s1')).toEqual([]);
+        pushHistory('s1', '   ');
+        expect(getHistory('s1')).toHaveLength(0);
     });
 
-    it('ignores whitespace-only text', () => {
-        pushHistory('s1', '  ');
-        expect(loadHistory('s1')).toEqual([]);
+    it('does not duplicate consecutive identical entries', () => {
+        pushHistory('s1', 'hello');
+        pushHistory('s1', 'hello');
+        expect(getHistory('s1')).toHaveLength(1);
     });
 
-    it('trims text before storing', () => {
-        pushHistory('s1', '  hello  ');
-        expect(loadHistory('s1')[0]).toBe('hello');
+    it('allows non-consecutive duplicates', () => {
+        pushHistory('s1', 'hello');
+        pushHistory('s1', 'world');
+        pushHistory('s1', 'hello');
+        expect(getHistory('s1')).toHaveLength(3);
     });
 
-    it('clears history', () => {
-        pushHistory('s1', 'x');
+    it('trims to MAX_HISTORY entries', () => {
+        for (let i = 0; i < 110; i++) {
+            pushHistory('s1', `message ${i}`);
+        }
+        expect(getHistory('s1').length).toBeLessThanOrEqual(100);
+    });
+
+    it('isolates history per session', () => {
+        pushHistory('s1', 'msg');
+        expect(getHistory('s2')).toHaveLength(0);
+    });
+
+    it('clearHistory removes all entries', () => {
+        pushHistory('s1', 'hello');
         clearHistory('s1');
-        expect(loadHistory('s1')).toEqual([]);
-    });
-
-    it('history is isolated per session', () => {
-        pushHistory('s1', 'session-one');
-        pushHistory('s2', 'session-two');
-        expect(loadHistory('s1')).toEqual(['session-one']);
-        expect(loadHistory('s2')).toEqual(['session-two']);
+        expect(getHistory('s1')).toHaveLength(0);
     });
 });
