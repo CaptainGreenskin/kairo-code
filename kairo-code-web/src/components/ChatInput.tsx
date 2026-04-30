@@ -13,28 +13,13 @@ interface ChatInputProps {
 }
 
 const AT_RE = /@([^\s]*)$/;
-const MAX_FILE_SIZE = 100_000;
-
-function inferLanguage(fileName: string): string {
-    const dot = fileName.lastIndexOf('.');
-    if (dot < 0) return '';
-    const ext = fileName.substring(dot + 1).toLowerCase();
-    const map: Record<string, string> = {
-        java: 'java', kt: 'kotlin', kts: 'kotlin', ts: 'typescript', tsx: 'tsx',
-        js: 'javascript', jsx: 'jsx', py: 'python', go: 'go', rs: 'rust',
-        rb: 'ruby', cs: 'csharp', cpp: 'cpp', cc: 'cpp', cxx: 'cpp',
-        c: 'c', h: 'c', scala: 'scala', groovy: 'groovy',
-        yaml: 'yaml', yml: 'yaml', json: 'json', xml: 'xml',
-        html: 'html', htm: 'html', css: 'css', scss: 'scss',
-        sh: 'bash', bash: 'bash', sql: 'sql', md: 'markdown',
-        toml: 'toml', properties: 'properties', gradle: 'groovy',
-    };
-    return map[ext] || '';
-}
+const CHAR_WARN_THRESHOLD = 2000;
+const CHAR_MAX = 4000;
 
 export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sentMessages }: ChatInputProps) {
     const [text, setText] = useState('');
     const [dragging, setDragging] = useState(false);
+    const [isDragOver, setIsDragOver] = useState(false);
     const [showFilePicker, setShowFilePicker] = useState(false);
     const [atQuery, setAtQuery] = useState('');
     const [historyIndex, setHistoryIndex] = useState<number | null>(null);
@@ -44,6 +29,14 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
     useEffect(() => {
         textareaRef.current?.focus();
     }, []);
+
+    // Auto-adjust textarea height
+    useEffect(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    }, [text]);
 
     // Handle external text append (e.g. from file tree panel)
     useEffect(() => {
@@ -136,31 +129,35 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
         setDragging(false);
+        setIsDragOver(false);
         const files = Array.from(e.dataTransfer.files);
-        files.forEach((file) => {
-            if (file.size > MAX_FILE_SIZE) {
-                setText((prev) => prev + `\n\n[File too large: ${file.name} (${(file.size / 1024).toFixed(1)}KB > 100KB)]\n`);
-                return;
-            }
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                const content = ev.target?.result as string;
-                const lang = inferLanguage(file.name);
-                const block = `\n\n\`\`\`${lang}\n// ${file.name}\n${content}\n\`\`\`\n`;
-                setText((prev) => prev + block);
-            };
-            reader.readAsText(file);
+        if (files.length === 0) return;
+        const paths = files.map(f => f.name).join(' ');
+        setText(prev => {
+            const textarea = textareaRef.current;
+            if (!textarea) return prev + ' ' + paths;
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            return prev.slice(0, start) + paths + prev.slice(end);
         });
     };
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
         setDragging(true);
+        setIsDragOver(true);
     };
 
     const handleDragLeave = (e: React.DragEvent) => {
         e.preventDefault();
-        setDragging(false);
+        // Only reset if we actually left the container (not entering a child)
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const x = e.clientX;
+        const y = e.clientY;
+        if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
+            setDragging(false);
+            setIsDragOver(false);
+        }
     };
 
     const handleFilePickerSelect = useCallback((block: string) => {
@@ -199,17 +196,35 @@ export function ChatInput({ onSend, onStop, disabled, isThinking, appendText, on
         >
             <div className="max-w-3xl mx-auto flex items-end gap-2 relative">
                 <div className="flex-1 relative">
-                    <textarea
-                        ref={textareaRef}
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder={historyIndex !== null ? '↑↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
-                        disabled={disabled && !isThinking}
-                        rows={1}
-                        className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] disabled:opacity-50"
-                        style={{ maxHeight: '120px', minHeight: '40px' }}
-                    />
+                    <div
+                        className={`relative transition-colors ${isDragOver ? 'ring-2 ring-[var(--accent)] ring-inset rounded-lg' : ''}`}
+                    >
+                        <textarea
+                            ref={textareaRef}
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder={historyIndex !== null ? '↑↓ browsing history · Esc to cancel' : "Type a message... (Enter to send, Shift+Enter for new line, @ to insert file)"}
+                            disabled={disabled && !isThinking}
+                            rows={1}
+                            className="w-full resize-none overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] disabled:opacity-50"
+                            style={{ maxHeight: '200px', minHeight: '40px' }}
+                        />
+                        {text.length > CHAR_WARN_THRESHOLD && (
+                            <div className={`absolute bottom-2 right-12 text-[10px] font-mono ${
+                                text.length > CHAR_MAX * 0.9
+                                    ? 'text-red-400'
+                                    : 'text-[var(--text-muted)]'
+                            }`}>
+                                {text.length}/{CHAR_MAX}
+                            </div>
+                        )}
+                        {isDragOver && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-[var(--accent)]/10 rounded-lg z-10 pointer-events-none">
+                                <span className="text-sm text-[var(--accent)]">Drop to insert file path</span>
+                            </div>
+                        )}
+                    </div>
                     {showFilePicker && (
                         <FilePicker
                             query={atQuery}
