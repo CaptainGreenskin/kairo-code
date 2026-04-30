@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { fuzzyMatch } from '@utils/fuzzyMatch';
 
 export interface Command {
     id: string;
@@ -15,15 +16,56 @@ interface CommandPaletteProps {
     commands: Command[];
 }
 
+function highlightMatches(text: string, query: string): React.ReactNode {
+    if (!query) return text;
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+
+    // Substring match: highlight the whole match
+    const idx = t.indexOf(q);
+    if (idx >= 0) {
+        return (
+            <>
+                {text.slice(0, idx)}
+                <span className="text-[var(--accent)] font-medium">{text.slice(idx, idx + q.length)}</span>
+                {text.slice(idx + q.length)}
+            </>
+        );
+    }
+
+    // Fuzzy: highlight individual matched chars
+    const chars: React.ReactNode[] = [];
+    let qi = 0;
+    for (let i = 0; i < text.length; i++) {
+        if (qi < q.length && text[i].toLowerCase() === q[qi]) {
+            chars.push(<span key={i} className="text-[var(--accent)] font-medium">{text[i]}</span>);
+            qi++;
+        } else {
+            chars.push(text[i]);
+        }
+    }
+    return <>{chars}</>;
+}
+
 export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProps) {
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    const filtered = commands.filter(cmd =>
-        cmd.label.toLowerCase().includes(query.toLowerCase()) ||
-        (cmd.description?.toLowerCase().includes(query.toLowerCase()) ?? false)
-    );
+    const filtered = useMemo(() => {
+        if (!query) return commands;
+        return commands
+            .map(c => ({
+                cmd: c,
+                score: Math.max(
+                    fuzzyMatch(c.label, query),
+                    c.description ? fuzzyMatch(c.description, query) : -1,
+                ),
+            }))
+            .filter(({ score }) => score >= 0)
+            .sort((a, b) => b.score - a.score)
+            .map(({ cmd }) => cmd);
+    }, [commands, query]);
 
     // Reset state when opened
     useEffect(() => {
@@ -109,7 +151,7 @@ export function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProp
                                 onMouseEnter={() => setSelectedIndex(index)}
                             >
                                 <span className="flex-shrink-0">{cmd.icon}</span>
-                                <span className="flex-1">{cmd.label}</span>
+                                <span className="flex-1">{highlightMatches(cmd.label, query)}</span>
                                 {cmd.shortcut && (
                                     <span className="text-xs text-[var(--text-muted)] font-mono">
                                         {cmd.shortcut}
