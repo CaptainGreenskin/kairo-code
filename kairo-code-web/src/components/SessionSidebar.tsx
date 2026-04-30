@@ -57,7 +57,8 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
     const [renaming, setRenaming] = useState(false);
     const [nameInput, setNameInput] = useState('');
     const [pinned, setPinned] = useState(() => isSessionPinned(session.sessionId));
-    const customName = getSessionName(session.sessionId);
+    const [nameVersion, setNameVersion] = useState(0);
+    const customName = useMemo(() => getSessionName(session.sessionId), [session.sessionId, nameVersion]);
     const tags = getSessionTags(session.sessionId);
     const [addingTag, setAddingTag] = useState(false);
     const [tagInput, setTagInput] = useState('');
@@ -79,7 +80,7 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
     };
 
     const displayName = customName
-        ? (customName.length > 20 ? customName.slice(0, 20) + '…' : customName)
+        ? (customName.length > 40 ? customName.slice(0, 40) + '…' : customName)
         : `Session ${session.sessionId.slice(0, 8)}`;
 
     const startRename = (e: React.MouseEvent) => {
@@ -89,12 +90,8 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
     };
 
     const confirmRename = () => {
-        const trimmed = nameInput.trim();
-        if (trimmed) {
-            setSessionName(session.sessionId, trimmed);
-        } else {
-            removeSessionName(session.sessionId);
-        }
+        setSessionName(session.sessionId, nameInput);
+        setNameVersion(v => v + 1);
         setRenaming(false);
     };
 
@@ -153,7 +150,7 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                                 if (e.key === 'Escape') setRenaming(false);
                             }}
                             onBlur={confirmRename}
-                            maxLength={40}
+                            maxLength={60}
                             onClick={e => e.stopPropagation()}
                         />
                     ) : (

@@ -14,8 +14,14 @@ export function getSessionName(sessionId: string): string | null {
 
 export function setSessionName(sessionId: string, name: string): void {
     const map = load();
-    map[sessionId] = name.trim();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    const trimmed = name.trim();
+    if (trimmed) {
+        map[sessionId] = trimmed;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    } else {
+        delete map[sessionId];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    }
 }
 
 export function removeSessionName(sessionId: string): void {
