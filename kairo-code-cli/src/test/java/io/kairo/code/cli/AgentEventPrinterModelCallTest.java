@@ -10,6 +10,7 @@ import io.kairo.api.model.ModelResponse;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -151,6 +152,9 @@ class AgentEventPrinterModelCallTest {
 
     @Test
     void fillBarColorChangesAtThresholds() {
+        Assumptions.assumeTrue(
+                AgentEventPrinter.supportsColor(),
+                "ANSI RED is disabled when TERM is unset/dumb; bar color escapes are empty.");
         // Low usage: < 70% → no RED
         StringWriter swLow = new StringWriter();
         AgentEventPrinter pLow = new AgentEventPrinter(
