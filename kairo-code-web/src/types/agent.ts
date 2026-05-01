@@ -11,7 +11,8 @@ export type AgentEventType =
     | 'AGENT_THINKING'
     | 'SESSION_RESTORED'
     | 'PLAN_STEPS'
-    | 'PLAN_STEP_DONE';
+    | 'PLAN_STEP_DONE'
+    | 'CONTEXT_COMPACTED';
 
 export interface AgentEvent {
     type: AgentEventType;
@@ -29,7 +30,8 @@ export type AgentEventPayload =
     | AgentThinkingPayload
     | SessionRestoredPayload
     | PlanStepsPayload
-    | PlanStepDonePayload;
+    | PlanStepDonePayload
+    | ContextCompactedPayload;
 
 export interface TextChunkPayload {
     text: string;
@@ -78,6 +80,18 @@ export interface PlanStepsPayload {
 
 export interface PlanStepDonePayload {
     stepIndex: number;
+}
+
+/**
+ * Payload for CONTEXT_COMPACTED event, emitted when the backend ContextCompactionHook
+ * triggers a compaction injection. {@code beforeTokens} is the estimated context size
+ * at trigger time, {@code maxTokens} is the configured context window, and {@code ratio}
+ * is {@code beforeTokens / maxTokens} clamped to [0, 1].
+ */
+export interface ContextCompactedPayload {
+    beforeTokens: number;
+    maxTokens: number;
+    ratio: number;
 }
 
 export interface Message {

@@ -34,6 +34,7 @@ import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent'
 import { getConfig } from '@api/config';
 import { exportAndDownload, copySessionToClipboard } from '@utils/exportSession';
 import { estimateMessagesTokens } from '@utils/tokenCount';
+import { getContextWindow } from '@utils/tokenBudget';
 import { searchMessages } from '@utils/messageSearch';
 import type { MessageSearchResult } from '@utils/messageSearch';
 import { Virtuoso } from 'react-virtuoso';
@@ -90,6 +91,14 @@ function App() {
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const [agentPhase, setAgentPhase] = useState<Phase>('thinking');
     const [currentToolName, setCurrentToolName] = useState<string | undefined>(undefined);
+    // Briefly true after a CONTEXT_COMPACTED event so the Header indicator can flash.
+    const [isCompacting, setIsCompacting] = useState(false);
+    const compactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        return () => {
+            if (compactionTimerRef.current) clearTimeout(compactionTimerRef.current);
+        };
+    }, []);
 
     // Tool execution timing
     const toolStartTimeRef = useRef<number | null>(null);
@@ -374,6 +383,19 @@ function App() {
                 case 'PLAN_STEP_DONE': {
                     const payload = event.payload as { stepIndex: number };
                     markStepDone(payload.stepIndex);
+                    break;
+                }
+
+                case 'CONTEXT_COMPACTED': {
+                    // Pulse the Context Health indicator for 3s. Reset any in-flight timer so a
+                    // burst of compactions still keeps the flash visible for at least 3s after
+                    // the latest event.
+                    setIsCompacting(true);
+                    if (compactionTimerRef.current) clearTimeout(compactionTimerRef.current);
+                    compactionTimerRef.current = setTimeout(() => {
+                        setIsCompacting(false);
+                        compactionTimerRef.current = null;
+                    }, 3000);
                     break;
                 }
             }
@@ -1142,6 +1164,8 @@ function App() {
                 currentModel={currentModel}
                 tokenUsage={tokenUsage}
                 estimatedCost={estimatedCost}
+                contextWindow={getContextWindow(currentModel ?? '')}
+                isCompacting={isCompacting}
                 onToggleTheme={handleToggleTheme}
                 onOpenSettings={handleOpenSettings}
                 onToggleFileTree={handleToggleFileTree}

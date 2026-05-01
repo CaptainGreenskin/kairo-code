@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { StatsPopover } from './StatsPopover';
 import { TokenUsageBar } from './TokenUsageBar';
+import { ContextHealthIndicator } from './ContextHealthIndicator';
 import type { ConnectionStatus } from '@/types/agent';
 
 interface HeaderProps {
@@ -10,6 +11,10 @@ interface HeaderProps {
     tokenUsage: { input: number; output: number };
     estimatedCost: number;
     tokenLimit?: number;
+    /** Context window size for the active model. When omitted/zero the health indicator hides. */
+    contextWindow?: number;
+    /** True briefly after a CONTEXT_COMPACTED event so the indicator can flash. */
+    isCompacting?: boolean;
     onToggleTheme: () => void;
     onOpenSettings: () => void;
     onToggleFileTree: () => void;
@@ -56,6 +61,8 @@ export const Header = React.memo(function Header({
     tokenUsage,
     estimatedCost,
     tokenLimit: _tokenLimit = 128000,
+    contextWindow,
+    isCompacting = false,
     onToggleTheme,
     onOpenSettings,
     onToggleFileTree,
@@ -144,6 +151,12 @@ export const Header = React.memo(function Header({
             </div>
 
             <div className="flex items-center gap-4">
+                <ContextHealthIndicator
+                    tokenUsage={tokenUsage.input + tokenUsage.output}
+                    maxTokens={contextWindow ?? 0}
+                    isCompacting={isCompacting}
+                />
+
                 <TokenUsageBar
                     inputTokens={tokenUsage.input}
                     outputTokens={tokenUsage.output}

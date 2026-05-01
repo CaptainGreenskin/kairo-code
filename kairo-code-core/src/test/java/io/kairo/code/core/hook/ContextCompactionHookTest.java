@@ -25,6 +25,7 @@ import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelConfig;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class ContextCompactionHookTest {
@@ -258,5 +259,79 @@ class ContextCompactionHookTest {
         List<Msg> messages = List.of(msg);
         int estimated = hook.estimateTokens(messages);
         assertThat(estimated).isGreaterThan(0);
+    }
+
+    @Test
+    void compactionListener_firedOnInject() {
+        AtomicInteger lastTokens = new AtomicInteger(-1);
+        AtomicInteger callCount = new AtomicInteger(0);
+        ContextCompactionHook hook = new ContextCompactionHook(
+                MAX_TOKENS, THRESHOLD, false, /* coolingTurns */ 1, tokens -> {
+                    lastTokens.set(tokens);
+                    callCount.incrementAndGet();
+                });
+
+        // Below threshold: listener not fired
+        hook.onPreReasoning(eventWithCharCount(294_000));
+        assertThat(callCount.get()).isZero();
+
+        // Above threshold: listener fired exactly once with the same tokens used for the trigger
+        HookResult<PreReasoningEvent> result = hook.onPreReasoning(eventWithCharCount(297_500));
+        assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
+        assertThat(callCount.get()).isEqualTo(1);
+        // 297500 chars * 2/7 ≈ 85000 tokens
+        assertThat(lastTokens.get()).isBetween(80_000, 90_000);
+    }
+
+    @Test
+    void compactionListener_notFiredDuringCooling() {
+        AtomicInteger callCount = new AtomicInteger(0);
+        ContextCompactionHook hook = new ContextCompactionHook(
+                MAX_TOKENS, THRESHOLD, false, /* coolingTurns */ 5, tokens -> callCount.incrementAndGet());
+
+        PreReasoningEvent event = eventWithCharCount(297_500);
+
+        // First call triggers compaction & fires listener
+        hook.onPreReasoning(event);
+        assertThat(callCount.get()).isEqualTo(1);
+
+        // Subsequent calls during cooling are suppressed: listener not fired again
+        hook.onPreReasoning(event);
+        hook.onPreReasoning(event);
+        assertThat(callCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    void compactionListener_throwingDoesNotBreakInjection() {
+        ContextCompactionHook hook = new ContextCompactionHook(
+                MAX_TOKENS, THRESHOLD, false, /* coolingTurns */ 1, tokens -> {
+                    throw new RuntimeException("listener boom");
+                });
+
+        // Listener throwing must not propagate out of the hook.
+        HookResult<PreReasoningEvent> result = hook.onPreReasoning(eventWithCharCount(297_500));
+        assertThat(result.decision()).isEqualTo(HookResult.Decision.INJECT);
+    }
+
+    @Test
+    void compactionListener_replModeNotFired() {
+        AtomicInteger callCount = new AtomicInteger(0);
+        ContextCompactionHook hook = new ContextCompactionHook(
+                MAX_TOKENS, THRESHOLD, true, /* coolingTurns */ 1, tokens -> callCount.incrementAndGet());
+
+        hook.onPreReasoning(eventWithCharCount(315_000));
+        assertThat(callCount.get()).isZero();
+    }
+
+    @Test
+    void withListener_factoryAttachesListener() {
+        AtomicInteger callCount = new AtomicInteger(0);
+        ContextCompactionHook hook = ContextCompactionHook.withListener(tokens -> callCount.incrementAndGet());
+        assertThat(hook.maxContextTokens()).isPositive();
+
+        // Force a trigger using a synthetic event sized above the env-default threshold.
+        // Default config: 100k * 0.80 = 80k tokens trigger. 280k chars → 80k tokens.
+        hook.onPreReasoning(eventWithCharCount(280_000));
+        assertThat(callCount.get()).isEqualTo(1);
     }
 }
