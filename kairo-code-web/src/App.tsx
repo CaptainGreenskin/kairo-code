@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain, Zap, Wrench, Activity } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain, Zap, Wrench, Activity, Star } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -34,6 +34,8 @@ import { ToolStatsDashboard } from '@components/ToolStatsDashboard';
 import { SessionSearchPanel } from '@components/SessionSearchPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import { ExecutionTimeline } from '@components/ExecutionTimeline';
+import { BookmarkPanel } from '@components/BookmarkPanel';
+import { getBookmarks, toggleBookmark } from '@utils/bookmarkMessages';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
 import { exportAndDownload, copySessionToClipboard } from '@utils/exportSession';
@@ -903,6 +905,21 @@ function App() {
     const [showToolStats, setShowToolStats] = useState(false);
     const handleCloseToolStats = useCallback(() => setShowToolStats(false), []);
     const [showTimeline, setShowTimeline] = useState(false);
+    const [showBookmarks, setShowBookmarks] = useState(false);
+    const [bookmarks, setBookmarks] = useState<Set<string>>(() =>
+        sessionId ? new Set(getBookmarks(sessionId)) : new Set()
+    );
+
+    // Reset bookmarks when sessionId changes
+    useEffect(() => {
+        setBookmarks(sessionId ? new Set(getBookmarks(sessionId)) : new Set());
+    }, [sessionId]);
+
+    const handleToggleBookmark = useCallback((messageId: string) => {
+        if (!sessionId) return;
+        toggleBookmark(sessionId, messageId);
+        setBookmarks(new Set(getBookmarks(sessionId)));
+    }, [sessionId]);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -1163,6 +1180,13 @@ function App() {
             action: () => { setShowTimeline(true); setShowCommandPalette(false); },
         },
         {
+            id: 'bookmarks',
+            label: 'Bookmarks',
+            description: 'View bookmarked messages',
+            icon: <Star size={14} />,
+            action: () => { setShowBookmarks(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -1385,6 +1409,8 @@ function App() {
                                             isCurrentMatch={isCurrentMatch}
                                             isCollapsed={shouldCollapse && !isExpanded}
                                             onToggleCollapse={shouldCollapse && !isStreaming ? () => handleToggleMessageExpand(msgObj.id) : undefined}
+                                            isBookmarked={bookmarks.has(msgObj.id)}
+                                            onToggleBookmark={handleToggleBookmark}
                                         />
                                     </div>
                                 );
@@ -1539,6 +1565,21 @@ function App() {
             )}
             {showTimeline && (
                 <ExecutionTimeline sessionId={sessionId} onClose={() => setShowTimeline(false)} />
+            )}
+            {showBookmarks && sessionId && (
+                <BookmarkPanel
+                    sessionId={sessionId}
+                    messages={messages}
+                    isOpen={showBookmarks}
+                    onClose={() => setShowBookmarks(false)}
+                    onScrollToMessage={(messageId) => {
+                        const idx = messages.findIndex(m => m.id === messageId);
+                        if (idx >= 0) {
+                            virtuosoRef.current?.scrollToIndex({ index: idx, behavior: 'smooth' });
+                            setShowBookmarks(false);
+                        }
+                    }}
+                />
             )}
         </div>
     );
