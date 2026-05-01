@@ -1,7 +1,7 @@
 import { useSyncExternalStore, useState } from 'react';
 import { LazyMarkdown } from './LazyMarkdown';
-import { LazySyntaxHighlighter } from './LazySyntaxHighlighter';
-import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus, Brain, ChevronDown, ChevronUp, Star } from 'lucide-react';
+import { CodeBlock } from './CodeBlock';
+import { Copy, Check, RefreshCw, Pencil, Brain, ChevronDown, ChevronUp, Star } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
@@ -31,106 +31,6 @@ interface ChatMessageProps {
     onToggleBookmark?: (messageId: string) => void;
     isCollapsed?: boolean;
     onToggleCollapse?: () => void;
-}
-
-interface CodeBlockProps {
-    language: string;
-    content: string;
-    meta?: string;
-    onInsertToChat?: (text: string) => void;
-    onApplyToFile?: (filename: string, content: string) => void;
-    onRetry?: () => void;
-}
-
-function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFile }: CodeBlockProps) {
-    const [copied, setCopied] = useState(false);
-
-    const handleCopy = () => {
-        navigator.clipboard.writeText(content).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        });
-    };
-
-    // Parse title from meta string (e.g., title="main.py")
-    const titleMatch = meta?.match(/title="([^"]+)"/);
-    const title = titleMatch?.[1];
-
-    const lines = content.split('\n');
-    // Remove trailing empty line if content ends with newline
-    const displayLines = lines.length > 1 && lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
-
-    return (
-        <div className="relative group rounded-lg overflow-hidden border border-[var(--border)] my-3">
-            {/* Header bar: language tag + title + copy button */}
-            <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)]">
-                <div className="flex items-center gap-2">
-                    {language && (
-                        <span className="text-xs text-[var(--text-muted)] font-mono">{language}</span>
-                    )}
-                    {title && (
-                        <span className="text-xs text-[var(--text-secondary)]">{title}</span>
-                    )}
-                </div>
-                <div className="flex items-center gap-3">
-                    {onInsertToChat && (
-                        <button
-                            onClick={() => onInsertToChat('```' + (language || '') + '\n' + content + '\n```')}
-                            className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                            title="Insert to chat"
-                        >
-                            <MessageSquarePlus size={12} />
-                        </button>
-                    )}
-                    {onApplyToFile && title && (
-                        <button
-                            onClick={() => onApplyToFile(title, content)}
-                            className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-                            title={`Apply to ${title}`}
-                        >
-                            <ArrowDownToLine size={12} />
-                            <span>Apply</span>
-                        </button>
-                    )}
-                    <button
-                        onClick={handleCopy}
-                        className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                    >
-                        {copied ? <Check size={12} /> : <Copy size={12} />}
-                        <span>{copied ? 'Copied' : 'Copy'}</span>
-                    </button>
-                </div>
-            </div>
-            {/* Code with line numbers */}
-            <div className="flex overflow-x-auto bg-[var(--color-code-bg)]">
-                {/* Line numbers column */}
-                <pre className="flex-shrink-0 m-0 py-4 pl-4 pr-4 text-right text-xs text-[var(--text-muted)] select-none font-mono leading-[1.5]">
-                    {displayLines.map((_, i) => (
-                        <span key={i} className="block">{i + 1}</span>
-                    ))}
-                </pre>
-                {/* Syntax highlighted code */}
-                <div className="flex-1 min-w-0">
-                    <LazySyntaxHighlighter
-                        language={language}
-                        PreTag="div"
-                        customStyle={{
-                            margin: 0,
-                            borderRadius: 0,
-                            borderTop: 'none',
-                            borderBottom: 'none',
-                            background: 'transparent',
-                            padding: '1rem 1rem 1rem 0',
-                        }}
-                        showLineNumbers={false}
-                        wrapLines={false}
-                    >
-                        {content}
-                    </LazySyntaxHighlighter>
-                </div>
-            </div>
-        </div>
-    );
 }
 
 function extractThinkBlocks(content: string): { think: string[]; rest: string } {
