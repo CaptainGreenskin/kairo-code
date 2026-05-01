@@ -76,6 +76,7 @@ import io.kairo.tools.info.WebSearchTool;
 import io.kairo.tools.vcs.GithubTool;
 import io.kairo.tools.skill.SkillListTool;
 import io.kairo.tools.skill.SkillLoadTool;
+import io.kairo.tools.skill.SkillManageTool;
 import io.kairo.tools.agent.EnterPlanModeTool;
 import io.kairo.tools.agent.ExitPlanModeTool;
 import io.kairo.tools.agent.ListPlansTool;
@@ -200,7 +201,19 @@ public final class CodeAgentFactory {
             registry.registerInstance("skill_list", new SkillListTool(skillReg));
             registry.registerTool(SkillLoadTool.class);
             registry.registerInstance("skill_load", new SkillLoadTool(skillReg));
-            // SkillManageTool skipped — requires SkillChangeHistory + searchPaths + readonly.
+            // SkillManageTool — skill creation/edit/delete for the agent
+            Path historyPath = Path.of(System.getProperty("user.home"),
+                ".kairo-code", "skill-history.jsonl");
+            io.kairo.skill.SkillChangeHistory changeHistory =
+                new io.kairo.skill.SkillChangeHistory(historyPath);
+            List<String> searchPaths = new java.util.ArrayList<>();
+            if (config.workingDir() != null && !config.workingDir().isBlank()) {
+                searchPaths.add(config.workingDir());
+            }
+            SkillManageTool skillManage =
+                new SkillManageTool(skillReg, changeHistory, searchPaths, false);
+            registry.registerTool(SkillManageTool.class);
+            registry.registerInstance("skill_manage", skillManage);
         }
 
         // Register the task tool only when dependencies are wired AND this is not a child session.

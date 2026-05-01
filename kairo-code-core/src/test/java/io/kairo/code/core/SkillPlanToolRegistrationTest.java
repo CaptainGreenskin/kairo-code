@@ -88,6 +88,7 @@ class SkillPlanToolRegistrationTest {
         assertThatCode(() -> {
             org.assertj.core.api.Assertions.assertThat(toolNames).contains("skill_list");
             org.assertj.core.api.Assertions.assertThat(toolNames).contains("skill_load");
+            org.assertj.core.api.Assertions.assertThat(toolNames).contains("skill_manage");
             org.assertj.core.api.Assertions.assertThat(toolNames).contains("enter_plan_mode");
             org.assertj.core.api.Assertions.assertThat(toolNames).contains("exit_plan_mode");
             org.assertj.core.api.Assertions.assertThat(toolNames).contains("list_plans");
