@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu, Star, FileText, GitBranch } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu, Star, FileText, GitBranch, Terminal } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { StatsPopover } from './StatsPopover';
@@ -34,6 +34,7 @@ interface HeaderProps {
     onToggleBookmarks?: () => void;
     onOpenMemory?: () => void;
     onOpenGitStatus?: () => void;
+    onOpenShell?: () => void;
 }
 
 const statusDotClass: Record<ConnectionStatus, string> = {
@@ -74,6 +75,7 @@ export const Header = React.memo(function Header({
     onToggleBookmarks,
     onOpenMemory,
     onOpenGitStatus,
+    onOpenShell,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -200,6 +202,17 @@ export const Header = React.memo(function Header({
                         title="Git changes"
                     >
                         <GitBranch size={18} />
+                    </button>
+                )}
+
+                {onOpenShell && (
+                    <button
+                        onClick={onOpenShell}
+                        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                        aria-label="Shell terminal"
+                        title="Shell terminal (Ctrl+`)"
+                    >
+                        <Terminal size={18} />
                     </button>
                 )}
 

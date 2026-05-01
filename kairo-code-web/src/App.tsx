@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -26,6 +26,7 @@ import type { Command } from '@components/CommandPalette';
 import { MemoryEditorPanel } from '@components/MemoryEditorPanel';
 import { PromptTemplatesPanel } from '@components/PromptTemplatesPanel';
 import { GitStatusPanel } from '@components/GitStatusPanel';
+import { ShellPanel } from '@components/ShellPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -342,6 +343,7 @@ function App() {
         isConnected,
         isThinking: wsThinking,
         connectionStatus,
+        stompClient,
         connect,
         disconnect,
         sendMessage,
@@ -433,6 +435,11 @@ function App() {
             if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'k') {
                 e.preventDefault();
                 setShowCommandPalette(prev => !prev);
+            }
+            // Cmd+` — toggle shell terminal
+            if ((e.metaKey || e.ctrlKey) && e.key === '`') {
+                e.preventDefault();
+                setShowShell(s => !s);
             }
         };
         window.addEventListener('keydown', handler);
@@ -735,6 +742,7 @@ function App() {
         setChatInputAppend(content);
     }, []);
     const [showGitStatus, setShowGitStatus] = useState(false);
+    const [showShell, setShowShell] = useState(false);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -945,6 +953,13 @@ function App() {
             action: () => { setShowGitStatus(true); setShowCommandPalette(false); },
         },
         {
+            id: 'open-shell',
+            label: 'Shell Terminal',
+            description: 'Open interactive bash terminal',
+            icon: <Terminal size={16} />,
+            action: () => { setShowShell(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -1019,6 +1034,7 @@ function App() {
                 onOpenShortcuts={handleOpenShortcuts}
                 onOpenMemory={handleOpenMemory}
                 onOpenGitStatus={() => setShowGitStatus(true)}
+                onOpenShell={() => setShowShell(true)}
                 exportAction={
                     <ExportMenu
                         onExport={handleExport}
@@ -1271,6 +1287,12 @@ function App() {
             )}
             {showGitStatus && (
                 <GitStatusPanel onClose={() => setShowGitStatus(false)} />
+            )}
+            {showShell && (
+                <ShellPanel
+                    stompClient={stompClient}
+                    onClose={() => setShowShell(false)}
+                />
             )}
         </div>
     );

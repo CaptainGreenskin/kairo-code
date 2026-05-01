@@ -94,6 +94,7 @@ interface UseAgentWebSocketReturn {
     isConnected: boolean;
     isThinking: boolean;
     connectionStatus: ConnectionStatus;
+    stompClient: Client | null;
     connect: () => void;
     disconnect: () => void;
     sendMessage: (sessionId: string, text: string) => void;
@@ -336,6 +337,7 @@ export function useAgentWebSocket(
         isConnected,
         isThinking,
         connectionStatus,
+        stompClient: clientRef.current,
         connect: createConnection,
         disconnect,
         sendMessage,
