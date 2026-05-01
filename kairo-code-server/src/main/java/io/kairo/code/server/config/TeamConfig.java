@@ -15,6 +15,7 @@
  */
 package io.kairo.code.server.config;
 
+import io.kairo.code.core.team.MessageBus;
 import io.kairo.code.core.team.SwarmCoordinator;
 import io.kairo.code.core.team.TeamManager;
 import org.springframework.context.annotation.Bean;
@@ -29,7 +30,12 @@ public class TeamConfig {
     }
 
     @Bean
-    public SwarmCoordinator swarmCoordinator(TeamManager teamManager) {
-        return new SwarmCoordinator(teamManager);
+    public MessageBus messageBus() {
+        return new MessageBus();
+    }
+
+    @Bean
+    public SwarmCoordinator swarmCoordinator(TeamManager teamManager, MessageBus messageBus) {
+        return new SwarmCoordinator(teamManager, messageBus);
     }
 }
