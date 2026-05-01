@@ -52,7 +52,7 @@ export default defineConfig(({ mode }) => {
                     manualChunks: {
                         'react-vendor': ['react', 'react-dom'],
                         'xterm': ['@xterm/xterm', '@xterm/addon-fit'],
-                        'markdown': ['react-markdown', 'react-syntax-highlighter'],
+                        'markdown': ['react-markdown'],
                         'virtuoso': ['react-virtuoso'],
                         'websocket': ['@stomp/stompjs', 'sockjs-client'],
                     },
