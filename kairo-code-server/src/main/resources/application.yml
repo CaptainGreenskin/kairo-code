@@ -8,3 +8,12 @@ kairo:
     model: ${KAIRO_MODEL:gpt-4o}
     provider: ${KAIRO_PROVIDER:openai}
     base-url: ${KAIRO_BASE_URL:https://api.openai.com}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
