@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -21,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -178,5 +180,82 @@ public class SessionSnapshotController {
         } catch (IOException e) {
             return 0L;
         }
+    }
+
+    public record SearchHit(
+            String sessionId,
+            String sessionName,
+            long savedAt,
+            String messageId,
+            String role,
+            String snippet,
+            int matchIndex
+    ) {}
+
+    /**
+     * Search across all session snapshots for messages containing {@code q}.
+     * Returns up to {@code limit} hits, newest sessions first.
+     */
+    @GetMapping("/search")
+    public List<SearchHit> searchMessages(
+            @RequestParam("q") String q,
+            @RequestParam(value = "limit", defaultValue = "30") int limit) throws IOException {
+
+        if (q == null || q.trim().length() < 2) return List.of();
+        String query = q.trim().toLowerCase();
+
+        if (!Files.exists(sessionsDir)) return List.of();
+
+        List<SearchHit> results = new ArrayList<>();
+
+        try (Stream<Path> files = Files.list(sessionsDir)) {
+            files.filter(p -> p.toString().endsWith(".json"))
+                    .sorted(Comparator.comparingLong(p -> {
+                        try { return -Files.getLastModifiedTime(p).toMillis(); }
+                        catch (IOException e) { return 0L; }
+                    }))
+                    .forEach(file -> {
+                        if (results.size() >= limit) return;
+                        try {
+                            JsonNode root = objectMapper.readTree(file.toFile());
+                            String sessionId = root.path("sessionId").asText("");
+                            String sessionName = root.path("name").asText("");
+                            long savedAt = root.path("savedAt").asLong(0);
+                            JsonNode messages = root.path("messages");
+                            if (!messages.isArray()) return;
+
+                            for (int i = 0; i < messages.size() && results.size() < limit; i++) {
+                                JsonNode msg = messages.get(i);
+                                String role = msg.path("role").asText("");
+                                String content = extractText(msg);
+                                if (content.toLowerCase().contains(query)) {
+                                    int idx = content.toLowerCase().indexOf(query);
+                                    int start = Math.max(0, idx - 60);
+                                    int end = Math.min(content.length(), idx + query.length() + 60);
+                                    String snippet = (start > 0 ? "…" : "")
+                                            + content.substring(start, end)
+                                            + (end < content.length() ? "…" : "");
+                                    String messageId = msg.path("id").asText("");
+                                    results.add(new SearchHit(sessionId, sessionName, savedAt, messageId, role, snippet, i));
+                                }
+                            }
+                        } catch (IOException e) { /* skip corrupt file */ }
+                    });
+        }
+        return results;
+    }
+
+    private String extractText(JsonNode msg) {
+        JsonNode content = msg.path("content");
+        if (content.isTextual()) return content.asText();
+        if (content.isArray()) {
+            StringBuilder sb = new StringBuilder();
+            content.forEach(block -> {
+                if ("text".equals(block.path("type").asText()))
+                    sb.append(block.path("text").asText()).append(' ');
+            });
+            return sb.toString();
+        }
+        return "";
     }
 }
