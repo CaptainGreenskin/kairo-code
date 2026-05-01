@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { ChevronDown, FileCode } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { LazySyntaxHighlighter } from './LazySyntaxHighlighter';
 import type { FileWriteInfo } from '@utils/toolPreview';
 
 const MAX_PREVIEW_LINES = 30;
@@ -31,8 +30,7 @@ export function FileContentPreview({ info }: { info: FileWriteInfo }) {
             </button>
             {open && (
                 <div className="max-h-64 overflow-auto bg-[var(--color-code-bg)]">
-                    <SyntaxHighlighter
-                        style={vscDarkPlus as never}
+                    <LazySyntaxHighlighter
                         language={info.language}
                         PreTag="div"
                         customStyle={{
@@ -47,7 +45,7 @@ export function FileContentPreview({ info }: { info: FileWriteInfo }) {
                         wrapLines={false}
                     >
                         {previewContent}
-                    </SyntaxHighlighter>
+                    </LazySyntaxHighlighter>
                 </div>
             )}
         </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Save, Eye, Edit3, FileText, RefreshCw } from 'lucide-react';
-import Markdown from 'react-markdown';
+import { LazyMarkdown } from './LazyMarkdown';
 
 interface MemoryEditorPanelProps {
     workingDir: string;
@@ -213,7 +213,7 @@ export function MemoryEditorPanel({ workingDir: _workingDir, onClose }: MemoryEd
                             text-[var(--text-primary)] [&_h1]:text-[var(--text-primary)] [&_h2]:text-[var(--text-primary)]
                             [&_h3]:text-[var(--text-primary)] [&_code]:text-[var(--accent)] [&_a]:text-[var(--accent)]">
                             {content
-                                ? <Markdown>{content}</Markdown>
+                                ? <LazyMarkdown>{content}</LazyMarkdown>
                                 : <p className="text-[var(--text-muted)] italic">Empty file. Switch to editor to add content.</p>
                             }
                         </div>

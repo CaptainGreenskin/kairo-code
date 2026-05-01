@@ -1,7 +1,6 @@
 import { useSyncExternalStore, useState } from 'react';
-import Markdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { LazyMarkdown } from './LazyMarkdown';
+import { LazySyntaxHighlighter } from './LazySyntaxHighlighter';
 import { Copy, Check, RefreshCw, Pencil, ArrowDownToLine, MessageSquarePlus, Brain, ChevronDown, ChevronUp, Star } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
@@ -112,8 +111,7 @@ function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFile }: C
                 </pre>
                 {/* Syntax highlighted code */}
                 <div className="flex-1 min-w-0">
-                    <SyntaxHighlighter
-                        style={vscDarkPlus as never}
+                    <LazySyntaxHighlighter
                         language={language}
                         PreTag="div"
                         customStyle={{
@@ -128,7 +126,7 @@ function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFile }: C
                         wrapLines={false}
                     >
                         {content}
-                    </SyntaxHighlighter>
+                    </LazySyntaxHighlighter>
                 </div>
             </div>
         </div>
@@ -169,12 +167,12 @@ function ThinkBlock({ content }: { content: string }) {
     );
 }
 
-function renderWithTables(content: string, mkComponents: React.ComponentProps<typeof Markdown>['components']) {
+function renderWithTables(content: string, mkComponents: React.ComponentProps<typeof LazyMarkdown>['components']) {
     const segs = parseMarkdownContent(content);
     return segs.map((seg, i) =>
         seg.type === 'table'
             ? <MarkdownTableView key={i} table={seg.table} />
-            : <Markdown key={i} components={mkComponents}>{seg.content}</Markdown>
+            : <LazyMarkdown key={i} components={mkComponents}>{seg.content}</LazyMarkdown>
     );
 }
 
