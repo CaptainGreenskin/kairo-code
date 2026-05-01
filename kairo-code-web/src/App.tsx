@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain, Zap, Wrench, Activity, Star } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain, Zap, Wrench, Activity, Star, Users } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -32,6 +32,7 @@ import { EvolutionPanel } from '@components/EvolutionPanel';
 import { HookConfigPanel } from '@components/HookConfigPanel';
 import { ToolStatsDashboard } from '@components/ToolStatsDashboard';
 import { SessionSearchPanel } from '@components/SessionSearchPanel';
+import { TeamPanel } from '@components/TeamPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import { ExecutionTimeline } from '@components/ExecutionTimeline';
 import { BookmarkPanel } from '@components/BookmarkPanel';
@@ -906,6 +907,7 @@ function App() {
     const handleCloseToolStats = useCallback(() => setShowToolStats(false), []);
     const [showTimeline, setShowTimeline] = useState(false);
     const [showBookmarks, setShowBookmarks] = useState(false);
+    const [showTeamPanel, setShowTeamPanel] = useState(false);
     const [bookmarks, setBookmarks] = useState<Set<string>>(() =>
         sessionId ? new Set(getBookmarks(sessionId)) : new Set()
     );
@@ -1187,6 +1189,13 @@ function App() {
             action: () => { setShowBookmarks(true); setShowCommandPalette(false); },
         },
         {
+            id: 'teams',
+            label: 'Teams',
+            description: 'View active teams and tasks',
+            icon: <Users size={14} />,
+            action: () => { setShowTeamPanel(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -1244,7 +1253,7 @@ function App() {
             shortcut: '⌘⇧C',
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showSessionSearch, showEvolution, showHookConfig, setShowToolStats]);
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showSessionSearch, showEvolution, showHookConfig, setShowToolStats, showBookmarks, showTeamPanel]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -1580,6 +1589,9 @@ function App() {
                         }
                     }}
                 />
+            )}
+            {showTeamPanel && (
+                <TeamPanel isOpen={showTeamPanel} onClose={() => setShowTeamPanel(false)} />
             )}
         </div>
     );
