@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2 } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Wrench } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -29,6 +29,7 @@ import { GitStatusPanel } from '@components/GitStatusPanel';
 import { ShellPanel } from '@components/ShellPanel';
 import { McpServersPanel } from '@components/McpServersPanel';
 import { PlanPanel } from '@components/PlanPanel';
+import { ToolStatsDashboard } from '@components/ToolStatsDashboard';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -853,6 +854,8 @@ function App() {
     const [showMcpServers, setShowMcpServers] = useState(false);
     const handleOpenMcpServers = useCallback(() => setShowMcpServers(true), []);
     const handleCloseMcpServers = useCallback(() => setShowMcpServers(false), []);
+    const [showToolStats, setShowToolStats] = useState(false);
+    const handleCloseToolStats = useCallback(() => setShowToolStats(false), []);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -1077,6 +1080,13 @@ function App() {
             action: () => { handleOpenMcpServers(); setShowCommandPalette(false); },
         },
         {
+            id: 'open-tool-stats',
+            label: 'Tool Usage Stats',
+            description: 'View per-tool usage statistics',
+            icon: <Wrench size={16} />,
+            action: () => { setShowToolStats(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -1134,7 +1144,7 @@ function App() {
             shortcut: '⌘⇧C',
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch]);
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, setShowToolStats]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -1418,6 +1428,12 @@ function App() {
             )}
             {showMcpServers && (
                 <McpServersPanel onClose={handleCloseMcpServers} />
+            )}
+            {showToolStats && (
+                <ToolStatsDashboard
+                    sessionId={sessionId}
+                    onClose={handleCloseToolStats}
+                />
             )}
             {showPlanPanel && planSteps.length > 0 && (
                 <PlanPanel
