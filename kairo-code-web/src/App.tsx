@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain, Zap, Wrench } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain, Zap, Wrench, Activity } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -33,6 +33,7 @@ import { HookConfigPanel } from '@components/HookConfigPanel';
 import { ToolStatsDashboard } from '@components/ToolStatsDashboard';
 import { SessionSearchPanel } from '@components/SessionSearchPanel';
 import { ExportMenu } from '@components/ExportMenu';
+import { ExecutionTimeline } from '@components/ExecutionTimeline';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
 import { exportAndDownload, copySessionToClipboard } from '@utils/exportSession';
@@ -894,6 +895,7 @@ function App() {
     const [showHookConfig, setShowHookConfig] = useState(false);
     const [showToolStats, setShowToolStats] = useState(false);
     const handleCloseToolStats = useCallback(() => setShowToolStats(false), []);
+    const [showTimeline, setShowTimeline] = useState(false);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -1145,6 +1147,13 @@ function App() {
             description: 'View per-tool usage statistics',
             icon: <Wrench size={16} />,
             action: () => { setShowToolStats(true); setShowCommandPalette(false); },
+        },
+        {
+            id: 'open-timeline',
+            label: 'Execution Timeline',
+            description: 'View tool call timeline',
+            icon: <Activity size={14} />,
+            action: () => { setShowTimeline(true); setShowCommandPalette(false); },
         },
         {
             id: 'toggle-theme',
@@ -1520,6 +1529,9 @@ function App() {
                     onClose={() => setShowSessionSearch(false)}
                     onSelectSession={handleSelectSession}
                 />
+            )}
+            {showTimeline && (
+                <ExecutionTimeline sessionId={sessionId} onClose={() => setShowTimeline(false)} />
             )}
         </div>
     );
