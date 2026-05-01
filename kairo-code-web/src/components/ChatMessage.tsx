@@ -14,6 +14,7 @@ import { streamingStore } from '@store/streamingStore';
 import { formatRelativeTime, formatAbsoluteTime } from '@utils/formatTime';
 import { useDebounce } from '@hooks/useDebounce';
 import { getPreviewContent, countLines, COLLAPSE_PREVIEW_LINES } from '@utils/messageCollapse';
+import { MessageReaction } from './MessageReaction';
 
 interface ChatMessageProps {
     message: Message;
@@ -199,9 +200,9 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
     };
 
     return (
-        <div className="flex justify-start mb-4 animate-slide-up">
+        <div className="flex justify-start mb-4 animate-slide-up group">
             <div className="max-w-[85%]">
-                <div className={`relative group px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)] ${searchHighlight ? 'ring-1 ring-[var(--accent)]/40' : ''} ${isCurrentMatch ? 'ring-2 ring-[var(--accent)]' : ''}`}>
+                <div className={`relative px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)] ${searchHighlight ? 'ring-1 ring-[var(--accent)]/40' : ''} ${isCurrentMatch ? 'ring-2 ring-[var(--accent)]' : ''}`}>
                     {/* Right-side overlay: timestamp + action buttons */}
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-end gap-1">
                         {/* Timestamp tooltip */}
@@ -242,6 +243,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                             {copiedMsg ? <Check size={14} /> : <Copy size={14} />}
                         </button>
                         </div>
+                        {message.id && <MessageReaction messageId={message.id} />}
                     </div>
 
                     {thinkBlocks.map((t, i) => <ThinkBlock key={i} content={t} />)}
