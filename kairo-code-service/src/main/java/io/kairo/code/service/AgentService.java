@@ -9,6 +9,7 @@ import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
+import io.kairo.code.core.stats.ToolUsageTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -354,6 +355,35 @@ public class AgentService {
             log.warn("Failed to read checkpoint for session {}: {}", entry.sessionId(), e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * Return tool-usage stats for a session, or null if not found.
+     * Each entry maps tool name to a map of {calls, successes, totalMillis, successRate, avgMillis}.
+     */
+    public Map<String, Map<String, Object>> getSessionToolStats(String sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) {
+            return null;
+        }
+        ToolUsageTracker tracker = entry.session().toolUsageTracker();
+        if (tracker == null) {
+            return Map.of();
+        }
+        return tracker.snapshot().entrySet().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        Map.Entry::getKey,
+                        e -> {
+                            ToolUsageTracker.ToolStat s = e.getValue();
+                            return Map.<String, Object>of(
+                                    "calls", s.calls(),
+                                    "successes", s.successes(),
+                                    "totalMillis", s.totalMillis(),
+                                    "successRate", s.successRate(),
+                                    "avgMillis", s.avgMillis()
+                            );
+                        }
+                ));
     }
 
     /**
