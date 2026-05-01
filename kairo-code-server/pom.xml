@@ -62,6 +62,12 @@
             <artifactId>kairo-observability</artifactId>
         </dependency>
 
+        <!-- OTel SDK autoconfigure (no exporter — NOOP by default, exporters added via env) -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-extension-autoconfigure</artifactId>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

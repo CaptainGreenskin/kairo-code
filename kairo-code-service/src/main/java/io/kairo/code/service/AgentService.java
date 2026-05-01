@@ -5,6 +5,7 @@ import io.kairo.api.exception.AgentInterruptedException;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.tool.ApprovalResult;
+import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentFactory.SessionOptions;
@@ -50,6 +51,9 @@ public class AgentService {
 
     @Autowired
     private AgentConcurrencyController concurrencyController;
+
+    @Autowired(required = false)
+    private Tracer tracer;
 
     private volatile CodeAgentConfig defaultConfig;
 
@@ -99,11 +103,13 @@ public class AgentService {
         ContextCompactionHook compactionHook = buildCompactionHook(sink, sessionId);
 
         try {
-            CodeAgentSession session = CodeAgentFactory.createSession(
-                    config,
-                    SessionOptions.empty()
-                            .withApprovalHandler(approvalHandler)
-                            .withHooks(List.of(bridgeHook, compactionHook)));
+            SessionOptions opts = SessionOptions.empty()
+                    .withApprovalHandler(approvalHandler)
+                    .withHooks(List.of(bridgeHook, compactionHook));
+            if (tracer != null) {
+                opts = opts.withTracer(tracer);
+            }
+            CodeAgentSession session = CodeAgentFactory.createSession(config, opts);
 
             SessionEntry entry = new SessionEntry(sessionId, config, session, approvalHandler);
             sessions.put(sessionId, entry);

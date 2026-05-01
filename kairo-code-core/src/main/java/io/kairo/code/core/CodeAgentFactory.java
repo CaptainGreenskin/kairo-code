@@ -10,6 +10,7 @@ import io.kairo.api.tool.PermissionGuard;
 import io.kairo.api.tool.ToolDefinition;
 import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.api.memory.MemoryStore;
+import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.mcp.McpConfig;
 import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.memory.KairoMdLoader;
@@ -265,6 +266,10 @@ public final class CodeAgentFactory {
 
         if (options.approvalHandler() != null) {
             builder.approvalHandler(options.approvalHandler());
+        }
+
+        if (options.tracer() != null) {
+            builder.tracer(options.tracer());
         }
 
         // Always enable streaming so per-token output works even without hooks.
@@ -632,7 +637,8 @@ public final class CodeAgentFactory {
             TurnMetricsCollector turnMetricsCollector,
             boolean isRepl,
             Msg checkpointInitialMessage,
-            MemoryStore memoryStore) {
+            MemoryStore memoryStore,
+            Tracer tracer) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -641,7 +647,7 @@ public final class CodeAgentFactory {
 
         public static SessionOptions empty() {
             return new SessionOptions(
-                    null, null, List.of(), null, Set.of(), null, null, false, null, null, null, false, null, null);
+                    null, null, List.of(), null, Set.of(), null, null, false, null, null, null, false, null, null, null);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
@@ -649,7 +655,7 @@ public final class CodeAgentFactory {
                     provider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
@@ -657,7 +663,7 @@ public final class CodeAgentFactory {
                     modelProvider, handler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -666,7 +672,7 @@ public final class CodeAgentFactory {
                     hookList == null ? List.of() : List.copyOf(hookList),
                     skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
                     childSession, textDeltaConsumer, toolUsageTracker, turnMetricsCollector,
-                    isRepl, checkpointInitialMessage, memoryStore);
+                    isRepl, checkpointInitialMessage, memoryStore, tracer);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
@@ -675,7 +681,7 @@ public final class CodeAgentFactory {
                     active == null ? Set.of() : Set.copyOf(active),
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
@@ -683,14 +689,14 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     snapshot, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         public SessionOptions withTaskTool(TaskToolDependencies deps) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker,
-                    turnMetricsCollector, isRepl, checkpointInitialMessage, memoryStore);
+                    turnMetricsCollector, isRepl, checkpointInitialMessage, memoryStore, tracer);
         }
 
         public SessionOptions withTextDeltaConsumer(
@@ -699,7 +705,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, consumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         public SessionOptions asChildSession() {
@@ -707,7 +713,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, true, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         public SessionOptions withToolUsageTracker(ToolUsageTracker tracker) {
@@ -715,7 +721,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     tracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         public SessionOptions withTurnMetricsCollector(TurnMetricsCollector collector) {
@@ -723,7 +729,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, collector, isRepl, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         public SessionOptions asReplSession() {
@@ -731,7 +737,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, true, checkpointInitialMessage,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         /**
@@ -744,7 +750,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, msg,
-                    memoryStore);
+                    memoryStore, tracer);
         }
 
         /**
@@ -757,7 +763,18 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    store);
+                    store, tracer);
+        }
+
+        /**
+         * Set the tracer for observability.
+         */
+        public SessionOptions withTracer(Tracer t) {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
+                    memoryStore, t);
         }
     }
 }
