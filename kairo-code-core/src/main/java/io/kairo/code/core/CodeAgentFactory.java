@@ -63,6 +63,16 @@ import io.kairo.tools.agent.TodoReadTool;
 import io.kairo.tools.agent.TodoWriteTool;
 import io.kairo.tools.info.AskUserTool;
 import io.kairo.tools.info.WebFetchTool;
+import io.kairo.tools.exec.MvnTool;
+import io.kairo.tools.file.BatchReadTool;
+import io.kairo.tools.file.BatchWriteTool;
+import io.kairo.tools.file.DiffTool;
+import io.kairo.tools.file.JsonQueryTool;
+import io.kairo.tools.file.PatchApplyTool;
+import io.kairo.tools.file.SearchReplaceTool;
+import io.kairo.tools.info.HttpTool;
+import io.kairo.tools.info.WebSearchTool;
+import io.kairo.tools.vcs.GithubTool;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -161,6 +171,19 @@ public final class CodeAgentFactory {
         registry.registerTool(TodoReadTool.class);
         registry.registerTool(TodoWriteTool.class);
         registry.registerTool(TreeTool.class);
+        // --- M57: extended tool set ---
+        registry.registerTool(DiffTool.class);
+        registry.registerTool(JsonQueryTool.class);
+        registry.registerTool(HttpTool.class);
+        registry.registerTool(BatchReadTool.class);
+        registry.registerTool(BatchWriteTool.class);
+        registry.registerTool(PatchApplyTool.class);
+        registry.registerTool(SearchReplaceTool.class);
+        registry.registerTool(MvnTool.class);
+        registry.registerTool(GithubTool.class);
+        if (System.getenv("TAVILY_API_KEY") != null && !System.getenv("TAVILY_API_KEY").isBlank()) {
+            registry.registerTool(WebSearchTool.class);
+        }
         // Register the task tool only when dependencies are wired AND this is not a child session.
         // Child sessions never get TaskTool — recursion is out of scope for M3.
         TaskToolDependencies taskDeps = options.taskToolDependencies();
