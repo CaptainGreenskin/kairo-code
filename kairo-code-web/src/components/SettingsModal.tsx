@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Eye, EyeOff, Check } from 'lucide-react';
+import { X, Eye, EyeOff, Check, Settings2, ChevronRight } from 'lucide-react';
 import type { ServerConfig } from '@/types/agent';
 import { updateConfig, getModels } from '@api/config';
 
@@ -8,6 +8,7 @@ interface SettingsModalProps {
     onClose: () => void;
     config: ServerConfig;
     onSaved: (newConfig: ServerConfig) => void;
+    onOpenMcpServers?: () => void;
 }
 
 const PROVIDERS = [
@@ -17,7 +18,7 @@ const PROVIDERS = [
     { value: 'custom', label: 'Custom' },
 ];
 
-export function SettingsModal({ isOpen, onClose, config, onSaved }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServers }: SettingsModalProps) {
     const [provider, setProvider] = useState(config.provider || 'openai');
     const [apiKey, setApiKey] = useState('');
     const [model, setModel] = useState(config.model || '');
@@ -215,6 +216,20 @@ export function SettingsModal({ isOpen, onClose, config, onSaved }: SettingsModa
                             )}
                         </button>
                     </div>
+
+                    {onOpenMcpServers && (
+                        <div className="pt-3 border-t border-[var(--border)]">
+                            <button
+                                onClick={() => { onClose(); onOpenMcpServers(); }}
+                                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm
+                                    text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                            >
+                                <Settings2 size={15} />
+                                MCP Servers
+                                <ChevronRight size={12} className="ml-auto" />
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
