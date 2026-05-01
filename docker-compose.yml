@@ -1,44 +1,47 @@
-# =============================================================================
-# Kairo Code — Docker Compose (Production)
-# =============================================================================
+# Kairo Code — 本地一键部署
 # Usage:
-#   docker compose up -d          # Start in background
-#   docker compose logs -f        # Follow logs
-#   docker compose down           # Stop and remove
-#   docker compose up --build     # Rebuild and start
-# =============================================================================
+#   cp .env.example .env   # 填入 API key
+#   docker compose up -d
 
 services:
   kairo-server:
     build:
-      context: ./kairo-code-server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: kairo-code-server/Dockerfile
     image: kairo-code-server:latest
     container_name: kairo-server
-    environment:
-      - KAIRO_CODE_API_KEY=${KAIRO_CODE_API_KEY}
-      - KAIRO_PROVIDER=${KAIRO_PROVIDER:-openai}
-      - KAIRO_MODEL=${KAIRO_MODEL:-gpt-4o}
-      - KAIRO_BASE_URL=${KAIRO_BASE_URL:-https://api.openai.com}
-      - KAIRO_WORKING_DIR=/workspace
-      - JAVA_OPTS=${JAVA_OPTS:--Xms256m -Xmx1024m}
-    volumes:
-      - ./workspace:/workspace
-      - kairo-memory:/root/.kairo-code/memory
     restart: unless-stopped
+    environment:
+      KAIRO_CODE_API_KEY: ${KAIRO_CODE_API_KEY}
+      KAIRO_MODEL: ${KAIRO_MODEL:-glm-4-flash}
+      KAIRO_PROVIDER: ${KAIRO_PROVIDER:-openai}
+      KAIRO_BASE_URL: ${KAIRO_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      KAIRO_WORKING_DIR: /workspace
+    volumes:
+      - kairo-workspace:/workspace
+      - kairo-sessions:/workspace/.kairo-code/sessions
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/config"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   kairo-web:
     build:
-      context: ./kairo-code-web
+      context: kairo-code-web
       dockerfile: Dockerfile
     image: kairo-code-web:latest
     container_name: kairo-web
-    ports:
-      - "${KAIRO_WEB_PORT:-3000}:80"
-    depends_on:
-      - kairo-server
     restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:80"
+    depends_on:
+      kairo-server:
+        condition: service_healthy
 
 volumes:
-  kairo-memory:
-    driver: local
+  kairo-workspace:
+  kairo-sessions:

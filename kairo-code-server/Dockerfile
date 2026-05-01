@@ -19,14 +19,7 @@ USER kairo
 
 EXPOSE 8080
 
-ENV JAVA_OPTS="-Xms256m -Xmx1024m" \
-    KAIRO_WORKING_DIR="/workspace" \
-    KAIRO_CODE_API_KEY="" \
-    KAIRO_PROVIDER="openai" \
-    KAIRO_MODEL="gpt-4o" \
-    KAIRO_BASE_URL="https://api.openai.com"
-
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD wget --spider -q http://localhost:8080/actuator/health || exit 1
+    CMD wget --spider -q http://localhost:8080/api/config || exit 1
 
-ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS} -Djava.security.egd=file:/dev/./urandom -jar app.jar"]
+ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS:-} -Djava.security.egd=file:/dev/./urandom -jar app.jar"]
