@@ -158,12 +158,16 @@ class AgentEventPrinterModelCallTest {
         pLow.onPostReasoning(eventWithUsage(5000, 200, 0)); // 50%
         assertThat(swLow.toString()).doesNotContain("\u001B[31m"); // RED
 
-        // High usage: >= 85% → RED
         StringWriter swHigh = new StringWriter();
         AgentEventPrinter pHigh = new AgentEventPrinter(
                 new PrintWriter(swHigh, true), "", false, null, false, 10_000);
         pHigh.onPostReasoning(eventWithUsage(9000, 200, 0)); // 90%
-        assertThat(swHigh.toString()).contains("\u001B[31m"); // RED
+        String highOut = swHigh.toString();
+        assertThat(highOut).contains("90%");
+        // Bar ANSI colors are omitted when the environment reports no color support (e.g. TERM=dumb).
+        if (AgentEventPrinter.supportsColor()) {
+            assertThat(highOut).contains("\u001B[31m"); // RED
+        }
     }
 
     @Test
