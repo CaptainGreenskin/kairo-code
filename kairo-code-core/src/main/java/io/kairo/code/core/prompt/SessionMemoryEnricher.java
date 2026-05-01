@@ -3,6 +3,7 @@ package io.kairo.code.core.prompt;
 import io.kairo.api.memory.MemoryEntry;
 import io.kairo.api.memory.MemoryScope;
 import io.kairo.api.memory.MemoryStore;
+import io.kairo.code.core.memory.BM25MemorySearcher;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
@@ -50,25 +51,50 @@ public final class SessionMemoryEnricher {
      * @return the formatted memory section, or empty string if no memories exist
      */
     public static String buildMemorySection(MemoryStore store) {
+        return buildMemorySection(store, null);
+    }
+
+    /**
+     * Query the memory store with an optional user query for BM25-based ranking.
+     *
+     * @param store the memory store to query (nullable — returns empty string if null)
+     * @param userQuery optional user message to use as BM25 search query; if null or blank,
+     *                  falls back to importance+recency ranking
+     * @return the formatted memory section, or empty string if no memories exist
+     */
+    public static String buildMemorySection(MemoryStore store, String userQuery) {
         if (store == null) {
             return "";
         }
         try {
-            // Collect memories from both AGENT and GLOBAL scopes
-            List<MemoryEntry> agentMemories =
-                    store.list(MemoryScope.AGENT).collectList().block(QUERY_TIMEOUT);
-            List<MemoryEntry> globalMemories =
-                    store.list(MemoryScope.GLOBAL).collectList().block(QUERY_TIMEOUT);
+            List<MemoryEntry> relevant;
 
-            List<MemoryEntry> allMemories = new java.util.ArrayList<>();
-            if (agentMemories != null) allMemories.addAll(agentMemories);
-            if (globalMemories != null) allMemories.addAll(globalMemories);
+            // Use BM25 search when a query is provided
+            if (userQuery != null && !userQuery.isBlank()) {
+                BM25MemorySearcher searcher = new BM25MemorySearcher(store);
+                relevant = searcher.search(AGENT_ID, userQuery, MAX_MEMORIES);
+            } else {
+                // Fall back to importance+recency ranking
+                List<MemoryEntry> agentMemories =
+                        store.list(MemoryScope.AGENT).collectList().block(QUERY_TIMEOUT);
+                List<MemoryEntry> globalMemories =
+                        store.list(MemoryScope.GLOBAL).collectList().block(QUERY_TIMEOUT);
 
-            if (allMemories.isEmpty()) {
+                List<MemoryEntry> allMemories = new java.util.ArrayList<>();
+                if (agentMemories != null) allMemories.addAll(agentMemories);
+                if (globalMemories != null) allMemories.addAll(globalMemories);
+
+                if (allMemories.isEmpty()) {
+                    return "";
+                }
+                relevant = rankMemories(allMemories);
+            }
+
+            if (relevant.isEmpty()) {
                 return "";
             }
 
-            return formatMemories(rankMemories(allMemories));
+            return formatMemories(relevant);
         } catch (Exception e) {
             log.warn("Failed to query memory store for session enrichment: {}", e.getMessage());
             return "";
