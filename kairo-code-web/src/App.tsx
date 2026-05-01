@@ -58,6 +58,8 @@ import { isCollapsible } from '@utils/messageCollapse';
 import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
 import { useAgentNotification } from '@hooks/useAgentNotification';
 import { usePlanSteps } from '@hooks/usePlanSteps';
+import { useFileTracker } from '@hooks/useFileTracker';
+import { FileTrackerBadge } from '@components/FileTrackerBadge';
 
 declare const __APP_VERSION__: string;
 
@@ -173,6 +175,9 @@ function App() {
     const [showPlanPanel, setShowPlanPanel] = useState(true);
     const [showEvolution, setShowEvolution] = useState(false);
 
+    // File tracker (Read/Write/Edit/Search tool paths during this session)
+    const { files: trackedFiles, trackToolCall, clearFiles } = useFileTracker();
+
     // Responsive layout
     const breakpoint = useBreakpoint();
     const isMobile = breakpoint === 'xs' || breakpoint === 'sm';
@@ -246,6 +251,7 @@ function App() {
                         requiresApproval: payload.requiresApproval,
                     };
                     addToolCall(assistantMsgRef.current, toolCall);
+                    trackToolCall(toolCall);
                     break;
                 }
 
@@ -396,6 +402,7 @@ function App() {
             setPlanSteps,
             markStepDone,
             refreshPersistedSessions,
+            trackToolCall,
         ],
     );
 
@@ -671,9 +678,10 @@ function App() {
         setTokenUsage({ input: 0, output: 0 });
         setEstimatedCost(0);
         setExpandedMessages(new Set());
+        clearFiles();
         sessionStorage.removeItem('kairo-code-session-id');
         clearLastSessionId();
-    }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost, sessionId]);
+    }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost, sessionId, clearFiles]);
 
     const handleSelectSession = useCallback(
         (id: string) => {
@@ -682,6 +690,7 @@ function App() {
             disconnect();
             setSessionId(id);
             setExpandedMessages(new Set());
+            clearFiles();
             // 立即从缓存恢复
             const cached = loadMessages(id);
             if (cached.length > 0) {
@@ -696,7 +705,7 @@ function App() {
             setLastSessionId(id);
             connect();
         },
-        [sessionId, disconnect, setSessionId, setMessages, clearMessages, connect],
+        [sessionId, disconnect, setSessionId, setMessages, clearMessages, connect, clearFiles],
     );
 
     // Restore a session from the on-disk snapshot (no live WebSocket bind).
@@ -716,13 +725,14 @@ function App() {
             saveMessages(snap.sessionId, snap.messages);
             setLastSessionId(snap.sessionId);
             setExpandedMessages(new Set());
+            clearFiles();
             assistantMsgRef.current = null;
             setStreamingMsgId(null);
             setAgentPhase('thinking');
             setCurrentToolName(undefined);
             setLoadingSessionId(null);
         },
-        [sessionId, disconnect, restoreSession, addToast],
+        [sessionId, disconnect, restoreSession, addToast, clearFiles],
     );
 
     const handleDeleteSession = useCallback(
@@ -1017,9 +1027,10 @@ function App() {
     const handleNewSessionFromSidebar = useCallback(({ sessionId: newId }: { sessionId: string }) => {
         setSessionId(newId);
         clearMessages();
+        clearFiles();
         assistantMsgRef.current = null;
         connect();
-    }, [setSessionId, clearMessages, connect]);
+    }, [setSessionId, clearMessages, connect, clearFiles]);
 
     // Command palette commands
     const commands: Command[] = useMemo(() => [
@@ -1180,6 +1191,9 @@ function App() {
                 onOpenMemory={handleOpenMemory}
                 onOpenGitStatus={() => setShowGitStatus(true)}
                 onOpenShell={() => setShowShell(true)}
+                fileTrackerSlot={
+                    <FileTrackerBadge files={trackedFiles} onClear={clearFiles} />
+                }
                 exportAction={
                     <ExportMenu
                         onExport={handleExport}
