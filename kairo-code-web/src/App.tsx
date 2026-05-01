@@ -31,6 +31,7 @@ import { PlanPanel } from '@components/PlanPanel';
 import { EvolutionPanel } from '@components/EvolutionPanel';
 import { HookConfigPanel } from '@components/HookConfigPanel';
 import { ToolStatsDashboard } from '@components/ToolStatsDashboard';
+import { SessionSearchPanel } from '@components/SessionSearchPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -139,6 +140,7 @@ function App() {
     const [messageSearchQuery, setMessageSearchQuery] = useState('');
     const [messageSearchResults, setMessageSearchResults] = useState<MessageSearchResult[]>([]);
     const [messageSearchMatchIndex, setMessageSearchMatchIndex] = useState(0);
+    const [showSessionSearch, setShowSessionSearch] = useState(false);
     const [chatInputAppend, setChatInputAppend] = useState<string>('');
     const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
 
@@ -532,10 +534,7 @@ function App() {
             }
             if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
                 e.preventDefault();
-                setShowSearch(v => {
-                    if (!v) setSearchQuery('');
-                    return !v;
-                });
+                setShowSessionSearch(true);
             }
         };
         window.addEventListener('keydown', handler);
@@ -1074,6 +1073,13 @@ function App() {
             action: () => { setShowSearch(v => !v); if (!showSearch) setSearchQuery(''); setShowCommandPalette(false); },
         },
         {
+            id: 'session-search',
+            label: 'Search All Sessions',
+            shortcut: '⌘⇧F',
+            icon: <Search size={14} />,
+            action: () => { setShowSessionSearch(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-file-tree',
             label: 'Toggle File Tree',
             icon: <FolderTree size={16} />,
@@ -1198,7 +1204,7 @@ function App() {
             shortcut: '⌘⇧C',
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showEvolution, showHookConfig, setShowToolStats]);
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showSessionSearch, showEvolution, showHookConfig, setShowToolStats]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -1508,6 +1514,13 @@ function App() {
                 />
             )}
             {showEvolution && <EvolutionPanel onClose={() => setShowEvolution(false)} />}
+            {showSessionSearch && (
+                <SessionSearchPanel
+                    isOpen={showSessionSearch}
+                    onClose={() => setShowSessionSearch(false)}
+                    onSelectSession={handleSelectSession}
+                />
+            )}
         </div>
     );
 }
