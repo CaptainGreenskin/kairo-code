@@ -16,6 +16,8 @@
 package io.kairo.code.core.team;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Orchestrates a Swarm run through 4 phases: Research → Synthesis → Implementation → Verification.
@@ -24,9 +26,85 @@ import java.util.List;
 public class SwarmCoordinator {
 
     private final TeamManager teamManager;
+    private final MessageBus messageBus;
+    private final ConcurrentHashMap<String, SwarmExecution> executions = new ConcurrentHashMap<>();
 
     public SwarmCoordinator(TeamManager teamManager) {
+        this(teamManager, new MessageBus());
+    }
+
+    public SwarmCoordinator(TeamManager teamManager, MessageBus messageBus) {
         this.teamManager = teamManager;
+        this.messageBus = messageBus;
+    }
+
+    /**
+     * Start a new Swarm run for a team.
+     */
+    public SwarmExecution startSwarm(String teamId, SwarmConfig config) {
+        SwarmExecution exec = new SwarmExecution(teamId, config);
+        executions.put(teamId, exec);
+        return exec;
+    }
+
+    /**
+     * Report worker completion for current phase.
+     * When all workers complete, automatically advance to next phase.
+     */
+    public synchronized PhaseAdvanceResult reportWorkerDone(String teamId,
+                                                             String workerId,
+                                                             String workerOutput) {
+        SwarmExecution exec = executions.get(teamId);
+        if (exec == null) return PhaseAdvanceResult.NOT_FOUND;
+
+        SharedTaskList taskList = teamManager.getTaskList(teamId).orElse(null);
+        if (taskList == null) return PhaseAdvanceResult.NOT_FOUND;
+
+        // Mark the worker's in-progress task as complete
+        taskList.all().stream()
+            .filter(t -> workerId.equals(t.ownerId())
+                && t.status() == SharedTask.TaskStatus.IN_PROGRESS)
+            .findFirst()
+            .ifPresent(t -> taskList.complete(t.taskId(), workerId));
+
+        // Check if phase is done
+        if (!isPhaseComplete(teamId)) {
+            return PhaseAdvanceResult.PHASE_ONGOING;
+        }
+
+        // Collect all worker outputs for synthesis
+        List<String> outputs = taskList.all().stream()
+            .filter(t -> t.status() == SharedTask.TaskStatus.COMPLETED)
+            .map(SharedTask::description)
+            .collect(java.util.stream.Collectors.toList());
+
+        String summary = String.join("\n---\n", outputs);
+        exec.recordPhase(new SwarmExecution.PhaseResult(
+            exec.currentPhase().getClass().getSimpleName(),
+            outputs, summary, System.currentTimeMillis()));
+
+        // Advance phase
+        SwarmPhase next = advance(teamId, exec.currentPhase(), summary);
+        exec.advanceTo(next);
+
+        // Check if swarm is complete (verification phase already passed)
+        if (next instanceof SwarmPhase.Verification v
+                && v.verificationCriteria().stream().anyMatch(s -> s.startsWith("COMPLETE:"))) {
+            exec.complete();
+            return PhaseAdvanceResult.SWARM_COMPLETE;
+        }
+
+        // Notify team of phase transition
+        messageBus.broadcast(teamId, "coordinator",
+            "Phase complete. Advancing to: " + next.getClass().getSimpleName(), teamManager);
+
+        return PhaseAdvanceResult.PHASE_ADVANCED;
+    }
+
+    public enum PhaseAdvanceResult { PHASE_ONGOING, PHASE_ADVANCED, SWARM_COMPLETE, NOT_FOUND }
+
+    public Optional<SwarmExecution> getExecution(String teamId) {
+        return Optional.ofNullable(executions.get(teamId));
     }
 
     /**
