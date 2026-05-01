@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Settings2 } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -26,6 +26,7 @@ import type { Command } from '@components/CommandPalette';
 import { MemoryEditorPanel } from '@components/MemoryEditorPanel';
 import { PromptTemplatesPanel } from '@components/PromptTemplatesPanel';
 import { GitStatusPanel } from '@components/GitStatusPanel';
+import { McpServersPanel } from '@components/McpServersPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -735,6 +736,9 @@ function App() {
         setChatInputAppend(content);
     }, []);
     const [showGitStatus, setShowGitStatus] = useState(false);
+    const [showMcpServers, setShowMcpServers] = useState(false);
+    const handleOpenMcpServers = useCallback(() => setShowMcpServers(true), []);
+    const handleCloseMcpServers = useCallback(() => setShowMcpServers(false), []);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -945,6 +949,13 @@ function App() {
             action: () => { setShowGitStatus(true); setShowCommandPalette(false); },
         },
         {
+            id: 'open-mcp-servers',
+            label: 'MCP Servers',
+            description: 'Manage MCP server configuration',
+            icon: <Settings2 size={16} />,
+            action: () => { handleOpenMcpServers(); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -1002,7 +1013,7 @@ function App() {
             shortcut: '⌘⇧C',
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch]);
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -1237,6 +1248,7 @@ function App() {
                     onClose={handleCloseSettings}
                     config={serverConfig}
                     onSaved={handleSettingsSaved}
+                    onOpenMcpServers={handleOpenMcpServers}
                 />
             )}
 
@@ -1271,6 +1283,9 @@ function App() {
             )}
             {showGitStatus && (
                 <GitStatusPanel onClose={() => setShowGitStatus(false)} />
+            )}
+            {showMcpServers && (
+                <McpServersPanel onClose={handleCloseMcpServers} />
             )}
         </div>
     );
