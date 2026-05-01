@@ -1,4 +1,4 @@
-import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu, Star, FileText } from 'lucide-react';
+import { Moon, Sun, Github, Settings, FolderTree, Search, HelpCircle, Menu, Star, FileText, GitBranch } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { StatsPopover } from './StatsPopover';
@@ -33,6 +33,7 @@ interface HeaderProps {
     bookmarksActive?: boolean;
     onToggleBookmarks?: () => void;
     onOpenMemory?: () => void;
+    onOpenGitStatus?: () => void;
 }
 
 const statusDotClass: Record<ConnectionStatus, string> = {
@@ -72,6 +73,7 @@ export const Header = React.memo(function Header({
     bookmarksActive,
     onToggleBookmarks,
     onOpenMemory,
+    onOpenGitStatus,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -187,6 +189,17 @@ export const Header = React.memo(function Header({
                         title="Edit memory files (CLAUDE.md)"
                     >
                         <FileText size={18} />
+                    </button>
+                )}
+
+                {onOpenGitStatus && (
+                    <button
+                        onClick={onOpenGitStatus}
+                        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                        aria-label="Git changes"
+                        title="Git changes"
+                    >
+                        <GitBranch size={18} />
                     </button>
                 )}
 

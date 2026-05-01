@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -25,6 +25,7 @@ import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
 import { MemoryEditorPanel } from '@components/MemoryEditorPanel';
 import { PromptTemplatesPanel } from '@components/PromptTemplatesPanel';
+import { GitStatusPanel } from '@components/GitStatusPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -728,6 +729,7 @@ function App() {
     const handleInsertTemplate = useCallback((content: string) => {
         setChatInputAppend(content);
     }, []);
+    const [showGitStatus, setShowGitStatus] = useState(false);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -920,6 +922,13 @@ function App() {
             action: () => { setShowPromptTemplates(true); setShowCommandPalette(false); },
         },
         {
+            id: 'open-git-status',
+            label: 'Git Changes',
+            description: 'View modified files and diff',
+            icon: <GitBranch size={16} />,
+            action: () => { setShowGitStatus(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -993,6 +1002,7 @@ function App() {
                 onOpenSearch={handleOpenSearch}
                 onOpenShortcuts={handleOpenShortcuts}
                 onOpenMemory={handleOpenMemory}
+                onOpenGitStatus={() => setShowGitStatus(true)}
                 exportAction={
                     <ExportMenu
                         onExport={handleExport}
@@ -1242,6 +1252,9 @@ function App() {
                     onClose={() => setShowPromptTemplates(false)}
                     onInsert={handleInsertTemplate}
                 />
+            )}
+            {showGitStatus && (
+                <GitStatusPanel onClose={() => setShowGitStatus(false)} />
             )}
         </div>
     );
