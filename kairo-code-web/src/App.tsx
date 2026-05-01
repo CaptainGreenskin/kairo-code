@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain } from 'lucide-react';
+import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain, Zap } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
@@ -30,6 +30,7 @@ import { ShellPanel } from '@components/ShellPanel';
 import { McpServersPanel } from '@components/McpServersPanel';
 import { PlanPanel } from '@components/PlanPanel';
 import { EvolutionPanel } from '@components/EvolutionPanel';
+import { HookConfigPanel } from '@components/HookConfigPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -855,6 +856,7 @@ function App() {
     const [showMcpServers, setShowMcpServers] = useState(false);
     const handleOpenMcpServers = useCallback(() => setShowMcpServers(true), []);
     const handleCloseMcpServers = useCallback(() => setShowMcpServers(false), []);
+    const [showHookConfig, setShowHookConfig] = useState(false);
     const handleSettingsSaved = useCallback((cfg: ServerConfig) => {
         setServerConfig(cfg);
         setCurrentModel(cfg.defaultModel);
@@ -1086,6 +1088,13 @@ function App() {
             action: () => { setShowEvolution(true); setShowCommandPalette(false); },
         },
         {
+            id: 'open-hooks',
+            label: 'Configure Hooks',
+            description: 'Enable/disable agent hooks',
+            icon: <Zap size={14} />,
+            action: () => { setShowHookConfig(true); setShowCommandPalette(false); },
+        },
+        {
             id: 'toggle-theme',
             label: 'Toggle Theme',
             icon: <Moon size={16} />,
@@ -1143,7 +1152,7 @@ function App() {
             shortcut: '⌘⇧C',
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showEvolution]);
+    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showEvolution, showHookConfig]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -1427,6 +1436,9 @@ function App() {
             )}
             {showMcpServers && (
                 <McpServersPanel onClose={handleCloseMcpServers} />
+            )}
+            {showHookConfig && (
+                <HookConfigPanel onClose={() => setShowHookConfig(false)} />
             )}
             {showPlanPanel && planSteps.length > 0 && (
                 <PlanPanel
