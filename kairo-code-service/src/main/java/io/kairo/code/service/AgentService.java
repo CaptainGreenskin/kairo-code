@@ -11,8 +11,12 @@ import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.hook.ContextCompactionHook;
+import io.kairo.code.service.concurrency.AgentConcurrencyController;
+import io.kairo.code.service.concurrency.AgentConcurrencyException;
+import io.kairo.code.service.concurrency.AgentSlot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -43,6 +47,9 @@ public class AgentService {
     private final Map<String, Sinks.Many<AgentEvent>> eventSinks = new ConcurrentHashMap<>();
     private final Map<String, SessionEntry> sessions = new ConcurrentHashMap<>();
     private final Map<String, AtomicBoolean> runningState = new ConcurrentHashMap<>();
+
+    @Autowired
+    private AgentConcurrencyController concurrencyController;
 
     private volatile CodeAgentConfig defaultConfig;
 
@@ -147,9 +154,20 @@ public class AgentService {
 
                     AtomicBoolean completed = new AtomicBoolean(false);
 
+                    AgentSlot slot;
+                    try {
+                        slot = concurrencyController.acquire(sessionId);
+                    } catch (AgentConcurrencyException e) {
+                        completed.set(true);
+                        emitter.next(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
+                        emitter.complete();
+                        return;
+                    }
+
                     agent.call(userMsg)
                             .subscribeOn(Schedulers.boundedElastic())
                             .doFinally(signal -> {
+                                slot.close();
                                 runningState.put(sessionId, new AtomicBoolean(false));
                                 if (!completed.get()) {
                                     if (signal != reactor.core.publisher.SignalType.ON_ERROR) {
