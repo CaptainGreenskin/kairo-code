@@ -26,6 +26,7 @@ import io.kairo.code.cli.commands.SnapshotCommand;
 import io.kairo.code.cli.commands.StatsCommand;
 import io.kairo.code.cli.commands.MetricsCommand;
 import io.kairo.code.cli.commands.SessionCommand;
+import io.kairo.code.cli.commands.SwarmCommand;
 import io.kairo.code.cli.commands.UsageCommand;
 import io.kairo.api.memory.MemoryStore;
 import io.kairo.code.core.evolution.FailurePatternTracker;
@@ -497,6 +498,7 @@ public class ReplLoop {
         registry.register(new StatsCommand());
         registry.register(new MetricsCommand());
         registry.register(new SessionCommand());
+        registry.register(new SwarmCommand());
         registry.register(new InitCommand());
         registry.register(new DoctorCommand());
 
