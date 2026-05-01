@@ -182,6 +182,63 @@ public class SessionSnapshotController {
         }
     }
 
+    public record AutoNameRequest(String firstMessage) {}
+    public record AutoNameResponse(String name) {}
+
+    /**
+     * Generate a short heuristic title from the first user message.
+     * Purely rule-based — no LLM call.
+     */
+    @PostMapping("/{id}/auto-name")
+    public ResponseEntity<AutoNameResponse> autoName(
+            @PathVariable String id,
+            @RequestBody AutoNameRequest req) {
+
+        if (req.firstMessage() == null || req.firstMessage().isBlank()) {
+            return ResponseEntity.ok(new AutoNameResponse("New Session"));
+        }
+
+        String name = generateName(req.firstMessage());
+        return ResponseEntity.ok(new AutoNameResponse(name));
+    }
+
+    private String generateName(String message) {
+        String trimmed = message.trim();
+
+        // Remove common prefixes
+        String[] prefixes = {"please ", "can you ", "could you ", "help me ", "i need to ", "how to "};
+        String lower = trimmed.toLowerCase();
+        for (String prefix : prefixes) {
+            if (lower.startsWith(prefix)) {
+                trimmed = trimmed.substring(prefix.length());
+                break;
+            }
+        }
+
+        // Capitalize first letter
+        if (!trimmed.isEmpty()) {
+            trimmed = Character.toUpperCase(trimmed.charAt(0)) + trimmed.substring(1);
+        }
+
+        // Truncate to first sentence or 50 chars
+        int dot = trimmed.indexOf('.');
+        int newline = trimmed.indexOf('\n');
+        int end = trimmed.length();
+        if (dot > 0 && dot < 60) end = dot;
+        if (newline > 0 && newline < end) end = newline;
+        if (end > 50) end = 50;
+
+        String name = trimmed.substring(0, end).trim();
+
+        // If name ends with incomplete word at 50 chars, trim to last space
+        if (end == 50 && name.length() == 50) {
+            int lastSpace = name.lastIndexOf(' ');
+            if (lastSpace > 20) name = name.substring(0, lastSpace) + "\u2026";
+        }
+
+        return name.isEmpty() ? "New Session" : name;
+    }
+
     public record SearchHit(
             String sessionId,
             String sessionName,

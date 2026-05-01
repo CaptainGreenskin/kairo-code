@@ -53,7 +53,8 @@ import {
     clearLastSessionId,
     type SnapshotMeta,
 } from '@utils/sessionSnapshot';
-import { setSessionName, getSessionName } from '@utils/sessionNames';
+import { getSessionName } from '@utils/sessionNames';
+import { autoNameSession } from '@utils/sessionAutoName';
 import { loadPrefs, savePref } from '@utils/userPrefs';
 import { loadDraft } from '@utils/inputDraft';
 import { isCollapsible } from '@utils/messageCollapse';
@@ -594,27 +595,33 @@ function App() {
                 createSession('.', currentModel || 'gpt-4')
                     .then((newId) => {
                         setSessionId(newId);
-                        // Auto-title: set session name from first user message if not yet named
-                        if (!getSessionName(newId)) {
-                            const autoTitle = text.trim().slice(0, 40).replace(/\n/g, ' ');
-                            if (autoTitle.length > 0) setSessionName(newId, autoTitle);
-                        }
+                        // Auto-title from first user message via backend heuristic
+                        autoNameSession(newId, text).then((name) => {
+                            if (name) {
+                                window.dispatchEvent(new Event('storage'));
+                                refreshPersistedSessions();
+                            }
+                        });
                         sendMessage(newId, text);
                     })
                     .catch((err) => {
                         console.error('[App] Failed to create session:', err);
                     });
             } else {
-                // Auto-title: set session name from first user message if not yet named
+                // Auto-title from first user message via backend heuristic
                 const userMsgCount = messages.filter(m => m.role === 'user').length;
-                if (userMsgCount === 0 && !getSessionName(sessionId)) {
-                    const autoTitle = text.trim().slice(0, 40).replace(/\n/g, ' ');
-                    if (autoTitle.length > 0) setSessionName(sessionId, autoTitle);
+                if (userMsgCount === 0) {
+                    autoNameSession(sessionId, text).then((name) => {
+                        if (name) {
+                            window.dispatchEvent(new Event('storage'));
+                            refreshPersistedSessions();
+                        }
+                    });
                 }
                 sendMessage(sessionId, text);
             }
         },
-        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile],
+        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions],
     );
 
     const handleStop = useCallback(() => {
