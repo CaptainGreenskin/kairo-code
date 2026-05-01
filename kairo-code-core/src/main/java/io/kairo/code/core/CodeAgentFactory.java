@@ -73,6 +73,12 @@ import io.kairo.tools.file.SearchReplaceTool;
 import io.kairo.tools.info.HttpTool;
 import io.kairo.tools.info.WebSearchTool;
 import io.kairo.tools.vcs.GithubTool;
+import io.kairo.tools.skill.SkillListTool;
+import io.kairo.tools.skill.SkillLoadTool;
+import io.kairo.tools.agent.EnterPlanModeTool;
+import io.kairo.tools.agent.ExitPlanModeTool;
+import io.kairo.tools.agent.ListPlansTool;
+import io.kairo.core.plan.PlanFileManager;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -184,6 +190,18 @@ public final class CodeAgentFactory {
         if (System.getenv("TAVILY_API_KEY") != null && !System.getenv("TAVILY_API_KEY").isBlank()) {
             registry.registerTool(WebSearchTool.class);
         }
+        // --- M57-002: skill tools (no executor dependency) ---
+
+        // Skill tools require SkillRegistry; only register when one is wired.
+        if (options.skillRegistry() != null) {
+            SkillRegistry skillReg = options.skillRegistry();
+            registry.registerTool(SkillListTool.class);
+            registry.registerInstance("skill_list", new SkillListTool(skillReg));
+            registry.registerTool(SkillLoadTool.class);
+            registry.registerInstance("skill_load", new SkillLoadTool(skillReg));
+            // SkillManageTool skipped — requires SkillChangeHistory + searchPaths + readonly.
+        }
+
         // Register the task tool only when dependencies are wired AND this is not a child session.
         // Child sessions never get TaskTool — recursion is out of scope for M3.
         TaskToolDependencies taskDeps = options.taskToolDependencies();
@@ -196,6 +214,28 @@ public final class CodeAgentFactory {
 
         PermissionGuard guard = new DefaultPermissionGuard();
         DefaultToolExecutor executor = new DefaultToolExecutor(registry, guard);
+
+        // --- M57-002: plan mode tools (require executor) ---
+        EnterPlanModeTool enterPlanMode = new EnterPlanModeTool();
+        ExitPlanModeTool exitPlanMode = new ExitPlanModeTool();
+        enterPlanMode.setToolExecutor(executor);
+        exitPlanMode.setToolExecutor(executor);
+        if (options.approvalHandler() != null) {
+            exitPlanMode.setApprovalHandler(options.approvalHandler());
+        }
+        registry.registerTool(EnterPlanModeTool.class);
+        registry.registerInstance("enter_plan_mode", enterPlanMode);
+        registry.registerTool(ExitPlanModeTool.class);
+        registry.registerInstance("exit_plan_mode", exitPlanMode);
+        if (config.workingDir() != null && !config.workingDir().isBlank()) {
+            PlanFileManager pfm = new PlanFileManager(Path.of(config.workingDir(), ".plans"));
+            enterPlanMode.setPlanFileManager(pfm);
+            exitPlanMode.setPlanFileManager(pfm);
+            ListPlansTool listPlans = new ListPlansTool();
+            listPlans.setPlanFileManager(pfm);
+            registry.registerTool(ListPlansTool.class);
+            registry.registerInstance("list_plans", listPlans);
+        }
 
         Set<String> activeSkills = options.activeSkills();
         String systemPrompt =
