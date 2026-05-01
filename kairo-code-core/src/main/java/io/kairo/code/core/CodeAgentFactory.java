@@ -217,7 +217,11 @@ public final class CodeAgentFactory {
 
         // Auto-register ContextCompactionHook: when context approaches the limit, injects a
         // compaction request so the model summarizes work and continues. Non-REPL only.
-        if (!options.isRepl()) {
+        // Callers that need to observe compaction events (e.g. transport bridges that surface
+        // CONTEXT_COMPACTED to clients) may supply their own ContextCompactionHook via
+        // {@link SessionOptions#withHooks(List)} — in that case we skip the auto-registration so
+        // the user-supplied instance (with its listener) is the single source of truth.
+        if (!options.isRepl() && !hasHookOfType(hooks, ContextCompactionHook.class)) {
             builder.hook(new ContextCompactionHook());
         }
 
@@ -342,6 +346,18 @@ public final class CodeAgentFactory {
             if (hook instanceof TurnMetricsCollector c) return c;
         }
         return null;
+    }
+
+    /**
+     * Returns {@code true} if any hook in the list is an instance of {@code type}. Used to
+     * suppress auto-registration of default hooks when the caller has supplied a customised one.
+     */
+    private static boolean hasHookOfType(List<Object> hooks, Class<?> type) {
+        if (hooks == null) return false;
+        for (Object hook : hooks) {
+            if (type.isInstance(hook)) return true;
+        }
+        return false;
     }
 
     /**

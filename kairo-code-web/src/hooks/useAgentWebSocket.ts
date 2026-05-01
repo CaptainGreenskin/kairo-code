@@ -107,6 +107,25 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 payload: { stepIndex: isNaN(stepIndex) ? -1 : stepIndex },
             };
         }
+        case 'CONTEXT_COMPACTED': {
+            // content field holds JSON: {beforeTokens, maxTokens, ratio}
+            const compactContent = raw.content as string;
+            let parsed: { beforeTokens: number; maxTokens: number; ratio: number };
+            try {
+                const obj = JSON.parse(compactContent ?? '{}');
+                parsed = {
+                    beforeTokens: typeof obj.beforeTokens === 'number' ? obj.beforeTokens : 0,
+                    maxTokens: typeof obj.maxTokens === 'number' ? obj.maxTokens : 0,
+                    ratio: typeof obj.ratio === 'number' ? obj.ratio : 0,
+                };
+            } catch {
+                parsed = { beforeTokens: 0, maxTokens: 0, ratio: 0 };
+            }
+            return {
+                type: 'CONTEXT_COMPACTED', sessionId, timestamp: ts,
+                payload: parsed,
+            };
+        }
         default:
             return { type: 'AGENT_ERROR', sessionId, timestamp: ts, payload: { message: `Unknown event type: ${type}` } };
     }

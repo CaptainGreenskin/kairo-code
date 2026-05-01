@@ -31,7 +31,8 @@ public record AgentEvent(
         AGENT_ERROR,
         SESSION_RESTORED,
         PLAN_STEPS,
-        PLAN_STEP_DONE
+        PLAN_STEP_DONE,
+        CONTEXT_COMPACTED
     }
 
     public static AgentEvent thinking(String sessionId) {
@@ -92,5 +93,20 @@ public record AgentEvent(
     public static AgentEvent planStepDone(String sessionId, int stepIndex) {
         return new AgentEvent(EventType.PLAN_STEP_DONE, sessionId, String.valueOf(stepIndex), null, null,
                 false, null, null, null, null, null, null, System.currentTimeMillis());
+    }
+
+    /**
+     * Create a CONTEXT_COMPACTED event signalling that {@link io.kairo.code.core.hook.ContextCompactionHook}
+     * has just injected a compaction request. The {@code content} field holds a JSON object
+     * {@code {"beforeTokens":N,"maxTokens":N,"ratio":0.xx}} where {@code ratio = beforeTokens / maxTokens}.
+     * The {@code tokenUsage} field also carries {@code beforeTokens} for downstream consumers.
+     */
+    public static AgentEvent contextCompacted(String sessionId, int beforeTokens, int maxTokens) {
+        double ratio = maxTokens > 0 ? Math.min(1.0, (double) beforeTokens / maxTokens) : 0.0;
+        String payload = "{\"beforeTokens\":" + beforeTokens
+                + ",\"maxTokens\":" + maxTokens
+                + ",\"ratio\":" + String.format(java.util.Locale.ROOT, "%.4f", ratio) + "}";
+        return new AgentEvent(EventType.CONTEXT_COMPACTED, sessionId, payload, null, null,
+                false, null, null, (long) beforeTokens, null, null, null, System.currentTimeMillis());
     }
 }

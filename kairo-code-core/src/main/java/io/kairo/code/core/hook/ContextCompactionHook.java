@@ -23,6 +23,9 @@ import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.code.core.stats.TokenEstimator;
 import java.util.List;
+import java.util.function.IntConsumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * When the conversation context approaches the configured token limit (default 80% of
@@ -42,6 +45,8 @@ import java.util.List;
  * </ul>
  */
 public final class ContextCompactionHook {
+
+    private static final Logger log = LoggerFactory.getLogger(ContextCompactionHook.class);
 
     private static final String COMPACT_MESSAGE_LIGHT =
             "The conversation context is getting large. Please briefly summarize "
@@ -66,12 +71,13 @@ public final class ContextCompactionHook {
     private final double threshold;
     private final boolean isRepl;
     private final int coolingTurns;
+    private final IntConsumer compactionListener;
     private int turnsSinceLastCompaction;
     private int compactionCount;
 
     /**
      * Uses defaults from environment variables or hard-coded fallbacks:
-     * maxContextTokens=100000, threshold=0.80, non-REPL, coolingTurns=5.
+     * maxContextTokens=100000, threshold=0.80, non-REPL, coolingTurns=5, no listener.
      */
     public ContextCompactionHook() {
         this(readMaxContextTokens(), readCompactionThreshold(), false);
@@ -83,7 +89,7 @@ public final class ContextCompactionHook {
      * @param isRepl true if running in REPL/interactive mode (suppresses injection)
      */
     public ContextCompactionHook(int maxContextTokens, double threshold, boolean isRepl) {
-        this(maxContextTokens, threshold, isRepl, DEFAULT_COOLING_TURNS);
+        this(maxContextTokens, threshold, isRepl, DEFAULT_COOLING_TURNS, null);
     }
 
     /**
@@ -94,13 +100,53 @@ public final class ContextCompactionHook {
      */
     public ContextCompactionHook(
             int maxContextTokens, double threshold, boolean isRepl, int coolingTurns) {
+        this(maxContextTokens, threshold, isRepl, coolingTurns, null);
+    }
+
+    /**
+     * @param maxContextTokens total context capacity
+     * @param threshold fraction of maxContextTokens that triggers compaction
+     * @param isRepl true if running in REPL/interactive mode (suppresses injection)
+     * @param coolingTurns minimum turns between consecutive compactions
+     * @param compactionListener optional listener invoked with the estimated token count whenever
+     *                           compaction is triggered (i.e. the inject decision is made).
+     *                           Passing {@code null} disables the listener.
+     */
+    public ContextCompactionHook(
+            int maxContextTokens,
+            double threshold,
+            boolean isRepl,
+            int coolingTurns,
+            IntConsumer compactionListener) {
         this.maxContextTokens = maxContextTokens;
         this.threshold = threshold;
         this.isRepl = isRepl;
         this.coolingTurns = coolingTurns;
+        this.compactionListener = compactionListener;
         // Initialize to coolingTurns so the first compaction fires immediately on threshold breach.
         this.turnsSinceLastCompaction = coolingTurns;
         this.compactionCount = 0;
+    }
+
+    /**
+     * Build a hook with environment-driven defaults plus a listener that is notified
+     * whenever compaction is triggered. Convenience for callers that only want to observe
+     * compaction events (e.g. WebSocket bridges).
+     *
+     * @param compactionListener callback invoked with the pre-injection token estimate
+     */
+    public static ContextCompactionHook withListener(IntConsumer compactionListener) {
+        return new ContextCompactionHook(
+                readMaxContextTokens(),
+                readCompactionThreshold(),
+                false,
+                DEFAULT_COOLING_TURNS,
+                compactionListener);
+    }
+
+    /** Returns the configured max context tokens (used for callers that need to compute ratios). */
+    public int maxContextTokens() {
+        return maxContextTokens;
     }
 
     @HookHandler(HookPhase.PRE_REASONING)
@@ -117,11 +163,24 @@ public final class ContextCompactionHook {
         if (estimatedTokens >= triggerAt && turnsSinceLastCompaction >= coolingTurns) {
             turnsSinceLastCompaction = 0;
             compactionCount++;
+            notifyListener(estimatedTokens);
             return HookResult.inject(
                     event, Msg.of(MsgRole.USER, selectCompactionPrompt()), "ContextCompactionHook");
         }
 
         return HookResult.proceed(event);
+    }
+
+    private void notifyListener(int estimatedTokens) {
+        if (compactionListener == null) {
+            return;
+        }
+        try {
+            compactionListener.accept(estimatedTokens);
+        } catch (RuntimeException e) {
+            // Listener failures must not disrupt compaction. Swallow & log.
+            log.warn("ContextCompactionHook listener threw, ignoring: {}", e.toString());
+        }
     }
 
     /** Returns the number of times compaction has been triggered in this session. */

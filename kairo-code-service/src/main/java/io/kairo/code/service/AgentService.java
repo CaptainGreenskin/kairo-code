@@ -10,6 +10,7 @@ import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.stats.ToolUsageTracker;
+import io.kairo.code.core.hook.ContextCompactionHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -84,12 +85,18 @@ public class AgentService {
         AgentEventBridgeHook bridgeHook = new AgentEventBridgeHook(sink, sessionId);
         WebSocketApprovalHandler approvalHandler = new WebSocketApprovalHandler();
 
+        // Register a ContextCompactionHook with a listener that surfaces CONTEXT_COMPACTED
+        // events on the session sink. Supplying it via SessionOptions causes CodeAgentFactory
+        // to skip its default auto-registration so this listener-equipped instance is the
+        // single source of truth for compaction in this session.
+        ContextCompactionHook compactionHook = buildCompactionHook(sink, sessionId);
+
         try {
             CodeAgentSession session = CodeAgentFactory.createSession(
                     config,
                     SessionOptions.empty()
                             .withApprovalHandler(approvalHandler)
-                            .withHooks(List.of(bridgeHook)));
+                            .withHooks(List.of(bridgeHook, compactionHook)));
 
             SessionEntry entry = new SessionEntry(sessionId, config, session, approvalHandler);
             sessions.put(sessionId, entry);
@@ -403,6 +410,27 @@ public class AgentService {
     private boolean isRunning(String sessionId) {
         AtomicBoolean state = runningState.get(sessionId);
         return state != null && state.get();
+    }
+
+    /**
+     * Build a {@link ContextCompactionHook} configured with environment-driven defaults plus a
+     * listener that emits {@code CONTEXT_COMPACTED} events to the given sink whenever the hook
+     * decides to inject a compaction prompt.
+     */
+    private static ContextCompactionHook buildCompactionHook(
+            Sinks.Many<AgentEvent> sink, String sessionId) {
+        // Use the public constructor with environment defaults via a temporary throwaway
+        // instance to read the configured max-tokens; then replace with a listener-equipped
+        // instance that also captures maxTokens for inclusion in the event payload.
+        ContextCompactionHook probe = new ContextCompactionHook();
+        int maxTokens = probe.maxContextTokens();
+        return ContextCompactionHook.withListener(beforeTokens -> {
+            Sinks.EmitResult emit = sink.tryEmitNext(
+                    AgentEvent.contextCompacted(sessionId, beforeTokens, maxTokens));
+            if (emit.isFailure()) {
+                log.warn("Failed to emit CONTEXT_COMPACTED for session {}: {}", sessionId, emit);
+            }
+        });
     }
 
     /**
