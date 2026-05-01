@@ -11,6 +11,7 @@ import io.kairo.code.cli.commands.CostCommand;
 import io.kairo.code.cli.commands.CtxCommand;
 import io.kairo.code.cli.commands.TeamCommand;
 import io.kairo.code.cli.commands.DoctorCommand;
+import io.kairo.code.cli.commands.EvolveCommand;
 import io.kairo.code.cli.commands.ExitCommand;
 import io.kairo.code.cli.commands.HelpCommand;
 import io.kairo.code.cli.commands.HistoryCommand;
@@ -503,6 +504,7 @@ public class ReplLoop {
         registry.register(new SwarmCommand());
         registry.register(new InitCommand());
         registry.register(new DoctorCommand());
+        registry.register(new EvolveCommand());
 
         return registry;
     }
