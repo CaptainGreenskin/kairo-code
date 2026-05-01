@@ -35,6 +35,16 @@ import { searchMessages } from '@utils/messageSearch';
 import type { MessageSearchResult } from '@utils/messageSearch';
 import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
+import {
+    saveSnapshot,
+    loadSnapshot,
+    listSnapshots,
+    deleteSnapshot,
+    setLastSessionId,
+    getLastSessionId,
+    clearLastSessionId,
+    type SnapshotMeta,
+} from '@utils/sessionSnapshot';
 import { setSessionName, getSessionName } from '@utils/sessionNames';
 import { loadPrefs, savePref } from '@utils/userPrefs';
 import { loadDraft } from '@utils/inputDraft';
@@ -124,7 +134,13 @@ function App() {
     const [showCommandPalette, setShowCommandPalette] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [sidebarSessions, setSidebarSessions] = useState<Array<{ sessionId: string }>>([]);
+    const [persistedSessions, setPersistedSessions] = useState<SnapshotMeta[]>([]);
     const [sessionSortOrder, setSessionSortOrder] = useState<SessionSortOrder>('date-desc');
+
+    const refreshPersistedSessions = useCallback(async () => {
+        const metas = await listSnapshots();
+        setPersistedSessions(metas);
+    }, []);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
     const [atBottom, setAtBottom] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -279,6 +295,23 @@ function App() {
                         (payload.inputTokens * 0.001 + payload.outputTokens * 0.003) /
                         1000;
                     setEstimatedCost(cost);
+                    // Persist a server-side snapshot so refreshing the page
+                    // restores the conversation. Fire-and-forget — failures
+                    // are logged inside saveSnapshot.
+                    {
+                        const sid = useSessionStore.getState().sessionId ?? event.sessionId;
+                        const msgs = useSessionStore.getState().messages;
+                        if (sid && msgs.length > 0) {
+                            const name = getSessionName(sid)
+                                ?? `Session ${sid.slice(0, 8)}`;
+                            saveSnapshot(sid, name, msgs).then((ok) => {
+                                if (ok) {
+                                    setLastSessionId(sid);
+                                    refreshPersistedSessions();
+                                }
+                            });
+                        }
+                    }
                     break;
                 }
 
@@ -335,6 +368,7 @@ function App() {
             restoreSession,
             setLoadingSessionId,
             addToast,
+            refreshPersistedSessions,
         ],
     );
 
@@ -396,6 +430,27 @@ function App() {
             connect();
         }
         // onConnect auto-detects the session and sends bind-session
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Load the list of on-disk session snapshots once on mount.
+    useEffect(() => { refreshPersistedSessions(); }, [refreshPersistedSessions]);
+
+    // Cross-tab refresh: when the server-side snapshot fails to restore via
+    // sessionStorage (e.g., new tab, cleared sessionStorage), fall back to the
+    // last-active session id stored in localStorage and rehydrate from disk.
+    // Only run when the in-memory store is empty to avoid clobbering live state.
+    useEffect(() => {
+        if (sessionStorage.getItem('kairo-code-session-id')) return;
+        if (useSessionStore.getState().messages.length > 0) return;
+        const lastId = getLastSessionId();
+        if (!lastId) return;
+        loadSnapshot(lastId).then(snap => {
+            if (snap && snap.messages.length > 0
+                && useSessionStore.getState().messages.length === 0) {
+                restoreSession(snap.sessionId, snap.messages, false);
+                saveMessages(snap.sessionId, snap.messages);
+            }
+        });
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Snapshot messages to sessionStorage on change
@@ -584,6 +639,7 @@ function App() {
         setEstimatedCost(0);
         setExpandedMessages(new Set());
         sessionStorage.removeItem('kairo-code-session-id');
+        clearLastSessionId();
     }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost, sessionId]);
 
     const handleSelectSession = useCallback(
@@ -604,9 +660,36 @@ function App() {
             setStreamingMsgId(null);
             setAgentPhase('thinking');
             setCurrentToolName(undefined);
+            setLastSessionId(id);
             connect();
         },
-        [sessionId, disconnect, setSessionId, clearMessages, connect],
+        [sessionId, disconnect, setSessionId, setMessages, clearMessages, connect],
+    );
+
+    // Restore a session from the on-disk snapshot (no live WebSocket bind).
+    // Used for clicking entries in the sidebar's "History" section.
+    const handleLoadSnapshotHistory = useCallback(
+        async (id: string) => {
+            if (id === sessionId) return;
+            setLoadingSessionId(id);
+            const snap = await loadSnapshot(id);
+            if (!snap) {
+                addToast('error', 'Snapshot not found on server');
+                setLoadingSessionId(null);
+                return;
+            }
+            disconnect();
+            restoreSession(snap.sessionId, snap.messages, false);
+            saveMessages(snap.sessionId, snap.messages);
+            setLastSessionId(snap.sessionId);
+            setExpandedMessages(new Set());
+            assistantMsgRef.current = null;
+            setStreamingMsgId(null);
+            setAgentPhase('thinking');
+            setCurrentToolName(undefined);
+            setLoadingSessionId(null);
+        },
+        [sessionId, disconnect, restoreSession, addToast],
     );
 
     const handleDeleteSession = useCallback(
@@ -614,11 +697,13 @@ function App() {
             const name = getSessionName(id) ?? id.slice(0, 8);
             addToast('info', `Session deleted: ${name}`);
             clearCachedMessages(id);
+            deleteSnapshot(id).then(() => refreshPersistedSessions());
+            if (getLastSessionId() === id) clearLastSessionId();
             if (id === sessionId) {
                 handleNewSession();
             }
         },
-        [sessionId, handleNewSession, addToast],
+        [sessionId, handleNewSession, addToast, refreshPersistedSessions],
     );
 
     const handleCopyConversation = useCallback(async () => {
@@ -1067,6 +1152,8 @@ function App() {
                                 onSessionsChange={setSidebarSessions}
                                 sortOrder={sessionSortOrder}
                                 onSortChange={setSessionSortOrder}
+                                persistedSessions={persistedSessions}
+                                onLoadSnapshot={(id) => { handleLoadSnapshotHistory(id); setSidebarOpen(false); }}
                             />
                         </div>
                     </>
@@ -1081,6 +1168,8 @@ function App() {
                         onSessionsChange={setSidebarSessions}
                         sortOrder={sessionSortOrder}
                         onSortChange={setSessionSortOrder}
+                        persistedSessions={persistedSessions}
+                        onLoadSnapshot={handleLoadSnapshotHistory}
                     />
                 )}
 

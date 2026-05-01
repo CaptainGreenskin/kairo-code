@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import React from 'react';
-import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, X } from 'lucide-react';
+import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, X, Archive } from 'lucide-react';
 import { listSessions, deleteSession as apiDeleteSession } from '@api/config';
 import type { SessionInfo } from '@/types/agent';
 import { NewSessionDialog } from './NewSessionDialog';
@@ -9,6 +9,7 @@ import { getSessionName, setSessionName, removeSessionName } from '@utils/sessio
 import { pinSession, unpinSession, isSessionPinned, getPinnedSessions } from '@utils/sessionPins';
 import { getSessionTags, addSessionTag, removeSessionTag, getAllTags } from '@utils/sessionTags';
 import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
+import type { SnapshotMeta } from '@utils/sessionSnapshot';
 
 interface SessionSidebarProps {
     activeSessionId: string | null;
@@ -20,6 +21,13 @@ interface SessionSidebarProps {
     onSessionsChange?: (sessions: SessionInfo[]) => void;
     sortOrder?: SessionSortOrder;
     onSortChange?: (order: SessionSortOrder) => void;
+    /**
+     * Persisted snapshots (server-side, on-disk). Entries that are NOT also
+     * present in the live `sessions` list are rendered as a "History" section.
+     */
+    persistedSessions?: SnapshotMeta[];
+    /** Called when a History entry is clicked. Restores the snapshot. */
+    onLoadSnapshot?: (sessionId: string) => void;
 }
 
 interface SessionItemProps {
@@ -284,6 +292,8 @@ export const SessionSidebar = React.memo(function SessionSidebar({
     onSessionsChange,
     sortOrder = 'date-desc',
     onSortChange,
+    persistedSessions,
+    onLoadSnapshot,
 }: SessionSidebarProps) {
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
@@ -343,6 +353,20 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                 s.sessionId.toLowerCase().startsWith(q);
         });
     }, [displayedSessions, sessionFilter]);
+
+    // History = snapshots that exist on disk but are NOT in the live session
+    // list (e.g., session was unloaded/expired server-side).
+    const historySnapshots = useMemo(() => {
+        if (!persistedSessions || persistedSessions.length === 0) return [];
+        const liveIds = new Set(sessions.map(s => s.sessionId));
+        const entries = persistedSessions.filter(p => !liveIds.has(p.sessionId));
+        if (!sessionFilter.trim()) return entries;
+        const q = sessionFilter.toLowerCase();
+        return entries.filter(p => {
+            const name = (getSessionName(p.sessionId) ?? p.name ?? '').toLowerCase();
+            return name.includes(q) || p.sessionId.toLowerCase().startsWith(q);
+        });
+    }, [persistedSessions, sessions, sessionFilter]);
 
     const handlePinChange = useCallback(() => {
         setPins(getPinnedSessions());
@@ -550,7 +574,7 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                         <div className="p-4 text-center text-sm text-[var(--color-danger)]">
                             {error}
                         </div>
-                    ) : sessions.length === 0 ? (
+                    ) : sessions.length === 0 && historySnapshots.length === 0 ? (
                         <div className="p-4 text-center text-sm text-[var(--text-muted)]">
                             <MessageSquare size={20} className="mx-auto mb-2 opacity-50" />
                             No sessions yet
@@ -619,6 +643,55 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                             {filteredSessions.length === 0 && sessionFilter && (
                                 <div className="px-3 py-4 text-xs text-[var(--text-muted)] text-center">
                                     No sessions match &#8220;{sessionFilter}&#8221;
+                                </div>
+                            )}
+
+                            {historySnapshots.length > 0 && (
+                                <div className="mt-2 border-t border-[var(--border)]">
+                                    <div className="flex items-center gap-1.5 px-3 pt-3 pb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                                        <Archive size={10} />
+                                        History
+                                    </div>
+                                    <ul className="px-2 pb-2 space-y-1">
+                                        {historySnapshots.map(snap => {
+                                            const customName = getSessionName(snap.sessionId);
+                                            const display = customName
+                                                ?? (snap.name && snap.name.length > 0
+                                                    ? snap.name
+                                                    : `Session ${snap.sessionId.slice(0, 8)}`);
+                                            const isLoading = snap.sessionId === loadingSessionId;
+                                            const isActive = snap.sessionId === activeSessionId;
+                                            return (
+                                                <li
+                                                    key={`history-${snap.sessionId}`}
+                                                    onClick={() => onLoadSnapshot?.(snap.sessionId)}
+                                                    className={`group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                                        isActive
+                                                            ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                                                            : 'hover:bg-[var(--bg-hover)]'
+                                                    } ${isLoading ? 'opacity-60' : ''}`}
+                                                    title={`Restore snapshot saved ${formatRelativeTime(snap.savedAt)}`}
+                                                >
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="text-xs font-mono truncate text-[var(--text-secondary)]">
+                                                                {highlightMatch(
+                                                                    display.length > 40 ? display.slice(0, 40) + '…' : display,
+                                                                    sessionFilter,
+                                                                )}
+                                                            </span>
+                                                            {isLoading && (
+                                                                <Loader size={11} className="animate-spin shrink-0 text-[var(--color-primary)]" />
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[10px] text-[var(--text-muted)]">
+                                                            {snap.messageCount} msg · {formatRelativeTime(snap.savedAt)}
+                                                        </p>
+                                                    </div>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
                                 </div>
                             )}
                         </>
