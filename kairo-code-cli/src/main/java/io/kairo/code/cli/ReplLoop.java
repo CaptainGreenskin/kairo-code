@@ -8,6 +8,7 @@ import io.kairo.api.skill.SkillRegistry;
 import io.kairo.code.cli.commands.ClearCommand;
 import io.kairo.code.cli.commands.CompactCommand;
 import io.kairo.code.cli.commands.CostCommand;
+import io.kairo.code.cli.commands.CtxCommand;
 import io.kairo.code.cli.commands.DoctorCommand;
 import io.kairo.code.cli.commands.ExitCommand;
 import io.kairo.code.cli.commands.HelpCommand;
@@ -480,6 +481,7 @@ public class ReplLoop {
         registry.register(new HistoryCommand());
         registry.register(new ClearCommand());
         registry.register(new CompactCommand());
+        registry.register(new CtxCommand());
         registry.register(new ModelCommand());
         registry.register(new CostCommand());
         registry.register(new UsageCommand());
