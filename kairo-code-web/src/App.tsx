@@ -40,6 +40,7 @@ import { loadPrefs, savePref } from '@utils/userPrefs';
 import { loadDraft } from '@utils/inputDraft';
 import { isCollapsible } from '@utils/messageCollapse';
 import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
+import { useAgentNotification } from '@hooks/useAgentNotification';
 
 declare const __APP_VERSION__: string;
 
@@ -71,6 +72,7 @@ function App() {
     } = useSessionStore();
 
     const assistantMsgRef = useRef<string | null>(null);
+    const hasErrorRef = useRef(false);
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const [agentPhase, setAgentPhase] = useState<Phase>('thinking');
     const [currentToolName, setCurrentToolName] = useState<string | undefined>(undefined);
@@ -283,6 +285,7 @@ function App() {
                 case 'AGENT_ERROR': {
                     const payload = event.payload as { message: string };
                     assistantMsgRef.current = null;
+                    hasErrorRef.current = true;
                     setStreamingMsgId(null);
                     setThinking(false);
                     setAgentPhase('thinking');
@@ -453,6 +456,8 @@ function App() {
     const handleSend = useCallback(
         (text: string) => {
             if (isMobile) setSidebarOpen(false);
+
+            hasErrorRef.current = false;
 
             // Add user message to store
             addMessage({
@@ -825,6 +830,17 @@ function App() {
         }
         return count;
     }, [messages]);
+
+    // Derive isRunning from agent state: true while thinking, processing tools, or writing
+    const isRunning = isThinking || agentPhase === 'tool' || agentPhase === 'writing';
+
+    // Browser notifications and title badge for agent state changes
+    useAgentNotification({
+        isRunning,
+        pendingApprovalCount: pendingToolCount,
+        hasError: hasErrorRef.current,
+        isThinking: isThinking,
+    });
 
     const currentDraft = useMemo(
         () => (sessionId ? loadDraft(sessionId) : ''),
