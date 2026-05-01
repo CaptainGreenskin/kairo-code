@@ -85,6 +85,28 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 payload: parsed as import('@/types/agent').SessionRestoredPayload,
             };
         }
+        case 'PLAN_STEPS': {
+            // content field holds JSON array of step strings
+            const stepsContent = raw.content as string;
+            let steps: string[];
+            try {
+                steps = JSON.parse(stepsContent);
+            } catch {
+                steps = [];
+            }
+            return {
+                type: 'PLAN_STEPS', sessionId, timestamp: ts,
+                payload: { steps },
+            };
+        }
+        case 'PLAN_STEP_DONE': {
+            // content field holds the step index as string
+            const stepIndex = parseInt(raw.content as string, 10);
+            return {
+                type: 'PLAN_STEP_DONE', sessionId, timestamp: ts,
+                payload: { stepIndex: isNaN(stepIndex) ? -1 : stepIndex },
+            };
+        }
         default:
             return { type: 'AGENT_ERROR', sessionId, timestamp: ts, payload: { message: `Unknown event type: ${type}` } };
     }

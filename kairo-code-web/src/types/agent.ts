@@ -9,7 +9,9 @@ export type AgentEventType =
     | 'AGENT_DONE'
     | 'AGENT_ERROR'
     | 'AGENT_THINKING'
-    | 'SESSION_RESTORED';
+    | 'SESSION_RESTORED'
+    | 'PLAN_STEPS'
+    | 'PLAN_STEP_DONE';
 
 export interface AgentEvent {
     type: AgentEventType;
@@ -25,7 +27,9 @@ export type AgentEventPayload =
     | AgentDonePayload
     | AgentErrorPayload
     | AgentThinkingPayload
-    | SessionRestoredPayload;
+    | SessionRestoredPayload
+    | PlanStepsPayload
+    | PlanStepDonePayload;
 
 export interface TextChunkPayload {
     text: string;
@@ -66,6 +70,14 @@ export interface AgentThinkingPayload {
 export interface SessionRestoredPayload {
     messages: Message[];
     running: boolean;
+}
+
+export interface PlanStepsPayload {
+    steps: string[];
+}
+
+export interface PlanStepDonePayload {
+    stepIndex: number;
 }
 
 export interface Message {

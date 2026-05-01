@@ -28,6 +28,7 @@ import { PromptTemplatesPanel } from '@components/PromptTemplatesPanel';
 import { GitStatusPanel } from '@components/GitStatusPanel';
 import { ShellPanel } from '@components/ShellPanel';
 import { McpServersPanel } from '@components/McpServersPanel';
+import { PlanPanel } from '@components/PlanPanel';
 import { ExportMenu } from '@components/ExportMenu';
 import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
@@ -43,6 +44,7 @@ import { loadDraft } from '@utils/inputDraft';
 import { isCollapsible } from '@utils/messageCollapse';
 import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
 import { useAgentNotification } from '@hooks/useAgentNotification';
+import { usePlanSteps } from '@hooks/usePlanSteps';
 
 declare const __APP_VERSION__: string;
 
@@ -146,6 +148,10 @@ function App() {
 
     // Toast state
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+    // Plan mode tracking
+    const { steps: planSteps, setPlanSteps, markStepDone, clearPlan } = usePlanSteps(messages);
+    const [showPlanPanel, setShowPlanPanel] = useState(true);
 
     // Responsive layout
     const breakpoint = useBreakpoint();
@@ -324,6 +330,19 @@ function App() {
                     setLoadingSessionId(null);
                     break;
                 }
+
+                case 'PLAN_STEPS': {
+                    const payload = event.payload as { steps: string[] };
+                    setPlanSteps(payload.steps);
+                    setShowPlanPanel(true);
+                    break;
+                }
+
+                case 'PLAN_STEP_DONE': {
+                    const payload = event.payload as { stepIndex: number };
+                    markStepDone(payload.stepIndex);
+                    break;
+                }
             }
         },
         [
@@ -337,6 +356,8 @@ function App() {
             restoreSession,
             setLoadingSessionId,
             addToast,
+            setPlanSteps,
+            markStepDone,
         ],
     );
 
@@ -1308,6 +1329,14 @@ function App() {
             )}
             {showMcpServers && (
                 <McpServersPanel onClose={handleCloseMcpServers} />
+            )}
+            {showPlanPanel && planSteps.length > 0 && (
+                <PlanPanel
+                    steps={planSteps}
+                    isRunning={isRunning}
+                    onClose={() => setShowPlanPanel(false)}
+                    onClear={() => { clearPlan(); setShowPlanPanel(false); }}
+                />
             )}
         </div>
     );
