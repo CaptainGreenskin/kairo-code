@@ -582,7 +582,7 @@ public class ReplLoop {
         FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir);
         for (SkillWithSource ws : loader.loadAll()) {
             registry.register(ws.skill());
-            skillSources.put(ws.skill().name(), ws.source());
+            skillSources.put(ws.skill().name(), ws.priority().name());
         }
 
         // Mark classpath skills that weren't overridden
@@ -624,7 +624,7 @@ public class ReplLoop {
 
         FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir);
         for (SkillWithSource ws : loader.loadAll()) {
-            skillSources.put(ws.skill().name(), ws.source());
+            skillSources.put(ws.skill().name(), ws.priority().name());
         }
     }
 
