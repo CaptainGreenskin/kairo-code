@@ -44,9 +44,8 @@ class FsSkillLoaderTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).skill().name()).isEqualTo("my-skill");
-        // Parser extracts description from the body text after the heading
         assertThat(result.get(0).skill().description()).isEqualTo("Do something special.");
-        assertThat(result.get(0).source()).isEqualTo("global");
+        assertThat(result.get(0).priority()).isEqualTo(SkillPriority.USER);
     }
 
     @Test
@@ -68,7 +67,7 @@ class FsSkillLoaderTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).skill().name()).isEqualTo("project-skill");
-        assertThat(result.get(0).source()).isEqualTo("project");
+        assertThat(result.get(0).priority()).isEqualTo(SkillPriority.PROJECT);
     }
 
     @Test
@@ -103,9 +102,8 @@ class FsSkillLoaderTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).skill().name()).isEqualTo("shared-skill");
-        // Project version wins — description comes from body text
         assertThat(result.get(0).skill().description()).isEqualTo("Project content.");
-        assertThat(result.get(0).source()).isEqualTo("project");
+        assertThat(result.get(0).priority()).isEqualTo(SkillPriority.PROJECT);
     }
 
     @Test
@@ -135,12 +133,12 @@ class FsSkillLoaderTest {
         List<SkillWithSource> result = loader.loadAll();
 
         assertThat(result).hasSize(2);
-        Map<String, String> byName = new java.util.LinkedHashMap<>();
+        Map<String, SkillPriority> byName = new java.util.LinkedHashMap<>();
         for (SkillWithSource ws : result) {
-            byName.put(ws.skill().name(), ws.source());
+            byName.put(ws.skill().name(), ws.priority());
         }
-        assertThat(byName).containsEntry("global-only", "global");
-        assertThat(byName).containsEntry("project-only", "project");
+        assertThat(byName).containsEntry("global-only", SkillPriority.USER);
+        assertThat(byName).containsEntry("project-only", SkillPriority.PROJECT);
     }
 
     @Test
@@ -157,16 +155,153 @@ class FsSkillLoaderTest {
     @Test
     void loadAll_skipsMalformedMdFiles() throws Exception {
         Path globalDir = Files.createDirectory(tempDir.resolve("global"));
-        // Missing YAML front-matter name — parser will fail or produce garbage
         Files.writeString(globalDir.resolve("bad.md"), "Just some text, no front matter.");
 
         FsSkillLoader loader = new FsSkillLoader(globalDir, null);
-        // Should not throw — just skip the bad file
         List<SkillWithSource> result = loader.loadAll();
 
-        // The parser may still produce something, but it should not crash
-        // Either way, no exception should propagate
         assertThat(result).isNotNull();
+    }
+
+    @Test
+    void loadAll_managedOverridesUser() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        Path managedDir = Files.createDirectory(globalDir.resolve("managed"));
+
+        writeFile(globalDir, "greet.md", """
+                ---
+                name: greet
+                description: USER version
+                ---
+
+                # Greet
+
+                User greeting.
+                """);
+
+        writeFile(managedDir, "greet.md", """
+                ---
+                name: greet
+                description: MANAGED version
+                ---
+
+                # Greet
+
+                Managed greeting.
+                """);
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, null);
+        List<SkillWithSource> result = loader.loadAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).skill().name()).isEqualTo("greet");
+        assertThat(result.get(0).skill().description()).isEqualTo("Managed greeting.");
+        assertThat(result.get(0).priority()).isEqualTo(SkillPriority.MANAGED);
+    }
+
+    @Test
+    void loadAll_userSkipsManagedSubdir() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        Path managedDir = Files.createDirectory(globalDir.resolve("managed"));
+
+        // Only managed has the skill, user scan skips managed/ dir
+        writeFile(managedDir, "admin.md", """
+                ---
+                name: admin
+                description: Admin skill
+                ---
+
+                # Admin
+                """);
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, null);
+        List<SkillWithSource> result = loader.loadAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).skill().name()).isEqualTo("admin");
+        assertThat(result.get(0).priority()).isEqualTo(SkillPriority.MANAGED);
+    }
+
+    @Test
+    void loadAll_projectOverridesManaged() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        Path managedDir = Files.createDirectory(globalDir.resolve("managed"));
+        Path projectDir = Files.createDirectory(tempDir.resolve("project"));
+
+        writeFile(managedDir, "deploy.md", """
+                ---
+                name: deploy
+                description: MANAGED version
+                ---
+
+                # Deploy
+
+                Managed deploy.
+                """);
+
+        writeFile(projectDir, "deploy.md", """
+                ---
+                name: deploy
+                description: PROJECT version
+                ---
+
+                # Deploy
+
+                Project deploy.
+                """);
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir);
+        List<SkillWithSource> result = loader.loadAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).skill().name()).isEqualTo("deploy");
+        assertThat(result.get(0).skill().description()).isEqualTo("Project deploy.");
+        assertThat(result.get(0).priority()).isEqualTo(SkillPriority.PROJECT);
+    }
+
+    @Test
+    void loadAll_uniqueSkillsNoDuplication() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        writeFile(globalDir, "build.md", """
+                ---
+                name: build
+                description: Build skill
+                ---
+
+                # Build
+
+                Build stuff.
+                """);
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, tempDir.resolve("nonexistent"));
+        List<SkillWithSource> result = loader.loadAll();
+        long count = result.stream().filter(s -> s.skill().name().equals("build")).count();
+
+        assertThat(count).isEqualTo(1);
+    }
+
+    @Test
+    void getWatchedDirs_returnsAllConfiguredPaths() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        Path projectDir = Files.createDirectory(tempDir.resolve("project"));
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir);
+        List<Path> dirs = loader.getWatchedDirs();
+
+        assertThat(dirs).containsExactly(
+                globalDir,
+                globalDir.resolve("managed"),
+                projectDir
+        );
+    }
+
+    @Test
+    void getWatchedDirs_handlesNullGlobalDir() {
+        Path projectDir = tempDir.resolve("project");
+        FsSkillLoader loader = new FsSkillLoader(null, projectDir);
+        List<Path> dirs = loader.getWatchedDirs();
+
+        assertThat(dirs).containsExactly(projectDir);
     }
 
     private void writeFile(Path dir, String name, String content) throws Exception {
