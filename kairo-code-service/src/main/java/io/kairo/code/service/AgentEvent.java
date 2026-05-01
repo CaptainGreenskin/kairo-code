@@ -1,5 +1,6 @@
 package io.kairo.code.service;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -28,7 +29,9 @@ public record AgentEvent(
         TOOL_RESULT,
         AGENT_DONE,
         AGENT_ERROR,
-        SESSION_RESTORED
+        SESSION_RESTORED,
+        PLAN_STEPS,
+        PLAN_STEP_DONE
     }
 
     public static AgentEvent thinking(String sessionId) {
@@ -69,6 +72,25 @@ public record AgentEvent(
     public static AgentEvent sessionRestored(String sessionId, String messagesJson, boolean running) {
         String payload = "{\"messages\":" + messagesJson + ",\"running\":" + running + "}";
         return new AgentEvent(EventType.SESSION_RESTORED, sessionId, payload, null, null,
+                false, null, null, null, null, null, null, System.currentTimeMillis());
+    }
+
+    /**
+     * Create a PLAN_STEPS event. The {@code content} field holds a JSON array of step strings.
+     */
+    public static AgentEvent planSteps(String sessionId, List<String> steps) {
+        String json = steps.stream()
+                .map(s -> "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        return new AgentEvent(EventType.PLAN_STEPS, sessionId, json, null, null,
+                false, null, null, null, null, null, null, System.currentTimeMillis());
+    }
+
+    /**
+     * Create a PLAN_STEP_DONE event. The {@code content} field holds the step index.
+     */
+    public static AgentEvent planStepDone(String sessionId, int stepIndex) {
+        return new AgentEvent(EventType.PLAN_STEP_DONE, sessionId, String.valueOf(stepIndex), null, null,
                 false, null, null, null, null, null, null, System.currentTimeMillis());
     }
 }

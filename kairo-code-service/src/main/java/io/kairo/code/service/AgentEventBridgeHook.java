@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Sinks;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -30,6 +31,9 @@ public class AgentEventBridgeHook {
     /** Tracks pending tool calls keyed by toolUseId → toolName. */
     private final Map<String, String> pendingToolCalls = new ConcurrentHashMap<>();
 
+    /** Whether plan steps have already been detected for this session. */
+    private volatile boolean planStepsDetected = false;
+
     public AgentEventBridgeHook(Sinks.Many<AgentEvent> sink, String sessionId) {
         this.sink = sink;
         this.sessionId = sessionId;
@@ -47,6 +51,15 @@ public class AgentEventBridgeHook {
                     String textContent = text.text();
                     if (textContent != null && !textContent.isBlank()) {
                         emit(AgentEvent.textChunk(sessionId, textContent));
+
+                        // Detect plan steps on first text block that contains them
+                        if (!planStepsDetected) {
+                            List<String> steps = PlanStepParser.parse(textContent);
+                            if (!steps.isEmpty()) {
+                                planStepsDetected = true;
+                                emit(AgentEvent.planSteps(sessionId, steps));
+                            }
+                        }
                     }
                 } else if (content instanceof Content.ToolUseContent toolUse) {
                     String toolUseId = toolUse.toolId();
