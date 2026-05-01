@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2 } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
@@ -26,7 +26,6 @@ import type { Command } from '@components/CommandPalette';
 import { MemoryEditorPanel } from '@components/MemoryEditorPanel';
 import { PromptTemplatesPanel } from '@components/PromptTemplatesPanel';
 import { GitStatusPanel } from '@components/GitStatusPanel';
-import { ShellPanel } from '@components/ShellPanel';
 import { McpServersPanel } from '@components/McpServersPanel';
 import { PlanPanel } from '@components/PlanPanel';
 import { ExportMenu } from '@components/ExportMenu';
@@ -57,6 +56,10 @@ import { useAgentNotification } from '@hooks/useAgentNotification';
 import { usePlanSteps } from '@hooks/usePlanSteps';
 
 declare const __APP_VERSION__: string;
+
+const ShellPanel = lazy(() =>
+    import('@components/ShellPanel').then(m => ({ default: m.ShellPanel })),
+);
 
 function generateId(): string {
     return crypto.randomUUID();
@@ -1411,10 +1414,12 @@ function App() {
                 <GitStatusPanel onClose={() => setShowGitStatus(false)} />
             )}
             {showShell && (
-                <ShellPanel
-                    stompClient={stompClient}
-                    onClose={() => setShowShell(false)}
-                />
+                <Suspense fallback={null}>
+                    <ShellPanel
+                        stompClient={stompClient}
+                        onClose={() => setShowShell(false)}
+                    />
+                </Suspense>
             )}
             {showMcpServers && (
                 <McpServersPanel onClose={handleCloseMcpServers} />
