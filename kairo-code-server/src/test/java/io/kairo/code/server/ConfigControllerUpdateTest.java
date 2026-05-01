@@ -137,5 +137,10 @@ class ConfigControllerUpdateTest {
         AgentService fakeAgentService() {
             return new FakeAgentService();
         }
+
+        @Bean
+        io.kairo.code.service.concurrency.AgentConcurrencyController agentConcurrencyController() {
+            return new io.kairo.code.service.concurrency.AgentConcurrencyController();
+        }
     }
 }
