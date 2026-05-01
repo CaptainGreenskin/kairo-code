@@ -53,6 +53,7 @@ export default defineConfig(({ mode }) => {
                         'react-vendor': ['react', 'react-dom'],
                         'xterm': ['@xterm/xterm', '@xterm/addon-fit'],
                         'markdown': ['react-markdown'],
+                        'syntax-highlighter': ['react-syntax-highlighter'],
                         'virtuoso': ['react-virtuoso'],
                         'websocket': ['@stomp/stompjs', 'sockjs-client'],
                     },
