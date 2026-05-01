@@ -35,6 +35,7 @@ interface HeaderProps {
     onOpenMemory?: () => void;
     onOpenGitStatus?: () => void;
     onOpenShell?: () => void;
+    fileTrackerSlot?: React.ReactNode;
 }
 
 const statusDotClass: Record<ConnectionStatus, string> = {
@@ -76,6 +77,7 @@ export const Header = React.memo(function Header({
     onOpenMemory,
     onOpenGitStatus,
     onOpenShell,
+    fileTrackerSlot,
 }: HeaderProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -180,6 +182,8 @@ export const Header = React.memo(function Header({
                 )}
 
                 {sessionStats && <StatsPopover stats={sessionStats} />}
+
+                {fileTrackerSlot}
 
                 {exportAction}
 
