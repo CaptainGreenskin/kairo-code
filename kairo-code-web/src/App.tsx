@@ -899,6 +899,8 @@ function App() {
     }, []);
     const [showGitStatus, setShowGitStatus] = useState(false);
     const [showShell, setShowShell] = useState(false);
+    const [shellCommandQueue, setShellCommandQueue] = useState<string[]>([]);
+    const [shellExternalCommand, setShellExternalCommand] = useState<string>('');
     const [showMcpServers, setShowMcpServers] = useState(false);
     const handleOpenMcpServers = useCallback(() => setShowMcpServers(true), []);
     const handleCloseMcpServers = useCallback(() => setShowMcpServers(false), []);
@@ -1068,6 +1070,26 @@ function App() {
         const instruction = `Please write the following content to \`${filename}\`:\n\`\`\`\n${content}\n\`\`\``;
         handleSend(instruction);
     }, [handleSend]);
+
+    const handleRunCommand = useCallback((cmd: string) => {
+        setShellCommandQueue(prev => [...prev, cmd]);
+        setShowShell(true);
+    }, []);
+
+    const handleOpenFile = useCallback((path: string) => {
+        // File opening: FileTreePanel handles file content loading
+        // For now, just log — this can be wired to FileEditorPanel later
+        console.log('[App] Open file:', path);
+    }, []);
+
+    // Process shell command queue: when ShellPanel is open and queue has items,
+    // send the first command to the shell
+    useEffect(() => {
+        if (!showShell || shellCommandQueue.length === 0) return;
+        const [cmd, ...rest] = shellCommandQueue;
+        setShellExternalCommand(cmd);
+        setShellCommandQueue(rest);
+    }, [showShell, shellCommandQueue]);
 
     // Stable callbacks for SessionSidebar (prevents memo-busting re-renders)
     const handleCreateSession = useCallback(async (workingDir: string, model: string) => {
@@ -1420,6 +1442,8 @@ function App() {
                                             onToggleCollapse={shouldCollapse && !isStreaming ? () => handleToggleMessageExpand(msgObj.id) : undefined}
                                             isBookmarked={bookmarks.has(msgObj.id)}
                                             onToggleBookmark={handleToggleBookmark}
+                                            onRunCommand={handleRunCommand}
+                                            onOpenFile={handleOpenFile}
                                         />
                                     </div>
                                 );
@@ -1541,6 +1565,7 @@ function App() {
                     <ShellPanel
                         stompClient={stompClient}
                         onClose={() => setShowShell(false)}
+                        externalCommand={shellExternalCommand}
                     />
                 </Suspense>
             )}

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { CodeBlock } from './CodeBlock';
 
@@ -59,5 +59,32 @@ describe('CodeBlock', () => {
     it('renders text as language fallback when language is empty', () => {
         render(<CodeBlock language="" content={SHORT_CODE} />);
         expect(screen.getByText('text')).toBeDefined();
+    });
+
+    it('shows Run button for shell language', () => {
+        render(<CodeBlock language="bash" content="echo hello" onRun={() => {}} />);
+        expect(screen.getByTitle('Run command')).toBeDefined();
+    });
+
+    it('shows Run button for zsh language', () => {
+        render(<CodeBlock language="zsh" content="echo hello" onRun={() => {}} />);
+        expect(screen.getByTitle('Run command')).toBeDefined();
+    });
+
+    it('does NOT show Run button for non-shell languages', () => {
+        render(<CodeBlock language="typescript" content="echo hello" onRun={() => {}} />);
+        expect(screen.queryByTitle('Run command')).toBeNull();
+    });
+
+    it('does NOT show Run button when onRun is not provided', () => {
+        render(<CodeBlock language="bash" content="echo hello" />);
+        expect(screen.queryByTitle('Run command')).toBeNull();
+    });
+
+    it('calls onRun with code content when Run button is clicked', () => {
+        const onRun = vi.fn();
+        render(<CodeBlock language="bash" content="echo hello" onRun={onRun} />);
+        fireEvent.click(screen.getByTitle('Run command'));
+        expect(onRun).toHaveBeenCalledWith('echo hello');
     });
 });

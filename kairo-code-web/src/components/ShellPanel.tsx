@@ -7,6 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 interface ShellPanelProps {
     stompClient: import('@stomp/stompjs').Client | null;
     onClose: () => void;
+    externalCommand?: string;
 }
 
 const SHELL_TOPIC_PREFIX = '/topic/shell/';
@@ -16,7 +17,7 @@ function generateShellId() {
     return 'shell-' + Math.random().toString(36).slice(2, 10);
 }
 
-export function ShellPanel({ stompClient, onClose }: ShellPanelProps) {
+export function ShellPanel({ stompClient, onClose, externalCommand }: ShellPanelProps) {
     const termRef = useRef<HTMLDivElement>(null);
     const termInstance = useRef<Terminal | null>(null);
     const fitAddon = useRef<FitAddon | null>(null);
@@ -127,6 +128,21 @@ export function ShellPanel({ stompClient, onClose }: ShellPanelProps) {
         ro.observe(termRef.current);
         return () => ro.disconnect();
     }, []);
+
+    // Handle external commands (e.g., from code block Run button)
+    const prevExternalCommand = useRef<string | undefined>(undefined);
+    useEffect(() => {
+        if (!externalCommand || externalCommand === prevExternalCommand.current) return;
+        prevExternalCommand.current = externalCommand;
+        if (stompClient?.connected) {
+            const line = externalCommand;
+            termInstance.current?.writeln(line);
+            stompClient.publish({
+                destination: SHELL_APP_PREFIX + 'input',
+                body: JSON.stringify({ shellId: shellIdRef.current, line }),
+            });
+        }
+    }, [externalCommand, stompClient]);
 
     const handleRestart = useCallback(() => {
         if (!stompClient?.connected) return;

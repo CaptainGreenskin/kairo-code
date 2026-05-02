@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Copy, Check, Maximize2, ChevronDown, ChevronUp, Hash, ArrowDownToLine, MessageSquarePlus } from 'lucide-react';
+import { Copy, Check, Maximize2, ChevronDown, ChevronUp, Hash, ArrowDownToLine, MessageSquarePlus, Play } from 'lucide-react';
 import { LazySyntaxHighlighter } from './LazySyntaxHighlighter';
 
 const COLLAPSE_LINES = 40;
+
+const SHELL_LANGUAGES = ['shell', 'bash', 'sh', 'zsh', 'console'];
 
 interface CodeBlockProps {
     language: string;
@@ -10,9 +12,10 @@ interface CodeBlockProps {
     meta?: string;
     onInsertToChat?: (text: string) => void;
     onApplyToFile?: (filename: string, content: string) => void;
+    onRun?: (command: string) => void;
 }
 
-export function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFile }: CodeBlockProps) {
+export function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFile, onRun }: CodeBlockProps) {
     const [copied, setCopied] = useState(false);
     const [showLines, setShowLines] = useState(false);
     const [expanded, setExpanded] = useState(false);
@@ -68,6 +71,15 @@ export function CodeBlock({ language, content, meta, onInsertToChat, onApplyToFi
                         )}
                     </div>
                     <div className="flex items-center gap-1">
+                        {onRun && SHELL_LANGUAGES.includes(language) && (
+                            <button
+                                onClick={() => onRun(content)}
+                                className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+                                title="Run command"
+                            >
+                                <Play size={11} />
+                            </button>
+                        )}
                         {onInsertToChat && (
                             <button
                                 onClick={() => onInsertToChat('```' + (language || '') + '\n' + content + '\n```')}
