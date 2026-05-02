@@ -42,10 +42,23 @@ class DtoTest {
 
     @Test
     void agentMessageRequest_fields() {
-        AgentMessageRequest request = new AgentMessageRequest("session-1", "hello");
+        AgentMessageRequest request = new AgentMessageRequest("session-1", "hello", null, null);
 
         assertThat(request.sessionId()).isEqualTo("session-1");
         assertThat(request.message()).isEqualTo("hello");
+        assertThat(request.imageData()).isNull();
+        assertThat(request.imageMediaType()).isNull();
+    }
+
+    @Test
+    void agentMessageRequest_withImage() {
+        AgentMessageRequest request = new AgentMessageRequest(
+                "session-1", "look at this", "base64data", "image/png");
+
+        assertThat(request.sessionId()).isEqualTo("session-1");
+        assertThat(request.message()).isEqualTo("look at this");
+        assertThat(request.imageData()).isEqualTo("base64data");
+        assertThat(request.imageMediaType()).isEqualTo("image/png");
     }
 
     @Test

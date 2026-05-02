@@ -5,5 +5,7 @@ package io.kairo.code.server.dto;
  */
 public record AgentMessageRequest(
         String sessionId,
-        String message
+        String message,
+        String imageData,        // base64 encoded, nullable
+        String imageMediaType    // e.g. "image/png", nullable
 ) {}

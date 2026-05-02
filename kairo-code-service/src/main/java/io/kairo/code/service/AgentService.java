@@ -2,6 +2,7 @@ package io.kairo.code.service;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.exception.AgentInterruptedException;
+import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.tool.ApprovalResult;
@@ -26,6 +27,7 @@ import reactor.core.scheduler.Schedulers;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -135,6 +137,33 @@ public class AgentService {
      * or → AGENT_ERROR
      */
     public Flux<AgentEvent> sendMessage(String sessionId, String text) {
+        Msg userMsg = Msg.of(MsgRole.USER, text);
+        return sendMessage(sessionId, userMsg);
+    }
+
+    /**
+     * Send a user message with an optional image attachment to a session.
+     *
+     * @param sessionId     the session ID
+     * @param text          the text message
+     * @param imageData     base64-encoded image data (nullable)
+     * @param imageMediaType MIME type of the image, e.g. "image/png" (nullable)
+     */
+    public Flux<AgentEvent> sendMessage(String sessionId, String text,
+                                         String imageData, String imageMediaType) {
+        if (imageData != null && !imageData.isBlank()) {
+            byte[] bytes = Base64.getDecoder().decode(imageData);
+            Msg userMsg = Msg.builder()
+                    .role(MsgRole.USER)
+                    .addContent(new Content.TextContent(text))
+                    .addContent(new Content.ImageContent(null, imageMediaType, bytes))
+                    .build();
+            return sendMessage(sessionId, userMsg);
+        }
+        return sendMessage(sessionId, text);
+    }
+
+    private Flux<AgentEvent> sendMessage(String sessionId, Msg userMsg) {
         SessionEntry entry = sessions.get(sessionId);
         if (entry == null) {
             return Flux.just(AgentEvent.error(sessionId,
@@ -155,7 +184,6 @@ public class AgentService {
         }
 
         Agent agent = entry.session().agent();
-        Msg userMsg = Msg.of(MsgRole.USER, text);
 
         return Flux.<AgentEvent>create(emitter -> {
                     // Emit thinking event

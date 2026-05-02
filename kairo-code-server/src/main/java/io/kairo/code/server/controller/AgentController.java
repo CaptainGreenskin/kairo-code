@@ -86,7 +86,8 @@ public class AgentController {
      */
     @MessageMapping("/agent/message")
     public void sendMessage(@Payload AgentMessageRequest request) {
-        agentService.sendMessage(request.sessionId(), request.message())
+        agentService.sendMessage(request.sessionId(), request.message(),
+                        request.imageData(), request.imageMediaType())
                 .subscribe(
                         event -> messagingTemplate.convertAndSend(
                                 "/topic/session/" + request.sessionId(), event),

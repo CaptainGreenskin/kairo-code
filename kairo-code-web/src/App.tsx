@@ -11,6 +11,7 @@ import { ThinkingIndicator } from '@components/ThinkingIndicator';
 import { LastToolDisplay } from '@components/LastToolDisplay';
 import type { Phase } from '@components/ThinkingIndicator';
 import { ChatInput } from '@components/ChatInput';
+import type { AttachedImage } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
 import { SettingsModal } from '@components/SettingsModal';
 import { FileTreePanel } from '@components/FileTreePanel';
@@ -629,7 +630,7 @@ function App() {
     }, []);
 
     const handleSend = useCallback(
-        (text: string) => {
+        (text: string, image: AttachedImage | null) => {
             if (isMobile) setSidebarOpen(false);
 
             hasErrorRef.current = false;
@@ -641,6 +642,7 @@ function App() {
                 content: text,
                 toolCalls: [],
                 timestamp: Date.now(),
+                ...(image ? { imageData: image.data, imageMediaType: image.mediaType } : {}),
             });
 
             // Create session if needed
@@ -656,7 +658,7 @@ function App() {
                                 refreshPersistedSessions();
                             }
                         });
-                        sendMessage(newId, text);
+                        sendMessage(newId, text, image?.data, image?.mediaType);
                     })
                     .catch((err) => {
                         console.error('[App] Failed to create session:', err);
@@ -672,7 +674,7 @@ function App() {
                         }
                     });
                 }
-                sendMessage(sessionId, text);
+                sendMessage(sessionId, text, image?.data, image?.mediaType);
             }
         },
         [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions],
@@ -683,12 +685,12 @@ function App() {
     }, [stopAgent, sessionId]);
 
     const handleInterruptAndSend = useCallback(
-        (text: string) => {
+        (text: string, image: AttachedImage | null) => {
             if (isThinking) {
                 handleStop();
-                setTimeout(() => handleSend(text), 300);
+                setTimeout(() => handleSend(text, image), 300);
             } else {
-                handleSend(text);
+                handleSend(text, image);
             }
         },
         [isThinking, handleStop, handleSend],
@@ -1121,7 +1123,7 @@ function App() {
 
     const handleApplyToFile = useCallback((filename: string, content: string) => {
         const instruction = `Please write the following content to \`${filename}\`:\n\`\`\`\n${content}\n\`\`\``;
-        handleSend(instruction);
+        handleSend(instruction, null);
     }, [handleSend]);
 
     const handleRunCommand = useCallback((cmd: string) => {
@@ -1450,7 +1452,7 @@ function App() {
                         </div>
                     ) : messages.length === 0 ? (
                         <WelcomeScreen
-                            onSelectPrompt={handleSend}
+                            onSelectPrompt={(prompt) => handleSend(prompt, null)}
                             appVersion={__APP_VERSION__}
                             recentSessions={persistedSessions.slice(0, 5).map((s) => ({
                                 id: s.sessionId,
