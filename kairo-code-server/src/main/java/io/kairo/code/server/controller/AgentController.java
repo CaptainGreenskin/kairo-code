@@ -67,7 +67,8 @@ public class AgentController {
                 workingDir,
                 null,
                 0,
-                0
+                0,
+                serverProperties.thinkingBudget()
         );
 
         String sessionId = agentService.createSession(config);

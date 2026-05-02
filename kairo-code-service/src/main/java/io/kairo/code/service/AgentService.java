@@ -2,9 +2,12 @@ package io.kairo.code.service;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.exception.AgentInterruptedException;
+import io.kairo.api.exception.ModelRateLimitException;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.api.model.ApiErrorType;
+import io.kairo.api.model.ApiException;
 import io.kairo.api.tool.ApprovalResult;
 import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.CodeAgentConfig;
@@ -64,10 +67,10 @@ public class AgentService {
      * Does not affect running sessions.
      */
     public void updateDefaultConfig(String apiKey, String model, String provider,
-                                     String baseUrl, String workingDir) {
+                                     String baseUrl, String workingDir, Integer thinkingBudget) {
         String resolvedBaseUrl = resolveBaseUrl(provider, baseUrl);
         this.defaultConfig = new CodeAgentConfig(
-                apiKey, resolvedBaseUrl, model, 50, workingDir, null, 0, 0
+                apiKey, resolvedBaseUrl, model, 50, workingDir, null, 0, 0, thinkingBudget
         );
         log.info("Updated default agent config (model={}, provider={})", model, provider);
     }
@@ -223,7 +226,7 @@ public class AgentService {
                                     error -> {
                                         completed.set(true);
                                         String errorMsg = error.getMessage();
-                                        String errorType = error.getClass().getSimpleName();
+                                        String errorType = classifyError(error);
                                         if (error instanceof AgentInterruptedException) {
                                             errorType = "INTERRUPTED";
                                             errorMsg = "Agent execution was interrupted";
@@ -465,6 +468,29 @@ public class AgentService {
     private boolean isRunning(String sessionId) {
         AtomicBoolean state = runningState.get(sessionId);
         return state != null && state.get();
+    }
+
+    /**
+     * Classify a throwable into a frontend-friendly error type string.
+     */
+    private static String classifyError(Throwable error) {
+        if (error instanceof ModelRateLimitException) {
+            return "RATE_LIMITED";
+        }
+        if (error instanceof ApiException apiEx) {
+            ApiErrorType type = apiEx.getErrorType();
+            if (type == null) {
+                return "PROVIDER_ERROR";
+            }
+            return switch (type) {
+                case AUTHENTICATION_ERROR -> "AUTH_FAILURE";
+                case RATE_LIMITED -> "RATE_LIMITED";
+                case BUDGET_EXCEEDED -> "QUOTA_EXCEEDED";
+                case SERVER_ERROR -> "PROVIDER_ERROR";
+                default -> "UNKNOWN";
+            };
+        }
+        return error.getClass().getSimpleName();
     }
 
     /**

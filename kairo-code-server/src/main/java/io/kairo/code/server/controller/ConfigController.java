@@ -89,7 +89,8 @@ public class ConfigController {
                 serverProperties.model(),
                 serverProperties.provider(),
                 serverProperties.baseUrl(),
-                serverProperties.workingDir()
+                serverProperties.workingDir(),
+                serverProperties.thinkingBudget()
         );
 
         return buildConfigResponse();

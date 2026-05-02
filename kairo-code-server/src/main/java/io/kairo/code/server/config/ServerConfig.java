@@ -50,7 +50,8 @@ public class ServerConfig {
                 props.workingDir(),
                 null,
                 0,
-                0
+                0,
+                props.thinkingBudget()
         );
     }
 

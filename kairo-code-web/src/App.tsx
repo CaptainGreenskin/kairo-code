@@ -372,7 +372,28 @@ function App() {
                         break;
                     }
                     hasErrorRef.current = true;
-                    addToast('error', payload.message);
+
+                    // Classify the error for user-facing display
+                    const errorType = payload.errorType ?? '';
+                    switch (errorType) {
+                        case 'AUTH_FAILURE':
+                            setShowSettings(true);
+                            addToast('error', 'API key invalid — check Settings');
+                            break;
+                        case 'RATE_LIMITED':
+                            addToast('warning', 'Rate limited — retry in a moment');
+                            break;
+                        case 'QUOTA_EXCEEDED':
+                            addToast('error', 'API quota exceeded');
+                            break;
+                        case 'PROVIDER_ERROR':
+                            addToast('error', `Provider error: ${payload.message}`);
+                            break;
+                        default:
+                            addToast('error', payload.message);
+                            break;
+                    }
+
                     addMessage({
                         id: generateId(),
                         role: 'error',
