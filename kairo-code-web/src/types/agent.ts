@@ -123,6 +123,7 @@ export interface ServerConfig {
     apiKeySet: boolean;
     defaultModel: string;
     availableModels: string[];
+    thinkingBudget?: number | null;
 }
 
 export interface SessionInfo {

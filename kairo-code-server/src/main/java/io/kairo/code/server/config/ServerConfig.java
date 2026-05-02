@@ -30,6 +30,9 @@ public class ServerConfig {
     @Value("${kairo.code.base-url:https://api.openai.com}")
     private String baseUrl;
 
+    @Value("${kairo.code.thinking-budget:#{null}}")
+    private Integer thinkingBudget;
+
     private final ConfigPersistenceService configPersistenceService;
 
     public ServerConfig(ConfigPersistenceService configPersistenceService) {
@@ -63,6 +66,7 @@ public class ServerConfig {
         String resolvedProvider = resolve("provider", provider, persisted);
         String resolvedBaseUrl = resolve("baseUrl", baseUrl, persisted);
         String resolvedWorkingDir = resolve("workingDir", workingDir, persisted);
+        Integer resolvedThinkingBudget = resolveThinkingBudget(thinkingBudget, persisted);
 
         if (StringUtils.hasText(resolvedApiKey)) {
             log.info("Using API key from {}",
@@ -74,7 +78,8 @@ public class ServerConfig {
                 resolvedModel,
                 resolvedWorkingDir,
                 resolvedBaseUrl,
-                resolvedApiKey
+                resolvedApiKey,
+                resolvedThinkingBudget
         );
     }
 
@@ -84,6 +89,21 @@ public class ServerConfig {
         }
         String persistedValue = persisted.get(key);
         return persistedValue != null ? persistedValue : "";
+    }
+
+    private Integer resolveThinkingBudget(Integer envValue, Map<String, String> persisted) {
+        if (envValue != null) {
+            return envValue;
+        }
+        String persistedValue = persisted.get("thinkingBudget");
+        if (persistedValue != null) {
+            try {
+                return Integer.parseInt(persistedValue);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**
@@ -96,14 +116,21 @@ public class ServerConfig {
         private volatile String workingDir;
         private volatile String baseUrl;
         private volatile String apiKey;
+        private volatile Integer thinkingBudget;
 
         public ServerProperties(String provider, String model, String workingDir,
-                                String baseUrl, String apiKey) {
+                                String baseUrl, String apiKey, Integer thinkingBudget) {
             this.provider = provider;
             this.model = model;
             this.workingDir = workingDir;
             this.baseUrl = baseUrl;
             this.apiKey = apiKey;
+            this.thinkingBudget = thinkingBudget;
+        }
+
+        public ServerProperties(String provider, String model, String workingDir,
+                                String baseUrl, String apiKey) {
+            this(provider, model, workingDir, baseUrl, apiKey, null);
         }
 
         public String provider() { return provider; }
@@ -111,11 +138,13 @@ public class ServerConfig {
         public String workingDir() { return workingDir; }
         public String baseUrl() { return baseUrl; }
         public String apiKey() { return apiKey; }
+        public Integer thinkingBudget() { return thinkingBudget; }
 
         public void setProvider(String provider) { this.provider = provider; }
         public void setModel(String model) { this.model = model; }
         public void setWorkingDir(String workingDir) { this.workingDir = workingDir; }
         public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
         public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+        public void setThinkingBudget(Integer thinkingBudget) { this.thinkingBudget = thinkingBudget; }
     }
 }

@@ -73,6 +73,7 @@ public class ConfigController {
         if (request.provider() != null) current.put("provider", request.provider());
         if (request.baseUrl() != null) current.put("baseUrl", request.baseUrl());
         if (request.workingDir() != null) current.put("workingDir", request.workingDir());
+        if (request.thinkingBudget() != null) current.put("thinkingBudget", String.valueOf(request.thinkingBudget()));
 
         persistenceService.save(current);
 
@@ -81,6 +82,7 @@ public class ConfigController {
         if (request.baseUrl() != null) serverProperties.setBaseUrl(request.baseUrl());
         if (request.workingDir() != null) serverProperties.setWorkingDir(request.workingDir());
         if (request.apiKey() != null) serverProperties.setApiKey(request.apiKey());
+        if (request.thinkingBudget() != null) serverProperties.setThinkingBudget(request.thinkingBudget());
 
         agentService.updateDefaultConfig(
                 serverProperties.apiKey(),
@@ -426,7 +428,8 @@ public class ConfigController {
                 serverProperties.model(),
                 serverProperties.workingDir(),
                 serverProperties.baseUrl(),
-                serverProperties.apiKey() != null && !serverProperties.apiKey().isBlank()
+                serverProperties.apiKey() != null && !serverProperties.apiKey().isBlank(),
+                serverProperties.thinkingBudget()
         );
     }
 
