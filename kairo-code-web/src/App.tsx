@@ -1406,6 +1406,7 @@ function App() {
                                 onSortChange={setSessionSortOrder}
                                 persistedSessions={persistedSessions}
                                 onLoadSnapshot={(id) => { handleLoadSnapshotHistory(id); setSidebarOpen(false); }}
+                                onRenameSuccess={(_id, _name) => { refreshPersistedSessions(); }}
                                 defaultWorkingDir={serverConfig?.workingDir}
                             />
                         </div>
@@ -1423,6 +1424,7 @@ function App() {
                         onSortChange={setSessionSortOrder}
                         persistedSessions={persistedSessions}
                         onLoadSnapshot={handleLoadSnapshotHistory}
+                        onRenameSuccess={(_id, _name) => { refreshPersistedSessions(); }}
                         defaultWorkingDir={serverConfig?.workingDir}
                     />
                 )}

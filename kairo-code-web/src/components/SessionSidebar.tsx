@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import React from 'react';
 import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, X, Archive } from 'lucide-react';
-import { listSessions, deleteSession as apiDeleteSession } from '@api/config';
+import { listSessions, deleteSession as apiDeleteSession, renameSession as apiRenameSession } from '@api/config';
 import type { SessionInfo } from '@/types/agent';
 import { NewSessionDialog } from './NewSessionDialog';
 import { formatRelativeTime } from '@utils/formatTime';
@@ -28,6 +28,8 @@ interface SessionSidebarProps {
     persistedSessions?: SnapshotMeta[];
     /** Called when a History entry is clicked. Restores the snapshot. */
     onLoadSnapshot?: (sessionId: string) => void;
+    /** Called after a successful server-side rename to refresh the sidebar. */
+    onRenameSuccess?: (id: string, name: string) => void;
     defaultWorkingDir?: string;
 }
 
@@ -39,6 +41,7 @@ interface SessionItemProps {
     onDelete: (id: string) => void;
     onPinChange?: () => void;
     onTagsChange?: () => void;
+    onRenameSuccess?: (id: string, name: string) => void;
     searchQuery?: string;
     selectMode?: boolean;
     isSelected?: boolean;
@@ -62,7 +65,7 @@ function highlightMatch(text: string, query: string): React.ReactNode {
     );
 }
 
-function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange, onTagsChange, searchQuery, selectMode, isSelected, onToggleSelect, isFocused, onFocus }: SessionItemProps) {
+function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinChange, onTagsChange, onRenameSuccess, searchQuery, selectMode, isSelected, onToggleSelect, isFocused, onFocus }: SessionItemProps) {
     const [renaming, setRenaming] = useState(false);
     const [nameInput, setNameInput] = useState('');
     const [pinned, setPinned] = useState(() => isSessionPinned(session.sessionId));
@@ -98,7 +101,14 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
         setRenaming(true);
     };
 
-    const confirmRename = () => {
+    const confirmRename = async () => {
+        const trimmed = nameInput.trim();
+        if (trimmed && trimmed !== (customName ?? '')) {
+            const ok = await apiRenameSession(session.sessionId, trimmed);
+            if (ok) {
+                onRenameSuccess?.(session.sessionId, trimmed);
+            }
+        }
         setSessionName(session.sessionId, nameInput);
         setNameVersion(v => v + 1);
         setRenaming(false);
@@ -295,6 +305,7 @@ export const SessionSidebar = React.memo(function SessionSidebar({
     onSortChange,
     persistedSessions,
     onLoadSnapshot,
+    onRenameSuccess,
     defaultWorkingDir,
 }: SessionSidebarProps) {
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -626,6 +637,7 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                                                         onDelete={handleDelete}
                                                         onPinChange={handlePinChange}
                                                         onTagsChange={handleTagsChange}
+                                                        onRenameSuccess={onRenameSuccess}
                                                         searchQuery={sessionFilter}
                                                         selectMode={selectMode}
                                                         isSelected={selectedIds.has(session.sessionId)}

@@ -109,3 +109,12 @@ export async function createDir(path: string): Promise<void> {
 export async function createFile(path: string): Promise<void> {
     return putFileContent(path, '');
 }
+
+export async function renameSession(id: string, name: string): Promise<boolean> {
+    const res = await fetch(`/api/sessions/${id}/name`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+    });
+    return res.ok;
+}

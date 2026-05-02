@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -137,6 +138,43 @@ public class SessionSnapshotController {
         Path file = sessionsDir.resolve(id + ".json");
         Files.deleteIfExists(file);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Rename a session snapshot. Returns true if the file was found and updated,
+     * false if no snapshot exists for the given id.
+     */
+    boolean renameSnapshot(String id, String name) throws IOException {
+        validateSessionId(id);
+        Path file = sessionsDir.resolve(id + ".json");
+        if (!Files.exists(file)) {
+            return false;
+        }
+        JsonNode node = objectMapper.readTree(file.toFile());
+        if (!(node instanceof ObjectNode obj)) {
+            return false;
+        }
+        obj.put("name", name);
+        Files.writeString(file, objectMapper.writeValueAsString(node), StandardCharsets.UTF_8);
+        return true;
+    }
+
+    public record RenameRequest(String name) {}
+
+    /**
+     * Rename a session snapshot via a user-provided title.
+     */
+    @PatchMapping("/{id}/name")
+    public ResponseEntity<Void> renameSession(
+            @PathVariable String id,
+            @RequestBody RenameRequest req) throws IOException {
+
+        if (req.name() == null || req.name().isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        boolean updated = renameSnapshot(id, req.name().strip());
+        return updated ? ResponseEntity.noContent().build()
+                       : ResponseEntity.notFound().build();
     }
 
     private void validateSessionId(String id) {
