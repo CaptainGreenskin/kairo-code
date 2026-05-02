@@ -40,6 +40,63 @@ class ConfigControllerTest {
     }
 
     @Test
+    void getConfig_returnsConfigWithoutApiKey() {
+        var response = controller.getConfig();
+
+        assertThat(response.model()).isEqualTo("gpt-4o");
+        assertThat(response.provider()).isEqualTo("openai");
+        assertThat(response.baseUrl()).isEqualTo("https://api.openai.com");
+        assertThat(response.workingDir()).isEqualTo(tempDir.toString());
+        // apiKey must NOT be exposed — only a boolean flag
+        assertThat(response.apiKeySet()).isTrue();
+    }
+
+    @Test
+    void getConfig_noApiKey_returnsApiKeySetFalse() {
+        ServerProperties propsNoKey = new ServerProperties(
+                "anthropic", "claude-sonnet-4-20250514", tempDir.toString(),
+                "https://api.anthropic.com", "");
+        ConfigController c = new ConfigController(propsNoKey, null, null);
+
+        var response = c.getConfig();
+
+        assertThat(response.provider()).isEqualTo("anthropic");
+        assertThat(response.model()).isEqualTo("claude-sonnet-4-20250514");
+        assertThat(response.apiKeySet()).isFalse();
+    }
+
+    @Test
+    void getConfig_noApiKey_apiKeySetIsFalse() {
+        ServerProperties propsNoKey = new ServerProperties(
+                "anthropic", "claude-3-5-sonnet-20241022", tempDir.toString(),
+                "https://api.anthropic.com", "");
+        ConfigController ctrlNoKey = new ConfigController(propsNoKey, null, null);
+
+        var config = ctrlNoKey.getConfig();
+
+        assertThat(config.provider()).isEqualTo("anthropic");
+        assertThat(config.model()).isEqualTo("claude-3-5-sonnet-20241022");
+        assertThat(config.baseUrl()).isEqualTo("https://api.anthropic.com");
+        assertThat(config.apiKeySet()).isFalse();
+    }
+
+    @Test
+    void getConfig_noApiKey_apiKeySetFalse() {
+        ServerProperties props = new ServerProperties(
+                "anthropic", "claude-3-5-sonnet-20241022", tempDir.toString(),
+                "https://api.anthropic.com", null);
+        ConfigController c = new ConfigController(props, null, null);
+
+        var response = c.getConfig();
+
+        assertThat(response.provider()).isEqualTo("anthropic");
+        assertThat(response.model()).isEqualTo("claude-3-5-sonnet-20241022");
+        assertThat(response.baseUrl()).isEqualTo("https://api.anthropic.com");
+        assertThat(response.workingDir()).isEqualTo(tempDir.toString());
+        assertThat(response.apiKeySet()).isFalse();
+    }
+
+    @Test
     void listFiles_returnsRootEntries() {
         var entries = controller.listFiles("");
 

@@ -470,7 +470,8 @@ function App() {
     }, [wsThinking, setThinking]);
 
     // Safety valve: if isThinking stays true for >6 minutes (server MAX_DURATION=5min + buffer),
-    // reset it locally. Guards against AGENT_ERROR messages dropped by WebSocket transport errors.
+    // reset it locally and notify the server to reset runningState.
+    // Guards against AGENT_ERROR messages dropped by WebSocket transport errors.
     const thinkingStartRef = useRef<number | null>(null);
     useEffect(() => {
         if (isThinking) {
@@ -480,6 +481,11 @@ function App() {
                 setAgentPhase('thinking');
                 addToast('warning', 'Agent response timed out. Please try again.');
                 thinkingStartRef.current = null;
+                // Notify server to reset runningState when WS is unavailable
+                const sid = useSessionStore.getState().sessionId;
+                if (sid) {
+                    fetch(`/api/sessions/${sid}/cancel`, { method: 'POST' }).catch(() => {});
+                }
             }, 6 * 60 * 1000); // 6 minutes
             return () => clearTimeout(timer);
         } else {
