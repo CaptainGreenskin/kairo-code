@@ -260,6 +260,9 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                     {hasContent && (
                         <div className="prose prose-sm dark:prose-invert max-w-none">
                             {renderWithTables(mainContent, {
+                                p({ children }) {
+                                    return <div className="mb-2 last:mb-0">{children}</div>;
+                                },
                                 code(props) {
                                     const { className, children, ...rest } = props as {
                                         className?: string;
@@ -329,7 +332,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                     )}
 
                     {hasToolCalls && (
-                        message.toolCalls!.length === 1 ? (
+                        message.toolCalls?.length === 1 ? (
                             <div className="mt-2">
                                 <ToolCallCard
                                     toolCall={message.toolCalls[0]}
@@ -366,7 +369,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                     )}
 
                     {/* Character count */}
-                    {!isStreaming && message.role === 'assistant' && message.content.length > 0 && (
+                    {!isStreaming && message.role === 'assistant' && (message.content?.length ?? 0) > 0 && (
                         <div className="text-[10px] text-[var(--text-muted)] mt-1 text-right">
                             {message.content.length.toLocaleString()} chars
                         </div>
