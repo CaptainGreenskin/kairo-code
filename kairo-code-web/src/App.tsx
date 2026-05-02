@@ -1310,6 +1310,7 @@ function App() {
                 models={serverConfig?.availableModels ?? []}
                 onModelChange={handleModelChange}
                 isThinking={isThinking}
+                isToolRunning={agentPhase === 'tool'}
                 isMobile={isMobile}
                 onMenuClick={handleMenuClick}
                 connectionStatus={connectionStatus}
@@ -1514,6 +1515,8 @@ function App() {
                         isThinking={isThinking}
                         appendText={chatInputAppend}
                         onAppendConsumed={() => setChatInputAppend('')}
+                        pendingToolCount={pendingToolCount}
+                        onScrollToPending={handleScrollToPending}
                     />
                 </main>
             </div>

@@ -143,6 +143,17 @@ body {
     100% { opacity: 0; }
 }
 
+@keyframes status-bar-flow {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.status-bar-flow {
+    background: linear-gradient(90deg, #22c55e 25%, #4ade80 50%, #22c55e 75%);
+    background-size: 200% 100%;
+    animation: status-bar-flow 2s linear infinite;
+}
+
 .animate-fade-out {
     animation: fade-out 2s ease forwards;
 }

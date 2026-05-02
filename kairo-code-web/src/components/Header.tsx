@@ -32,6 +32,7 @@ interface HeaderProps {
     models?: string[];
     onModelChange?: (model: string) => void;
     isThinking?: boolean;
+    isToolRunning?: boolean;
     isMobile?: boolean;
     onMenuClick?: () => void;
     connectionStatus?: ConnectionStatus;
@@ -76,6 +77,7 @@ export const Header = React.memo(function Header({
     models,
     onModelChange,
     isThinking,
+    isToolRunning = false,
     isMobile,
     onMenuClick,
     connectionStatus,
@@ -102,8 +104,18 @@ export const Header = React.memo(function Header({
         onToggleTheme();
     };
 
+    // Derive status bar state: connecting > thinking > tool > idle
+    const statusBarState =
+        connectionStatus === 'connecting'
+            ? 'connecting'
+            : isThinking
+              ? 'thinking'
+              : isToolRunning
+                ? 'tool'
+                : 'idle';
+
     return (
-        <header className="h-12 px-4 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
+        <header className="h-12 px-4 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0 relative">
             <div className="flex items-center gap-3">
                 {isMobile && onMenuClick && (
                     <button
@@ -270,6 +282,20 @@ export const Header = React.memo(function Header({
                     {isDark ? <Sun size={18} /> : <Moon size={18} />}
                 </button>
             </div>
+
+            {/* Status progress bar — 2px strip at the bottom of the header */}
+            {statusBarState !== 'idle' && (
+                <div
+                    className={`absolute bottom-0 left-0 right-0 h-[2px] ${
+                        statusBarState === 'connecting'
+                            ? 'bg-blue-500 animate-pulse'
+                            : statusBarState === 'thinking'
+                              ? 'bg-green-500 status-bar-flow'
+                              : 'bg-amber-500'
+                    }`}
+                    aria-hidden="true"
+                />
+            )}
         </header>
     );
 });
