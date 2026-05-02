@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Square } from 'lucide-react';
+import { Send, Square, Paperclip, X } from 'lucide-react';
 import { FilePicker } from './FilePicker';
 import { AutocompleteDropdown } from './AutocompleteDropdown';
 import { parseAutocompleteState, filterCommands, applyAutocomplete, SLASH_COMMANDS, type AutocompleteState } from '@utils/autocomplete';
@@ -9,9 +9,15 @@ import { readFile, formatFileBlock } from '@utils/fileReader';
 import { listFiles } from '@api/config';
 import type { FileEntry } from '@/types/agent';
 
+export interface AttachedImage {
+    data: string;       // base64 (no data: URL prefix)
+    mediaType: string;  // e.g. "image/png"
+    preview: string;    // object URL for preview
+}
+
 interface ChatInputProps {
-    onSend: (text: string) => void;
-    onInterruptAndSend?: (text: string) => void;
+    onSend: (text: string, image: AttachedImage | null) => void;
+    onInterruptAndSend?: (text: string, image: AttachedImage | null) => void;
     onStop: () => void;
     disabled: boolean;
     isThinking: boolean;
@@ -28,15 +34,31 @@ const AT_RE = /@([^\s]*)$/;
 const CHAR_WARN_THRESHOLD = 2000;
 const CHAR_MAX = 4000;
 
+function readFileAsBase64(file: File): Promise<{ data: string; mediaType: string }> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const [header, data] = dataUrl.split(',');
+            const mediaType = header.match(/data:(.*);/)?.[1] ?? 'image/png';
+            resolve({ data, mediaType });
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
 export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sessionId, initialDraft, pendingToolCount = 0, autoApproveTools = [], onScrollToPending }: ChatInputProps) {
     const [text, setText] = useState(initialDraft ?? '');
     const [dragging, setDragging] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
     const [showFilePicker, setShowFilePicker] = useState(false);
     const [atQuery, setAtQuery] = useState('');
+    const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
     const historyIndexRef = useRef<number | null>(null);
     const draftRef = useRef('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Autocomplete state
     const [acState, setAcState] = useState<AutocompleteState>({ type: 'none', query: '', startIndex: -1 });
@@ -244,7 +266,9 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
                 draftRef.current = '';
                 setText('');
                 setShowFilePicker(false);
-                onInterruptAndSend?.(trimmed);
+                const img = attachedImage;
+                setAttachedImage(null);
+                onInterruptAndSend?.(trimmed, img);
             }
             return;
         }
@@ -262,7 +286,9 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
         historyIndexRef.current = null;
         draftRef.current = '';
         if (sessionId) clearDraft(sessionId);
-        onSend(trimmed);
+        const img = attachedImage;
+        setAttachedImage(null);
+        onSend(trimmed, img);
         setText('');
         setShowFilePicker(false);
     };
@@ -273,9 +299,23 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
         setIsDragOver(false);
         const files = Array.from(e.dataTransfer.files);
         if (files.length === 0) return;
+
+        // Separate image files from non-image files
+        const imageFiles = files.filter(f => f.type.startsWith('image/'));
+        const otherFiles = files.filter(f => !f.type.startsWith('image/'));
+
+        // If there's exactly one image file and no other files, attach it as image
+        if (imageFiles.length === 1 && otherFiles.length === 0) {
+            const file = imageFiles[0];
+            const { data, mediaType } = await readFileAsBase64(file);
+            setAttachedImage({ data, mediaType, preview: URL.createObjectURL(file) });
+            return;
+        }
+
+        // Otherwise, insert all files as code blocks (existing behavior)
         const blocks = await Promise.all(files.map(readFile));
-        const text = blocks.map(formatFileBlock).join('\n');
-        setText(prev => prev ? prev + '\n' + text : text);
+        const inserted = blocks.map(formatFileBlock).join('\n');
+        setText(prev => prev ? prev + '\n' + inserted : inserted);
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -296,6 +336,18 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
     };
 
     const handlePaste = async (e: React.ClipboardEvent) => {
+        const items = Array.from(e.clipboardData.items);
+        const imageItem = items.find(i => i.type.startsWith('image/'));
+        if (imageItem) {
+            e.preventDefault();
+            const file = imageItem.getAsFile();
+            if (!file) return;
+            const { data, mediaType } = await readFileAsBase64(file);
+            setAttachedImage({ data, mediaType, preview: URL.createObjectURL(file) });
+            return;
+        }
+
+        // Fall back to existing file paste behavior
         const files = Array.from(e.clipboardData.files);
         if (files.length > 0) {
             e.preventDefault();
@@ -304,6 +356,22 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
             setText(prev => prev ? prev + '\n' + text : text);
             return;
         }
+    };
+
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const { data, mediaType } = await readFileAsBase64(file);
+        setAttachedImage({ data, mediaType, preview: URL.createObjectURL(file) });
+        // Reset input so the same file can be selected again
+        e.target.value = '';
+    };
+
+    const handleRemoveImage = () => {
+        if (attachedImage?.preview) {
+            URL.revokeObjectURL(attachedImage.preview);
+        }
+        setAttachedImage(null);
     };
 
     const handleFilePickerSelect = useCallback((block: string) => {
@@ -368,6 +436,19 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
 
             <div className="max-w-3xl mx-auto flex items-end gap-2 relative">
                 <div className="flex-1 relative">
+                    {attachedImage && (
+                        <div className="relative inline-block mb-2">
+                            <img src={attachedImage.preview} className="max-h-32 rounded border" alt="attachment" />
+                            <button
+                                onClick={handleRemoveImage}
+                                className="absolute -top-1.5 -right-1.5 bg-black/60 text-white rounded-full p-0.5 hover:bg-black/80"
+                                aria-label="Remove image"
+                            >
+                                <X size={12} />
+                            </button>
+                        </div>
+                    )}
+
                     <div
                         className={`relative transition-colors ${isDragOver ? 'ring-2 ring-[var(--accent)] ring-inset rounded-lg' : ''}`}
                     >
@@ -415,26 +496,45 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
                     )}
                 </div>
 
-                {isThinking ? (
+                <div className="flex items-center gap-1 shrink-0">
+                    <input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        hidden
+                        onChange={handleFileSelect}
+                    />
                     <button
-                        onClick={onStop}
-                        className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-[var(--color-danger)] text-white hover:bg-[var(--color-danger)]/90 transition-colors"
-                        aria-label="Stop"
-                        title="Stop"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={disabled && !isThinking}
+                        className="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-primary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label="Attach image"
+                        title="Attach image"
                     >
-                        <Square size={16} />
+                        <Paperclip size={16} />
                     </button>
-                ) : (
-                    <button
-                        onClick={handleSend}
-                        disabled={disabled || !text.trim()}
-                        className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        aria-label="Send"
-                        title="Send"
-                    >
-                        <Send size={16} />
-                    </button>
-                )}
+
+                    {isThinking ? (
+                        <button
+                            onClick={onStop}
+                            className="w-10 h-10 flex items-center justify-center rounded-lg bg-[var(--color-danger)] text-white hover:bg-[var(--color-danger)]/90 transition-colors"
+                            aria-label="Stop"
+                            title="Stop"
+                        >
+                            <Square size={16} />
+                        </button>
+                    ) : (
+                        <button
+                            onClick={handleSend}
+                            disabled={disabled || (!text.trim() && !attachedImage)}
+                            className="w-10 h-10 flex items-center justify-center rounded-lg bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label="Send"
+                            title="Send"
+                        >
+                            <Send size={16} />
+                        </button>
+                    )}
+                </div>
             </div>
         </div>
     );

@@ -166,7 +166,7 @@ interface UseAgentWebSocketReturn {
     stompClient: Client | null;
     connect: () => void;
     disconnect: () => void;
-    sendMessage: (sessionId: string, text: string) => void;
+    sendMessage: (sessionId: string, text: string, imageData?: string, imageMediaType?: string) => void;
     approveTool: (sessionId: string, toolCallId: string, approved: boolean) => void;
     stopAgent: (sessionId: string) => void;
     createSession: (workingDir: string) => Promise<string>;
@@ -354,8 +354,13 @@ export function useAgentWebSocket(
     );
 
     const sendMessage = useCallback(
-        (sessionId: string, text: string) => {
-            publish(SEND_DESTINATIONS.message, { sessionId, message: text });
+        (sessionId: string, text: string, imageData?: string, imageMediaType?: string) => {
+            const body: Record<string, unknown> = { sessionId, message: text };
+            if (imageData) {
+                body.imageData = imageData;
+                body.imageMediaType = imageMediaType;
+            }
+            publish(SEND_DESTINATIONS.message, body);
         },
         [publish],
     );

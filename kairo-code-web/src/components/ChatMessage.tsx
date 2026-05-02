@@ -150,6 +150,13 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                         </div>
                     ) : (
                         <>
+                            {message.imageData && message.imageMediaType && (
+                                <img
+                                    src={`data:${message.imageMediaType};base64,${message.imageData}`}
+                                    alt="attached image"
+                                    className="max-h-48 rounded border border-white/20 mb-2"
+                                />
+                            )}
                             <p className="whitespace-pre-wrap text-sm">{message.content}</p>
                             <div className="flex items-center justify-between mt-1">
                                 <span className="text-[10px] opacity-60">

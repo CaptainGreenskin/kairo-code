@@ -152,7 +152,7 @@ class E2EWebSocketIT {
         CreateSessionResponse createResp = createFuture.get(5, TimeUnit.SECONDS);
 
         // Stop the session
-        stompSession.send("/app/agent/stop", new AgentMessageRequest(createResp.sessionId(), "ignored"));
+        stompSession.send("/app/agent/stop", new AgentMessageRequest(createResp.sessionId(), "ignored", null, null));
 
         Thread.sleep(500);
 

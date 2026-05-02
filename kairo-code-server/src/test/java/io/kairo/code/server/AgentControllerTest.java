@@ -63,7 +63,7 @@ class AgentControllerTest {
 
     @Test
     void sendMessage_toNonExistentSession_sendsError() {
-        AgentMessageRequest request = new AgentMessageRequest("nonexistent", "hello");
+        AgentMessageRequest request = new AgentMessageRequest("nonexistent", "hello", null, null);
         controller.sendMessage(request);
 
         // The Flux completes synchronously for error case
@@ -88,7 +88,7 @@ class AgentControllerTest {
 
     @Test
     void stopAgent_nonExistentSession_noError() {
-        AgentMessageRequest request = new AgentMessageRequest("nonexistent", "ignored");
+        AgentMessageRequest request = new AgentMessageRequest("nonexistent", "ignored", null, null);
         controller.stopAgent(request);
         // Should not throw — stopAgent on non-existent session is a no-op
     }

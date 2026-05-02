@@ -102,6 +102,8 @@ export interface Message {
     toolCalls: ToolCall[];
     timestamp: number;
     streaming?: boolean;
+    imageData?: string;        // base64 encoded image data
+    imageMediaType?: string;   // e.g. "image/png"
 }
 
 export interface ToolCall {

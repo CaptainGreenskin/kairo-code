@@ -122,7 +122,7 @@ class StompIntegrationTest {
         });
 
         // Send message
-        session.send("/app/agent/message", new AgentMessageRequest(createResp.sessionId(), "hello"));
+        session.send("/app/agent/message", new AgentMessageRequest(createResp.sessionId(), "hello", null, null));
 
         doneFuture.get(10, TimeUnit.SECONDS);
 
@@ -154,7 +154,7 @@ class StompIntegrationTest {
             }
         });
 
-        session.send("/app/agent/message", new AgentMessageRequest(createResp.sessionId(), "hi"));
+        session.send("/app/agent/message", new AgentMessageRequest(createResp.sessionId(), "hi", null, null));
 
         doneFuture.get(10, TimeUnit.SECONDS);
 
@@ -191,7 +191,7 @@ class StompIntegrationTest {
         CreateSessionResponse createResp = createFuture.get(5, TimeUnit.SECONDS);
 
         // Stop agent
-        session.send("/app/agent/stop", new AgentMessageRequest(createResp.sessionId(), "ignored"));
+        session.send("/app/agent/stop", new AgentMessageRequest(createResp.sessionId(), "ignored", null, null));
 
         Thread.sleep(500);
 
