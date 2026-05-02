@@ -64,6 +64,7 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 type: 'AGENT_ERROR', sessionId, timestamp: ts,
                 payload: {
                     message: (raw.errorMessage as string) ?? 'Unknown error',
+                    errorType: (raw.errorType as string) ?? '',
                 },
             };
         case 'AGENT_THINKING':
@@ -141,8 +142,9 @@ interface UseAgentWebSocketReturn {
     sendMessage: (sessionId: string, text: string) => void;
     approveTool: (sessionId: string, toolCallId: string, approved: boolean) => void;
     stopAgent: (sessionId: string) => void;
-    createSession: (workingDir: string, model: string) => Promise<string>;
+    createSession: (workingDir: string) => Promise<string>;
     bindSession: (sessionId: string) => void;
+    switchSession: (sessionId: string) => void;
 }
 
 export function useAgentWebSocket(
@@ -185,7 +187,9 @@ export function useAgentWebSocket(
             const client = new Client({
                 webSocketFactory: () => new SockJS(WS_ENDPOINT),
                 reconnectDelay: 0,
-                heartbeatIncoming: 10000,
+                // Spring SockJS only sends SockJS-level heartbeats, not STOMP-level ones.
+                // Setting heartbeatIncoming > 0 would cause the client to disconnect every 10s.
+                heartbeatIncoming: 0,
                 heartbeatOutgoing: 10000,
                 onConnect: () => {
                     setIsConnected(true);
@@ -233,6 +237,13 @@ export function useAgentWebSocket(
                                         isThinking: boolean;
                                     };
                                     setIsThinking(payload.isThinking);
+                                }
+                                if (event.type === 'AGENT_ERROR') {
+                                    const p = event.payload as { errorType?: string };
+                                    if (p.errorType === 'SESSION_NOT_FOUND') {
+                                        sessionIdRef.current = null;
+                                        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+                                    }
                                 }
                                 onEventRef.current(event);
                             } catch {
@@ -326,36 +337,45 @@ export function useAgentWebSocket(
     );
 
     const createSession = useCallback(
-        (workingDir: string, model: string): Promise<string> => {
+        (workingDir: string): Promise<string> => {
             return new Promise((resolve, reject) => {
-                if (!clientRef.current?.connected) {
-                    reject(new Error('[WebSocket] Not connected'));
-                    return;
-                }
-                const timeout = setTimeout(() => {
-                    sub?.unsubscribe();
-                    reject(new Error('[WebSocket] createSession timeout'));
-                }, 10000);
-                const sub = clientRef.current!.subscribe('/topic/session/created', (message: IMessage) => {
-                    try {
-                        const resp = JSON.parse(message.body) as {
-                            sessionId: string;
-                        };
-                        sub.unsubscribe();
-                        clearTimeout(timeout);
-                        sessionIdRef.current = resp.sessionId;
-                        sessionStorage.setItem(SESSION_STORAGE_KEY, resp.sessionId);
-                        resolve(resp.sessionId);
-                    } catch (e) {
-                        sub.unsubscribe();
-                        clearTimeout(timeout);
-                        reject(e);
+                // Wait up to 5 s for the WebSocket to connect (connect() may still be handshaking)
+                const waitAndCreate = (attemptsLeft: number) => {
+                    if (clientRef.current?.connected) {
+                        doCreate();
+                    } else if (attemptsLeft > 0) {
+                        setTimeout(() => waitAndCreate(attemptsLeft - 1), 200);
+                    } else {
+                        reject(new Error('[WebSocket] Not connected'));
                     }
-                });
-                clientRef.current!.publish({
-                    destination: SEND_DESTINATIONS.create,
-                    body: JSON.stringify({ workingDir, model }),
-                });
+                };
+
+                const doCreate = () => {
+                    const timeout = setTimeout(() => {
+                        sub?.unsubscribe();
+                        reject(new Error('[WebSocket] createSession timeout'));
+                    }, 10000);
+                    const sub = clientRef.current!.subscribe('/topic/session/created', (message: IMessage) => {
+                        try {
+                            const resp = JSON.parse(message.body) as { sessionId: string };
+                            sub.unsubscribe();
+                            clearTimeout(timeout);
+                            sessionIdRef.current = resp.sessionId;
+                            sessionStorage.setItem(SESSION_STORAGE_KEY, resp.sessionId);
+                            resolve(resp.sessionId);
+                        } catch (e) {
+                            sub.unsubscribe();
+                            clearTimeout(timeout);
+                            reject(e);
+                        }
+                    });
+                    clientRef.current!.publish({
+                        destination: SEND_DESTINATIONS.create,
+                        body: JSON.stringify({ workingDir }),
+                    });
+                };
+
+                waitAndCreate(25); // up to 5 s (25 × 200 ms)
             });
         },
         [],
@@ -368,6 +388,60 @@ export function useAgentWebSocket(
             publish(SEND_DESTINATIONS.bindSession, { sessionId });
         },
         [publish],
+    );
+
+    const switchSession = useCallback(
+        (sid: string) => {
+            if (!clientRef.current?.connected) {
+                console.warn('[WebSocket] Not connected, cannot switch session');
+                return;
+            }
+            if (subscriptionRef.current) {
+                subscriptionRef.current.unsubscribe();
+                subscriptionRef.current = null;
+            }
+            sessionIdRef.current = sid;
+            sessionStorage.setItem(SESSION_STORAGE_KEY, sid);
+            subscriptionRef.current = clientRef.current.subscribe(
+                `${SUBSCRIBE_PREFIX}/${sid}`,
+                (message: IMessage) => {
+                    try {
+                        const raw = JSON.parse(message.body);
+                        if ('workingDir' in raw && 'model' in raw && !('type' in raw)) {
+                            const resp = raw as { sessionId: string };
+                            sessionIdRef.current = resp.sessionId;
+                            onEventRef.current({
+                                type: 'AGENT_THINKING',
+                                sessionId: resp.sessionId,
+                                payload: { isThinking: false },
+                                timestamp: Date.now(),
+                            } as AgentEvent);
+                            return;
+                        }
+                        const event = transformEvent(raw);
+                        if (event.type === 'AGENT_THINKING') {
+                            const payload = event.payload as { isThinking: boolean };
+                            setIsThinking(payload.isThinking);
+                        }
+                        if (event.type === 'AGENT_ERROR') {
+                            const p = event.payload as { errorType?: string };
+                            if (p.errorType === 'SESSION_NOT_FOUND') {
+                                sessionIdRef.current = null;
+                                sessionStorage.removeItem(SESSION_STORAGE_KEY);
+                            }
+                        }
+                        onEventRef.current(event);
+                    } catch {
+                        console.warn('[WebSocket] Failed to parse message:', message.body);
+                    }
+                },
+            );
+            clientRef.current.publish({
+                destination: SEND_DESTINATIONS.bindSession,
+                body: JSON.stringify({ sessionId: sid }),
+            });
+        },
+        [],
     );
 
     useEffect(() => {
@@ -386,5 +460,6 @@ export function useAgentWebSocket(
         stopAgent,
         createSession,
         bindSession,
+        switchSession,
     };
 }

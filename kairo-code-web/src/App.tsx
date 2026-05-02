@@ -14,6 +14,7 @@ import { ChatInput } from '@components/ChatInput';
 import { SessionSidebar } from '@components/SessionSidebar';
 import { SettingsModal } from '@components/SettingsModal';
 import { FileTreePanel } from '@components/FileTreePanel';
+import { FileEditorPanel } from '@components/FileEditorPanel';
 import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
@@ -102,6 +103,7 @@ function App() {
 
     const assistantMsgRef = useRef<string | null>(null);
     const hasErrorRef = useRef(false);
+    const wasConnectedRef = useRef(false);
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const [agentPhase, setAgentPhase] = useState<Phase>('thinking');
     const [currentToolName, setCurrentToolName] = useState<string | undefined>(undefined);
@@ -139,6 +141,7 @@ function App() {
     const [showSettings, setShowSettings] = useState(false);
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
     const [fileTreeOpen, setFileTreeOpen] = useState(() => prefs.fileTreeOpen ?? false);
+    const [editorFile, setEditorFile] = useState<string | null>(null);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -353,14 +356,21 @@ function App() {
                 }
 
                 case 'AGENT_ERROR': {
-                    const payload = event.payload as { message: string };
+                    const payload = event.payload as { message: string; errorType?: string };
                     assistantMsgRef.current = null;
-                    hasErrorRef.current = true;
                     setStreamingMsgId(null);
                     setThinking(false);
                     setAgentPhase('thinking');
                     setCurrentToolName(undefined);
                     setLoadingSessionId(null);
+                    if (payload.errorType === 'SESSION_NOT_FOUND') {
+                        setSessionId(null);
+                        clearMessages();
+                        sessionStorage.removeItem('kairo-code-session-id');
+                        addToast('warning', 'Session expired, please create a new session');
+                        break;
+                    }
+                    hasErrorRef.current = true;
                     addToast('error', payload.message);
                     addMessage({
                         id: generateId(),
@@ -435,6 +445,8 @@ function App() {
             markStepDone,
             refreshPersistedSessions,
             trackToolCall,
+            setSessionId,
+            clearMessages,
         ],
     );
 
@@ -449,6 +461,7 @@ function App() {
         approveTool,
         stopAgent,
         createSession,
+        switchSession,
     } = useAgentWebSocket(handleEvent);
 
     // Override store's isThinking with WS state
@@ -456,12 +469,13 @@ function App() {
         setThinking(wsThinking);
     }, [wsThinking, setThinking]);
 
-    // Toast on connection status changes
+    // Toast on connection status changes — only after at least one successful connection
     useEffect(() => {
-        if (connectionStatus === 'disconnected') {
-            addToast('warning', 'Connection lost. Reconnecting…', 0); // persistent
-        } else if (connectionStatus === 'connected') {
+        if (connectionStatus === 'connected') {
+            wasConnectedRef.current = true;
             setToasts(prev => prev.filter(t => t.type !== 'warning'));
+        } else if (connectionStatus === 'disconnected' && wasConnectedRef.current) {
+            addToast('warning', 'Connection lost. Reconnecting…', 0); // persistent
         }
     }, [connectionStatus, addToast]);
 
@@ -595,7 +609,7 @@ function App() {
             // Create session if needed
             if (!sessionId) {
                 connect();
-                createSession('.', currentModel || 'gpt-4')
+                createSession('.')
                     .then((newId) => {
                         setSessionId(newId);
                         // Auto-title from first user message via backend heuristic
@@ -722,11 +736,9 @@ function App() {
         (id: string) => {
             if (id === sessionId) return;
             setLoadingSessionId(id);
-            disconnect();
             setSessionId(id);
             setExpandedMessages(new Set());
             clearFiles();
-            // 立即从缓存恢复
             const cached = loadMessages(id);
             if (cached.length > 0) {
                 setMessages(cached);
@@ -738,9 +750,13 @@ function App() {
             setAgentPhase('thinking');
             setCurrentToolName(undefined);
             setLastSessionId(id);
-            connect();
+            if (isConnected) {
+                switchSession(id);
+            } else {
+                connect();
+            }
         },
-        [sessionId, disconnect, setSessionId, setMessages, clearMessages, connect, clearFiles],
+        [sessionId, setSessionId, setMessages, clearMessages, isConnected, switchSession, connect, clearFiles],
     );
 
     // Restore a session from the on-disk snapshot (no live WebSocket bind).
@@ -1092,9 +1108,9 @@ function App() {
     }, [showShell, shellCommandQueue]);
 
     // Stable callbacks for SessionSidebar (prevents memo-busting re-renders)
-    const handleCreateSession = useCallback(async (workingDir: string, model: string) => {
+    const handleCreateSession = useCallback(async (workingDir: string) => {
         connect();
-        const newId = await createSession(workingDir, model);
+        const newId = await createSession(workingDir);
         return { sessionId: newId };
     }, [connect, createSession]);
 
@@ -1103,8 +1119,12 @@ function App() {
         clearMessages();
         clearFiles();
         assistantMsgRef.current = null;
-        connect();
-    }, [setSessionId, clearMessages, connect, clearFiles]);
+        if (isConnected) {
+            switchSession(newId);
+        } else {
+            connect();
+        }
+    }, [setSessionId, clearMessages, isConnected, switchSession, connect, clearFiles]);
 
     // Command palette commands
     const commands: Command[] = useMemo(() => [
@@ -1348,6 +1368,7 @@ function App() {
                                 onSortChange={setSessionSortOrder}
                                 persistedSessions={persistedSessions}
                                 onLoadSnapshot={(id) => { handleLoadSnapshotHistory(id); setSidebarOpen(false); }}
+                                defaultWorkingDir={serverConfig?.workingDir}
                             />
                         </div>
                     </>
@@ -1364,6 +1385,7 @@ function App() {
                         onSortChange={setSessionSortOrder}
                         persistedSessions={persistedSessions}
                         onLoadSnapshot={handleLoadSnapshotHistory}
+                        defaultWorkingDir={serverConfig?.workingDir}
                     />
                 )}
 
@@ -1372,20 +1394,25 @@ function App() {
                     onToggle={handleToggleFileTree}
                     onInsertFile={handleInsertFile}
                     onMentionFile={handleMentionFile}
+                    onOpenInEditor={(path) => setEditorFile(path)}
                     width={isNarrow ? 200 : 240}
                 />
 
-                <main className="relative flex-1 flex flex-col min-w-0">
+                <main className="relative flex-1 flex flex-col min-w-0" style={{ minWidth: 0 }}>
                     {/* Chat area */}
-                    {messages.length === 0 && connectionStatus !== 'connecting' ? (
+                    {messages.length === 0 && connectionStatus === 'connecting' ? (
+                        <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
+                            <div className="text-sm">Connecting…</div>
+                        </div>
+                    ) : messages.length === 0 && isRunning ? (
+                        <div className="flex-1 flex items-center justify-center">
+                            <ThinkingIndicator isVisible={true} phase="thinking" />
+                        </div>
+                    ) : messages.length === 0 ? (
                         <WelcomeScreen
                             onSelectPrompt={handleSend}
                             appVersion={__APP_VERSION__}
                         />
-                    ) : messages.length === 0 ? (
-                        <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-                            <div className="text-sm">Connecting…</div>
-                        </div>
                     ) : (
                         <>
                         {showMessageSearch && (
@@ -1516,6 +1543,14 @@ function App() {
                         onAppendConsumed={() => setChatInputAppend('')}
                     />
                 </main>
+
+                {editorFile && (
+                    <FileEditorPanel
+                        path={editorFile}
+                        onClose={() => setEditorFile(null)}
+                        onSaved={() => {/* tree refresh not needed for edits */}}
+                    />
+                )}
             </div>
 
             {showSettings && serverConfig && (

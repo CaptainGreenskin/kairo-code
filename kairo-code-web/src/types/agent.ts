@@ -58,6 +58,7 @@ export interface AgentDonePayload {
 
 export interface AgentErrorPayload {
     message: string;
+    errorType?: string;
 }
 
 export interface AgentThinkingPayload {

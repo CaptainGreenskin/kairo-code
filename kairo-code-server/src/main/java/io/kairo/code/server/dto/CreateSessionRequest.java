@@ -2,19 +2,11 @@ package io.kairo.code.server.dto;
 
 /**
  * Request to create a new agent session.
+ * All fields except workingDir are optional — AgentController falls back to serverProperties.
  */
 public record CreateSessionRequest(
         String workingDir,
         String provider,
         String model,
         String apiKey
-) {
-    public CreateSessionRequest {
-        if (workingDir == null || workingDir.isBlank()) {
-            workingDir = System.getProperty("user.home") + "/kairo-workspace";
-        }
-        if (model == null || model.isBlank()) {
-            model = "gpt-4o";
-        }
-    }
-}
+) {}

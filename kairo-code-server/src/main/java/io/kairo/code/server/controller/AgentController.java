@@ -52,13 +52,19 @@ public class AgentController {
                 ? request.apiKey()
                 : resolveApiKey();
         String baseUrl = resolveBaseUrl(request.provider(), serverProperties);
+        String model = (request.model() != null && !request.model().isBlank())
+                ? request.model()
+                : serverProperties.model();
+        String workingDir = (request.workingDir() != null && !request.workingDir().isBlank())
+                ? request.workingDir()
+                : serverProperties.workingDir();
 
         CodeAgentConfig config = new CodeAgentConfig(
                 apiKey,
                 baseUrl,
-                request.model(),
+                model,
                 50,
-                request.workingDir(),
+                workingDir,
                 null,
                 0,
                 0

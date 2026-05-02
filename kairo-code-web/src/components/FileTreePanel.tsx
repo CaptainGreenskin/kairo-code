@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
     Folder,
     FolderOpen,
@@ -9,8 +9,12 @@ import {
     RefreshCw,
     Loader2,
     AtSign,
+    FilePlus,
+    FolderPlus,
+    Pencil,
+    Trash2,
 } from 'lucide-react';
-import { listFiles, getFileContent } from '@api/config';
+import { listFiles, getFileContent, deleteFile, renameFile, createFile, createDir } from '@api/config';
 import type { FileEntry } from '@/types/agent';
 
 interface FileTreePanelProps {
@@ -18,6 +22,7 @@ interface FileTreePanelProps {
     onToggle: () => void;
     onInsertFile: (path: string, content: string, language: string) => void;
     onMentionFile?: (path: string) => void;
+    onOpenInEditor?: (path: string) => void;
     width?: number;
 }
 
@@ -28,11 +33,17 @@ type TreeNode = {
     expanded?: boolean;
 };
 
+interface ContextMenu {
+    x: number;
+    y: number;
+    entry: FileEntry;
+}
+
 const CODE_EXTENSIONS = new Set([
     'java', 'kt', 'kts', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs',
     'rb', 'cs', 'cpp', 'cc', 'cxx', 'c', 'h', 'scala', 'groovy',
     'yaml', 'yml', 'json', 'xml', 'html', 'htm', 'css', 'scss',
-    'sh', 'bash', 'sql', 'toml', 'properties', 'gradle',
+    'sh', 'bash', 'sql', 'toml', 'properties', 'gradle', 'md',
 ]);
 
 function isCodeFile(name: string): boolean {
@@ -58,21 +69,29 @@ function TreeNodeItem({
     onExpand,
     onSelect,
     onMentionFile,
+    onContextMenu,
+    selectedPath,
 }: {
     node: TreeNode;
     depth: number;
     onExpand: (path: string) => void;
     onSelect: (entry: FileEntry) => void;
     onMentionFile?: (path: string) => void;
+    onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
+    selectedPath?: string;
 }) {
     const { entry, children, loading, expanded } = node;
     const isDir = entry.isDir;
+    const isSelected = entry.path === selectedPath;
 
     return (
         <div>
             <div
-                className="group w-full flex items-center gap-1.5 py-1 text-sm text-left hover:bg-[var(--bg-hover)] transition-colors truncate"
+                className={`group w-full flex items-center gap-1.5 py-1 text-sm text-left transition-colors truncate cursor-pointer ${
+                    isSelected ? 'bg-[var(--color-primary)]/15' : 'hover:bg-[var(--bg-hover)]'
+                }`}
                 style={{ paddingLeft: `${depth * 12 + 8}px` }}
+                onContextMenu={(e) => onContextMenu(e, entry)}
             >
                 <button
                     className={`flex-1 flex items-center gap-1.5 min-w-0 text-left ${
@@ -95,10 +114,7 @@ function TreeNodeItem({
                 </button>
                 {!isDir && onMentionFile && (
                     <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onMentionFile(entry.path);
-                        }}
+                        onClick={(e) => { e.stopPropagation(); onMentionFile(entry.path); }}
                         className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-opacity"
                         title={`Mention @${entry.name}`}
                     >
@@ -107,7 +123,7 @@ function TreeNodeItem({
                 )}
             </div>
             {isDir && expanded && (
-                <div className="transition-all" style={{ overflow: 'hidden' }}>
+                <div>
                     {loading && (
                         <div
                             className="flex items-center gap-1.5 py-1 text-xs text-[var(--text-muted)]"
@@ -125,6 +141,8 @@ function TreeNodeItem({
                             onExpand={onExpand}
                             onSelect={onSelect}
                             onMentionFile={onMentionFile}
+                            onContextMenu={onContextMenu}
+                            selectedPath={selectedPath}
                         />
                     ))}
                     {!loading && children && children.length === 0 && (
@@ -141,12 +159,81 @@ function TreeNodeItem({
     );
 }
 
-export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, width = 240 }: FileTreePanelProps) {
+function ContextMenuPopup({
+    menu,
+    onClose,
+    onAction,
+}: {
+    menu: ContextMenu;
+    onClose: () => void;
+    onAction: (action: string, entry: FileEntry) => void;
+}) {
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [onClose]);
+
+    const { entry } = menu;
+    const isDir = entry.isDir;
+
+    // Clamp position so menu stays in viewport
+    const style: React.CSSProperties = {
+        position: 'fixed',
+        top: menu.y,
+        left: menu.x,
+        zIndex: 9999,
+    };
+
+    const Item = ({ icon, label, action, danger }: { icon: React.ReactNode; label: string; action: string; danger?: boolean }) => (
+        <button
+            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors hover:bg-[var(--bg-hover)] ${
+                danger ? 'text-[var(--color-danger)]' : 'text-[var(--text-primary)]'
+            }`}
+            onClick={() => { onAction(action, entry); onClose(); }}
+        >
+            {icon}
+            {label}
+        </button>
+    );
+
+    return (
+        <div
+            ref={ref}
+            style={style}
+            className="min-w-40 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-xl py-1 overflow-hidden"
+        >
+            {!isDir && (
+                <>
+                    <Item icon={<FileCode size={12} />} label="Open in Editor" action="open" />
+                    <Item icon={<AtSign size={12} />} label="Insert to Chat" action="insert" />
+                    <div className="my-1 border-t border-[var(--border)]" />
+                </>
+            )}
+            {isDir && (
+                <>
+                    <Item icon={<FilePlus size={12} />} label="New File" action="new-file" />
+                    <Item icon={<FolderPlus size={12} />} label="New Folder" action="new-dir" />
+                    <div className="my-1 border-t border-[var(--border)]" />
+                </>
+            )}
+            <Item icon={<Pencil size={12} />} label="Rename" action="rename" />
+            <Item icon={<Trash2 size={12} />} label="Delete" action="delete" danger />
+        </div>
+    );
+}
+
+export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, onOpenInEditor, width = 240 }: FileTreePanelProps) {
     const [rootNodes, setRootNodes] = useState<TreeNode[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [workingDir, setWorkingDir] = useState<string>('');
-    const [insertingPath, setInsertingPath] = useState<string | null>(null);
+    const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
+    const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
 
     const loadRoot = useCallback(async () => {
         setLoading(true);
@@ -155,14 +242,9 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, w
             const entries = await listFiles(undefined);
             setRootNodes(entries.map((e) => ({ entry: e })));
             if (entries.length > 0) {
-                // Derive working dir from first entry's parent
                 const first = entries[0];
                 const parts = first.path.split('/').filter(Boolean);
-                if (parts.length > 1) {
-                    setWorkingDir(parts.slice(0, -1).join('/'));
-                } else {
-                    setWorkingDir('.');
-                }
+                setWorkingDir(parts.length > 1 ? parts.slice(0, -1).join('/') : '.');
             } else {
                 setWorkingDir('.');
             }
@@ -175,121 +257,135 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, w
     }, []);
 
     useEffect(() => {
-        if (isOpen && rootNodes.length === 0 && !loading) {
-            loadRoot();
-        }
+        if (isOpen && rootNodes.length === 0 && !loading) loadRoot();
     }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const handleExpand = useCallback(async (path: string) => {
-        setRootNodes((prev) => {
-            // Find the node
-            const findAndToggle = (nodes: TreeNode[]): TreeNode[] =>
-                nodes.map((node) => {
-                    if (node.entry.path === path) {
-                        if (node.children !== undefined) {
-                            // Already loaded, just toggle
-                            return { ...node, expanded: !node.expanded };
-                        }
-                        // Need to load children — handled below
-                        return { ...node, loading: true, expanded: true };
-                    }
-                    if (node.children) {
-                        return { ...node, children: findAndToggle(node.children) };
-                    }
-                    return node;
-                });
-            return findAndToggle(prev);
-        });
+    const updateNodeChildren = useCallback((nodes: TreeNode[], path: string, children: TreeNode[], opts?: { loading?: boolean }): TreeNode[] =>
+        nodes.map((node) => {
+            if (node.entry.path === path) {
+                return { ...node, loading: opts?.loading ?? false, children };
+            }
+            if (node.children) {
+                return { ...node, children: updateNodeChildren(node.children, path, children, opts) };
+            }
+            return node;
+        }), []);
 
-        // Check if we actually need to load
+    const handleExpand = useCallback(async (path: string) => {
         const findNode = (nodes: TreeNode[], target: string): TreeNode | null => {
             for (const n of nodes) {
                 if (n.entry.path === target) return n;
-                if (n.children) {
-                    const found = findNode(n.children, target);
-                    if (found) return found;
-                }
+                if (n.children) { const f = findNode(n.children, target); if (f) return f; }
             }
             return null;
         };
+
+        setRootNodes((prev) => {
+            const toggle = (nodes: TreeNode[]): TreeNode[] =>
+                nodes.map((node) => {
+                    if (node.entry.path === path) {
+                        if (node.children !== undefined) return { ...node, expanded: !node.expanded };
+                        return { ...node, loading: true, expanded: true };
+                    }
+                    if (node.children) return { ...node, children: toggle(node.children) };
+                    return node;
+                });
+            return toggle(prev);
+        });
 
         const current = findNode(rootNodes, path);
         if (current && current.children === undefined) {
             try {
                 const entries = await listFiles(path);
-                setRootNodes((prev) => {
-                    const updateChildren = (nodes: TreeNode[]): TreeNode[] =>
-                        nodes.map((node) => {
-                            if (node.entry.path === path) {
-                                return {
-                                    ...node,
-                                    loading: false,
-                                    children: entries.map((e) => ({ entry: e })),
-                                };
-                            }
-                            if (node.children) {
-                                return { ...node, children: updateChildren(node.children) };
-                            }
-                            return node;
-                        });
-                    return updateChildren(prev);
-                });
-            } catch (e) {
-                setRootNodes((prev) => {
-                    const updateChildren = (nodes: TreeNode[]): TreeNode[] =>
-                        nodes.map((node) => {
-                            if (node.entry.path === path) {
-                                return { ...node, loading: false, children: [] };
-                            }
-                            if (node.children) {
-                                return { ...node, children: updateChildren(node.children) };
-                            }
-                            return node;
-                        });
-                    return updateChildren(prev);
-                });
+                setRootNodes((prev) => updateNodeChildren(prev, path, entries.map((e) => ({ entry: e }))));
+            } catch {
+                setRootNodes((prev) => updateNodeChildren(prev, path, []));
             }
         }
-    }, [rootNodes]);
+    }, [rootNodes, updateNodeChildren]);
 
     const handleSelectFile = useCallback(async (entry: FileEntry) => {
+        setSelectedPath(entry.path);
+        if (onOpenInEditor) {
+            onOpenInEditor(entry.path);
+            return;
+        }
         if (entry.size > 100_000) {
-            // File too large — show toast-like error
             setError(`File too large: ${entry.name}`);
             setTimeout(() => setError(null), 3000);
             return;
         }
-        setInsertingPath(entry.path);
         try {
             const result = await getFileContent(entry.path);
             onInsertFile(entry.path, result.content, result.language);
         } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Failed to read file';
-            setError(msg);
+            setError(e instanceof Error ? e.message : 'Failed to read file');
             setTimeout(() => setError(null), 3000);
-        } finally {
-            setInsertingPath(null);
         }
-    }, [onInsertFile]);
+    }, [onInsertFile, onOpenInEditor]);
 
-    const displayPath = workingDir.length > 30
-        ? '...' + workingDir.slice(-27)
-        : workingDir;
+    const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry) => {
+        e.preventDefault();
+        setContextMenu({ x: e.clientX, y: e.clientY, entry });
+    }, []);
+
+    const handleContextAction = useCallback(async (action: string, entry: FileEntry) => {
+        switch (action) {
+            case 'open':
+                setSelectedPath(entry.path);
+                onOpenInEditor?.(entry.path);
+                break;
+            case 'insert': {
+                if (entry.size > 100_000) { setError('File too large'); return; }
+                try {
+                    const result = await getFileContent(entry.path);
+                    onInsertFile(entry.path, result.content, result.language);
+                } catch (e) {
+                    setError(e instanceof Error ? e.message : 'Failed to read file');
+                }
+                break;
+            }
+            case 'new-file': {
+                const name = window.prompt('New file name:');
+                if (!name?.trim()) return;
+                const newPath = `${entry.path}/${name.trim()}`;
+                try { await createFile(newPath); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to create file'); }
+                break;
+            }
+            case 'new-dir': {
+                const name = window.prompt('New folder name:');
+                if (!name?.trim()) return;
+                const newPath = `${entry.path}/${name.trim()}`;
+                try { await createDir(newPath); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to create folder'); }
+                break;
+            }
+            case 'rename': {
+                const newName = window.prompt('Rename to:', entry.name);
+                if (!newName?.trim() || newName.trim() === entry.name) return;
+                const dir = entry.path.includes('/') ? entry.path.substring(0, entry.path.lastIndexOf('/')) : '';
+                const newPath = dir ? `${dir}/${newName.trim()}` : newName.trim();
+                try { await renameFile(entry.path, newPath); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Rename failed'); }
+                break;
+            }
+            case 'delete': {
+                if (!window.confirm(`Delete "${entry.name}"?`)) return;
+                try { await deleteFile(entry.path); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Delete failed'); }
+                break;
+            }
+        }
+    }, [onInsertFile, onOpenInEditor, loadRoot]);
+
+    const displayPath = workingDir.length > 30 ? '...' + workingDir.slice(-27) : workingDir;
 
     return (
         <>
             {/* Toggle button */}
             <button
                 onClick={onToggle}
-                className={`shrink-0 w-5 flex items-center justify-center border-r border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors ${
-                    isOpen ? '' : 'border-l-0'
-                }`}
+                className="shrink-0 w-5 flex items-center justify-center border-r border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                 title={isOpen ? 'Close file tree' : 'Open file tree'}
             >
-                {isOpen
-                    ? <ChevronRight size={12} />
-                    : <ChevronRight size={12} />
-                }
+                <ChevronRight size={12} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {/* Panel */}
@@ -297,12 +393,8 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, w
                 className="shrink-0 flex flex-col border-r border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden transition-all duration-150"
                 style={{ width: isOpen ? `${width}px` : '0px' }}
             >
-                {/* Header */}
                 <div className="h-9 px-3 flex items-center justify-between border-b border-[var(--border)] shrink-0">
-                    <span
-                        className="text-xs text-[var(--text-muted)] font-mono truncate"
-                        title={workingDir}
-                    >
+                    <span className="text-xs text-[var(--text-muted)] font-mono truncate" title={workingDir}>
                         {displayPath || '.'}
                     </span>
                     <button
@@ -314,21 +406,17 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, w
                     </button>
                 </div>
 
-                {/* Tree */}
                 <div className="flex-1 overflow-y-auto py-1">
                     {loading && rootNodes.length === 0 && (
                         <div className="px-3 py-2 text-sm text-[var(--text-muted)] flex items-center gap-1.5">
-                            <Loader2 size={13} className="animate-spin" />
-                            Loading...
+                            <Loader2 size={13} className="animate-spin" /> Loading...
                         </div>
                     )}
-                    {error && !loading && rootNodes.length === 0 && (
-                        <div className="px-3 py-2 text-sm text-[var(--color-danger)]">{error}</div>
+                    {error && (
+                        <div className="px-3 py-2 text-xs text-[var(--color-danger)]">{error}</div>
                     )}
                     {!loading && rootNodes.length === 0 && !error && (
-                        <div className="px-3 py-2 text-sm text-[var(--text-muted)]">
-                            No files found
-                        </div>
+                        <div className="px-3 py-2 text-sm text-[var(--text-muted)]">No files found</div>
                     )}
                     {rootNodes.map((node) => (
                         <TreeNodeItem
@@ -338,16 +426,20 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, w
                             onExpand={handleExpand}
                             onSelect={handleSelectFile}
                             onMentionFile={onMentionFile}
+                            onContextMenu={handleContextMenu}
+                            selectedPath={selectedPath}
                         />
                     ))}
-                    {insertingPath && (
-                        <div className="px-3 py-1 text-xs text-[var(--color-info)] flex items-center gap-1.5">
-                            <Loader2 size={12} className="animate-spin" />
-                            Inserting {insertingPath}...
-                        </div>
-                    )}
                 </div>
             </div>
+
+            {contextMenu && (
+                <ContextMenuPopup
+                    menu={contextMenu}
+                    onClose={() => setContextMenu(null)}
+                    onAction={handleContextAction}
+                />
+            )}
         </>
     );
 }

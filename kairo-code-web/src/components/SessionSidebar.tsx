@@ -17,7 +17,7 @@ interface SessionSidebarProps {
     onSelectSession: (id: string) => void;
     onDeleteSession: (id: string) => void;
     onNewSession: (info: { sessionId: string; model: string }) => void;
-    onCreateSession: (workingDir: string, model: string) => Promise<{ sessionId: string }>;
+    onCreateSession: (workingDir: string) => Promise<{ sessionId: string }>;
     onSessionsChange?: (sessions: SessionInfo[]) => void;
     sortOrder?: SessionSortOrder;
     onSortChange?: (order: SessionSortOrder) => void;
@@ -28,6 +28,7 @@ interface SessionSidebarProps {
     persistedSessions?: SnapshotMeta[];
     /** Called when a History entry is clicked. Restores the snapshot. */
     onLoadSnapshot?: (sessionId: string) => void;
+    defaultWorkingDir?: string;
 }
 
 interface SessionItemProps {
@@ -294,6 +295,7 @@ export const SessionSidebar = React.memo(function SessionSidebar({
     onSortChange,
     persistedSessions,
     onLoadSnapshot,
+    defaultWorkingDir,
 }: SessionSidebarProps) {
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
@@ -704,6 +706,7 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                     onClose={() => setShowNewDialog(false)}
                     onCreate={handleCreate}
                     onCreateSession={onCreateSession}
+                    defaultWorkingDir={defaultWorkingDir}
                 />
             )}
         </>

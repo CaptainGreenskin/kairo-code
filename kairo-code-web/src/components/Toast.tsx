@@ -30,10 +30,18 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
         return () => clearTimeout(timer);
     }, [toast.id, toast.duration, onDismiss]);
 
+    // Truncate long messages (e.g. raw JSON API errors) to 120 chars
+    const short = toast.message.length > 120
+        ? toast.message.slice(0, 120) + '…'
+        : toast.message;
+
     return (
-        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg shadow-lg bg-[var(--bg-primary)] border border-[var(--border)] text-sm max-w-sm animate-fade-in">
+        <div
+            className="flex items-start gap-2 px-3 py-2.5 rounded-lg shadow-lg bg-[var(--bg-primary)] border border-[var(--border)] text-sm max-w-sm animate-fade-in"
+            title={toast.message.length > 120 ? toast.message : undefined}
+        >
             {icons[toast.type]}
-            <span className="flex-1 text-[var(--text-primary)]">{toast.message}</span>
+            <span className="flex-1 text-[var(--text-primary)] break-words">{short}</span>
             <button onClick={() => onDismiss(toast.id)} className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] shrink-0">
                 <X size={14} />
             </button>

@@ -2,6 +2,12 @@ server:
   port: 8080
 
 kairo:
+  # kairo-spring-boot-starter-core auto-config: must match kairo.code.* settings
+  model:
+    provider: ${KAIRO_PROVIDER:openai}
+    api-key: ${KAIRO_CODE_API_KEY:placeholder}
+    base-url: ${KAIRO_BASE_URL:https://api.openai.com}
+    model-name: ${KAIRO_MODEL:gpt-4o}
   code:
     working-dir: ${KAIRO_WORKING_DIR:${user.home}/kairo-workspace}
     api-key: ${KAIRO_CODE_API_KEY:}

@@ -1,47 +1,38 @@
-import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
-import { getModels } from '@api/config';
+import { useState } from 'react';
+import { X, Folder } from 'lucide-react';
+import { DirPicker } from './DirPicker';
 
 interface NewSessionDialogProps {
     onClose: () => void;
     onCreate: (info: { sessionId: string; model: string }) => void;
-    onCreateSession: (workingDir: string, model: string) => Promise<{ sessionId: string }>;
+    onCreateSession: (workingDir: string) => Promise<{ sessionId: string }>;
+    defaultWorkingDir?: string;
 }
 
-type Provider = 'openai' | 'anthropic' | 'qianwen';
+const LAST_DIR_KEY = 'kairo-last-working-dir';
 
-export function NewSessionDialog({ onClose, onCreate, onCreateSession }: NewSessionDialogProps) {
-    const [workingDir, setWorkingDir] = useState('.');
-    const [provider, setProvider] = useState<Provider>('openai');
-    const [model, setModel] = useState('');
-    const [apiKey, setApiKey] = useState('');
-    const [models, setModels] = useState<string[]>([]);
+export function NewSessionDialog({ onClose, onCreate, onCreateSession, defaultWorkingDir }: NewSessionDialogProps) {
+    const [workingDir, setWorkingDir] = useState(() => {
+        // Priority: defaultWorkingDir (from server config) → last used dir → '.'
+        return defaultWorkingDir
+            ?? localStorage.getItem(LAST_DIR_KEY)
+            ?? '.';
+    });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [fetchingModels, setFetchingModels] = useState(true);
-
-    useEffect(() => {
-        getModels()
-            .then((m) => {
-                setModels(m);
-                if (m.length > 0 && !model) setModel(m[0]);
-            })
-            .catch(() => {
-                // Fallback to common models
-                setModels(['gpt-4', 'gpt-3.5-turbo', 'claude-3-opus', 'claude-3-sonnet']);
-            })
-            .finally(() => setFetchingModels(false));
-    }, []);
+    const [showDirPicker, setShowDirPicker] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!workingDir.trim() || !model) return;
+        const dir = workingDir.trim();
+        if (!dir) return;
 
         setLoading(true);
         setError(null);
         try {
-            const result = await onCreateSession(workingDir.trim(), model);
-            onCreate({ sessionId: result.sessionId, model });
+            localStorage.setItem(LAST_DIR_KEY, dir);
+            const result = await onCreateSession(dir);
+            onCreate({ sessionId: result.sessionId, model: '' });
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to create session');
             setLoading(false);
@@ -57,9 +48,7 @@ export function NewSessionDialog({ onClose, onCreate, onCreateSession }: NewSess
         >
             <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-                    <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                        New Session
-                    </h2>
+                    <h2 className="text-base font-semibold text-[var(--text-primary)]">New Session</h2>
                     <button
                         onClick={onClose}
                         className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
@@ -80,70 +69,36 @@ export function NewSessionDialog({ onClose, onCreate, onCreateSession }: NewSess
                         <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
                             Working Directory
                         </label>
-                        <input
-                            type="text"
-                            value={workingDir}
-                            onChange={(e) => setWorkingDir(e.target.value)}
-                            className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)]"
-                            placeholder="."
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-                            Provider
-                        </label>
-                        <div className="flex gap-2">
-                            {(['openai', 'anthropic', 'qianwen'] as Provider[]).map((p) => (
-                                <button
-                                    key={p}
-                                    type="button"
-                                    onClick={() => setProvider(p)}
-                                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                                        provider === p
-                                            ? 'border-[var(--color-primary)] text-[var(--color-primary)] bg-[var(--color-primary-bg)]'
-                                            : 'border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                                    }`}
-                                >
-                                    {p}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-                            Model
-                        </label>
-                        {fetchingModels ? (
-                            <div className="text-sm text-[var(--text-muted)]">Loading models...</div>
-                        ) : (
-                            <select
-                                value={model}
-                                onChange={(e) => setModel(e.target.value)}
-                                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)]"
+                        <div className="flex gap-1">
+                            <input
+                                type="text"
+                                value={workingDir}
+                                onChange={(e) => setWorkingDir(e.target.value)}
+                                className="flex-1 px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] font-mono"
+                                placeholder="/path/to/project"
+                                autoFocus
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowDirPicker(v => !v)}
+                                className={`px-2.5 py-2 rounded-lg border transition-colors ${showDirPicker ? 'border-[var(--color-primary)] text-[var(--color-primary)] bg-[var(--color-primary-bg)]' : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
+                                title="Browse directories"
                             >
-                                {models.map((m) => (
-                                    <option key={m} value={m}>
-                                        {m}
-                                    </option>
-                                ))}
-                            </select>
+                                <Folder size={15} />
+                            </button>
+                        </div>
+                        {showDirPicker && (
+                            <DirPicker
+                                currentPath={workingDir}
+                                onSelect={(path) => { setWorkingDir(path); }}
+                                onClose={() => setShowDirPicker(false)}
+                            />
                         )}
                     </div>
 
-                    <div>
-                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-                            API Key (optional)
-                        </label>
-                        <input
-                            type="password"
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)]"
-                            placeholder="Uses server default if empty"
-                        />
-                    </div>
+                    <p className="text-xs text-[var(--text-muted)]">
+                        Model, provider, and API key are taken from Settings.
+                    </p>
 
                     <div className="flex justify-end gap-2 pt-2">
                         <button
@@ -155,7 +110,7 @@ export function NewSessionDialog({ onClose, onCreate, onCreateSession }: NewSess
                         </button>
                         <button
                             type="submit"
-                            disabled={loading || !workingDir.trim() || !model}
+                            disabled={loading || !workingDir.trim()}
                             className="px-4 py-2 text-sm font-medium text-white bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {loading ? 'Creating...' : 'Create'}

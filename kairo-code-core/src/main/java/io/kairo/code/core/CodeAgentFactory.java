@@ -164,7 +164,7 @@ public final class CodeAgentFactory {
         ModelProvider modelProvider =
                 options.modelProvider() != null
                         ? options.modelProvider()
-                        : new OpenAIProvider(config.apiKey(), config.baseUrl());
+                        : buildOpenAIProvider(config.apiKey(), config.baseUrl());
 
         DefaultToolRegistry registry = new DefaultToolRegistry();
         registry.registerTool(BashTool.class);
@@ -409,6 +409,16 @@ public final class CodeAgentFactory {
      * Find the ToolUsageTracker instance from the hooks list so it can be exposed
      * via CodeAgentSession for the :stats command.
      */
+    // URLs already containing a version segment (e.g. /v4) need /chat/completions appended
+    // directly; otherwise the standard /v1/chat/completions path is used.
+    private static OpenAIProvider buildOpenAIProvider(String apiKey, String baseUrl) {
+        if (baseUrl != null && baseUrl.matches(".*/v\\d+/?$")) {
+            String url = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+            return new OpenAIProvider(apiKey, url, "/chat/completions");
+        }
+        return new OpenAIProvider(apiKey, baseUrl);
+    }
+
     private static ToolUsageTracker findToolUsageTracker(List<Object> hooks) {
         if (hooks == null) return null;
         for (Object hook : hooks) {

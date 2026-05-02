@@ -99,12 +99,14 @@ public class ConfigController {
     @GetMapping("/models")
     public List<String> getModels() {
         return List.of(
-                "gpt-4o",
-                "gpt-4o-mini",
-                "gpt-4-turbo",
-                "claude-sonnet-4-20250514",
-                "claude-opus-4-20250514",
-                "glm-4-plus"
+                // OpenAI
+                "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
+                // Anthropic
+                "claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-5-20251001",
+                // Zhipu (GLM)
+                "glm-5.1", "glm-4-plus", "glm-4-flash", "glm-4-long",
+                // Qianwen
+                "qwen-max", "qwen-plus", "qwen-turbo"
         );
     }
 
@@ -232,6 +234,37 @@ public class ConfigController {
     private static final long MAX_FILE_SIZE = 100_000;
 
     /**
+     * List subdirectories of an arbitrary absolute path for the directory picker.
+     * No workingDir restriction — any readable directory on the server is allowed.
+     */
+    @GetMapping("/dirs")
+    public List<Map<String, String>> listDirs(@RequestParam(defaultValue = "") String path) {
+        Path target;
+        if (path.isBlank()) {
+            target = Paths.get(System.getProperty("user.home"));
+        } else {
+            target = Paths.get(path);
+        }
+
+        if (!Files.exists(target) || !Files.isDirectory(target) || !Files.isReadable(target)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Directory not found: " + path);
+        }
+
+        try (Stream<Path> stream = Files.list(target)) {
+            return stream
+                    .filter(Files::isDirectory)
+                    .filter(p -> {
+                        try { return Files.isReadable(p); } catch (Exception e) { return false; }
+                    })
+                    .sorted(Comparator.comparing(p -> p.getFileName().toString().toLowerCase()))
+                    .map(p -> Map.of("name", p.getFileName().toString(), "path", p.toAbsolutePath().toString()))
+                    .toList();
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to list directory", e);
+        }
+    }
+
+    /**
      * List directory contents (files + subdirectories).
      */
     @GetMapping("/files")
@@ -315,6 +348,64 @@ public class ConfigController {
             return Map.of("path", path, "status", "ok");
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to write file", e);
+        }
+    }
+
+    /**
+     * Delete a file or directory (recursive) within workingDir.
+     */
+    @DeleteMapping("/files")
+    public ResponseEntity<Void> deleteFile(@RequestParam String path) {
+        Path resolved = resolvePath(path);
+        if (!Files.exists(resolved)) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            if (Files.isDirectory(resolved)) {
+                try (Stream<Path> walk = Files.walk(resolved)) {
+                    walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                        try { Files.delete(p); } catch (IOException ignored) {}
+                    });
+                }
+            } else {
+                Files.delete(resolved);
+            }
+            return ResponseEntity.noContent().build();
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete", e);
+        }
+    }
+
+    /**
+     * Rename / move a file or directory within workingDir.
+     */
+    @PostMapping("/files/rename")
+    public Map<String, String> renameFile(@RequestParam String from, @RequestParam String to) {
+        Path src = resolvePath(from);
+        Path dst = resolvePath(to);
+        if (!Files.exists(src)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Source not found: " + from);
+        }
+        try {
+            Files.createDirectories(dst.getParent());
+            Files.move(src, dst, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return Map.of("from", from, "to", to, "status", "ok");
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to rename", e);
+        }
+    }
+
+    /**
+     * Create a new directory within workingDir.
+     */
+    @PostMapping("/files/mkdir")
+    public Map<String, String> mkdir(@RequestParam String path) {
+        Path resolved = resolvePath(path);
+        try {
+            Files.createDirectories(resolved);
+            return Map.of("path", path, "status", "ok");
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create directory", e);
         }
     }
 

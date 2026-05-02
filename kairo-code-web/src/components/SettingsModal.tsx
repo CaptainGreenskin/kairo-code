@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Eye, EyeOff, Check, Settings2, ChevronRight } from 'lucide-react';
+import { X, Eye, EyeOff, Check, Settings2, ChevronRight, Folder } from 'lucide-react';
 import type { ServerConfig } from '@/types/agent';
 import { updateConfig, getModels } from '@api/config';
+import { DirPicker } from './DirPicker';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -14,9 +15,15 @@ interface SettingsModalProps {
 const PROVIDERS = [
     { value: 'openai', label: 'OpenAI' },
     { value: 'anthropic', label: 'Anthropic' },
-    { value: 'zhipu', label: 'Zhipu' },
+    { value: 'zhipu', label: '智谱 (GLM)' },
+    { value: 'qianwen', label: '通义千问' },
     { value: 'custom', label: 'Custom' },
 ];
+
+const PROVIDER_BASE_URLS: Record<string, string> = {
+    zhipu: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    qianwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+};
 
 export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServers }: SettingsModalProps) {
     const [provider, setProvider] = useState(config.provider || 'openai');
@@ -24,6 +31,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
     const [model, setModel] = useState(config.model || '');
     const [baseUrl, setBaseUrl] = useState(config.baseUrl || '');
     const [workingDir, setWorkingDir] = useState(config.workingDir || '');
+    const [showDirPicker, setShowDirPicker] = useState(false);
     const [showApiKey, setShowApiKey] = useState(false);
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
@@ -47,6 +55,23 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
 
     if (!isOpen) return null;
 
+    const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+        zhipu: 'glm-5.1',
+        qianwen: 'qwen-max',
+    };
+
+    const handleProviderChange = (p: string) => {
+        setProvider(p);
+        if (PROVIDER_BASE_URLS[p]) {
+            setBaseUrl(PROVIDER_BASE_URLS[p]);
+        } else if (!PROVIDER_BASE_URLS[provider]) {
+            setBaseUrl('');
+        }
+        if (PROVIDER_DEFAULT_MODELS[p] && !model) {
+            setModel(PROVIDER_DEFAULT_MODELS[p]);
+        }
+    };
+
     const handleSave = async () => {
         setSaving(true);
         setError(null);
@@ -55,7 +80,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
             if (apiKey) req.apiKey = apiKey;
             if (model) req.model = model;
             if (provider) req.provider = provider;
-            if (provider === 'custom' && baseUrl) req.baseUrl = baseUrl;
+            if ((provider === 'custom' || PROVIDER_BASE_URLS[provider]) && baseUrl) req.baseUrl = baseUrl;
             if (workingDir) req.workingDir = workingDir;
 
             const newConfig = await updateConfig(req);
@@ -113,7 +138,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
                         <select
                             className={inputClass}
                             value={provider}
-                            onChange={(e) => setProvider(e.target.value)}
+                            onChange={(e) => handleProviderChange(e.target.value)}
                         >
                             {PROVIDERS.map((p) => (
                                 <option key={p.value} value={p.value}>
@@ -167,8 +192,8 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
                         </datalist>
                     </div>
 
-                    {/* Base URL (conditional) */}
-                    {provider === 'custom' && (
+                    {/* Base URL (shown for providers with non-standard endpoints) */}
+                    {(provider === 'custom' || PROVIDER_BASE_URLS[provider]) && (
                         <div>
                             <label className={labelClass}>Base URL</label>
                             <input
@@ -183,12 +208,29 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
                     {/* Working Directory */}
                     <div>
                         <label className={labelClass}>Working Directory</label>
-                        <input
-                            className={inputClass}
-                            placeholder="~/kairo-workspace"
-                            value={workingDir}
-                            onChange={(e) => setWorkingDir(e.target.value)}
-                        />
+                        <div className="flex gap-1">
+                            <input
+                                className={`${inputClass} flex-1 font-mono`}
+                                placeholder="~/kairo-workspace"
+                                value={workingDir}
+                                onChange={(e) => setWorkingDir(e.target.value)}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowDirPicker(v => !v)}
+                                className={`px-2.5 py-2 rounded-lg border transition-colors ${showDirPicker ? 'border-[var(--color-primary)] text-[var(--color-primary)] bg-[var(--color-primary-bg)]' : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
+                                title="Browse directories"
+                            >
+                                <Folder size={15} />
+                            </button>
+                        </div>
+                        {showDirPicker && (
+                            <DirPicker
+                                currentPath={workingDir}
+                                onSelect={(path) => setWorkingDir(path)}
+                                onClose={() => setShowDirPicker(false)}
+                            />
+                        )}
                     </div>
 
                     {/* Actions */}
