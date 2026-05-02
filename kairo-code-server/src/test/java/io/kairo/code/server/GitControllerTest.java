@@ -1,7 +1,7 @@
 package io.kairo.code.server;
 
-import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.controller.GitController;
+import io.kairo.code.service.AgentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link GitController} status/diff endpoints.
@@ -23,6 +25,7 @@ class GitControllerTest {
     Path tempDir;
 
     private GitController controller;
+    private AgentService agentService;
 
     @BeforeEach
     void setUp() throws IOException, InterruptedException {
@@ -31,10 +34,9 @@ class GitControllerTest {
         run("git", "-C", tempDir.toString(), "config", "user.name", "Test");
         run("git", "-C", tempDir.toString(), "config", "commit.gpgsign", "false");
 
-        ServerProperties props = new ServerProperties(
-                "openai", "gpt-4o", tempDir.toString(),
-                "https://api.openai.com", "sk-test");
-        controller = new GitController(props);
+        agentService = mock(AgentService.class);
+        when(agentService.getDefaultWorkingDir()).thenReturn(tempDir.toString());
+        controller = new GitController(agentService);
     }
 
     @Test

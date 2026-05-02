@@ -155,10 +155,16 @@ export function GitStatusPanel({ onClose }: GitStatusPanelProps) {
 
                 <div className="flex-1 overflow-y-auto">
                     {error ? (
-                        <div className="flex items-center justify-center h-full text-sm text-red-400 px-4 text-center">
-                            {error.includes('500') || error.includes('128') || error.toLowerCase().includes('not a git')
-                                ? 'Not a git repository or git not available'
-                                : error}
+                        <div className="flex flex-col items-center justify-center h-full text-sm px-4 text-center gap-2">
+                            <span className={error.includes('503')
+                                ? 'text-[var(--text-muted)]'
+                                : 'text-red-400'}>
+                                {error.includes('503')
+                                    ? 'Configure working directory in Settings'
+                                    : error.includes('500') || error.includes('128') || error.toLowerCase().includes('not a git')
+                                        ? 'Not a git repository or git not available'
+                                        : error}
+                            </span>
                         </div>
                     ) : loading && files.length === 0 ? (
                         <div className="flex items-center justify-center h-full text-sm text-[var(--text-muted)]">

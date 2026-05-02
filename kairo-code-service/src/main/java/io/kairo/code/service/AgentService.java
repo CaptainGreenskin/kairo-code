@@ -452,6 +452,13 @@ public class AgentService {
     }
 
     /**
+     * Return the configured default working directory, or null if not set.
+     */
+    public String getDefaultWorkingDir() {
+        return defaultConfig != null ? defaultConfig.workingDir() : null;
+    }
+
+    /**
      * Return a list of active session summaries.
      */
     public List<SessionInfo> listSessions() {
