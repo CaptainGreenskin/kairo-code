@@ -11,11 +11,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DtoTest {
 
     @Test
-    void createSessionRequest_defaults() {
+    void createSessionRequest_nullsPassthrough() {
         CreateSessionRequest request = new CreateSessionRequest(null, null, null, null);
 
-        assertThat(request.workingDir()).endsWith("kairo-workspace");
-        assertThat(request.model()).isEqualTo("gpt-4o");
+        assertThat(request.workingDir()).isNull();
+        assertThat(request.model()).isNull();
+        assertThat(request.provider()).isNull();
+        assertThat(request.apiKey()).isNull();
     }
 
     @Test
