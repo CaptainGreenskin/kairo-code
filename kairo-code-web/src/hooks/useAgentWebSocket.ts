@@ -16,6 +16,33 @@ const SEND_DESTINATIONS = {
 
 const SESSION_STORAGE_KEY = 'kairo-code-session-id';
 
+/** Timer handle for the stalled running-state probe. */
+let stalledRunningTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Cancel the stalled running-state probe timer.
+ */
+function clearStalledRunningTimer() {
+    if (stalledRunningTimer) {
+        clearTimeout(stalledRunningTimer);
+        stalledRunningTimer = null;
+    }
+}
+
+/**
+ * Start a 10s probe timer after receiving SESSION_RESTORED with running=true.
+ * If no agent activity arrives within 10s, call the REST cancel endpoint to
+ * reset the server-side runningState.
+ */
+function startStalledRunningProbe(sessionId: string) {
+    clearStalledRunningTimer();
+    stalledRunningTimer = setTimeout(() => {
+        stalledRunningTimer = null;
+        console.warn('[WebSocket] SESSION_RESTORED running=true with no activity for 10s — cancelling stuck state');
+        fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' }).catch(() => {});
+    }, 10_000);
+}
+
 /**
  * Transform backend AgentEvent record (flat fields) to frontend AgentEvent (payload-based).
  *
@@ -169,6 +196,7 @@ export function useAgentWebSocket(
             clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
         }
+        clearStalledRunningTimer();
         if (subscriptionRef.current) {
             subscriptionRef.current.unsubscribe();
             subscriptionRef.current = null;
@@ -237,6 +265,16 @@ export function useAgentWebSocket(
                                         isThinking: boolean;
                                     };
                                     setIsThinking(payload.isThinking);
+                                    clearStalledRunningTimer();
+                                }
+                                if (event.type === 'TEXT_CHUNK' || event.type === 'TOOL_CALL') {
+                                    clearStalledRunningTimer();
+                                }
+                                if (event.type === 'SESSION_RESTORED') {
+                                    const p = event.payload as { running: boolean };
+                                    if (p.running) {
+                                        startStalledRunningProbe(event.sessionId);
+                                    }
                                 }
                                 if (event.type === 'AGENT_ERROR') {
                                     const p = event.payload as { errorType?: string };
@@ -422,6 +460,16 @@ export function useAgentWebSocket(
                         if (event.type === 'AGENT_THINKING') {
                             const payload = event.payload as { isThinking: boolean };
                             setIsThinking(payload.isThinking);
+                            clearStalledRunningTimer();
+                        }
+                        if (event.type === 'TEXT_CHUNK' || event.type === 'TOOL_CALL') {
+                            clearStalledRunningTimer();
+                        }
+                        if (event.type === 'SESSION_RESTORED') {
+                            const p = event.payload as { running: boolean };
+                            if (p.running) {
+                                startStalledRunningProbe(event.sessionId);
+                            }
                         }
                         if (event.type === 'AGENT_ERROR') {
                             const p = event.payload as { errorType?: string };
