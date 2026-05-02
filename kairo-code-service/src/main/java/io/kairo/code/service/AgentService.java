@@ -67,10 +67,10 @@ public class AgentService {
      * Does not affect running sessions.
      */
     public void updateDefaultConfig(String apiKey, String model, String provider,
-                                     String baseUrl, String workingDir) {
+                                     String baseUrl, String workingDir, Integer thinkingBudget) {
         String resolvedBaseUrl = resolveBaseUrl(provider, baseUrl);
         this.defaultConfig = new CodeAgentConfig(
-                apiKey, resolvedBaseUrl, model, 50, workingDir, null, 0, 0
+                apiKey, resolvedBaseUrl, model, 50, workingDir, null, 0, 0, thinkingBudget
         );
         log.info("Updated default agent config (model={}, provider={})", model, provider);
     }
