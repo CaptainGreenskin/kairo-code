@@ -1073,7 +1073,7 @@ function App() {
     const sessionStats = useMemo(() => {
         const userMessages = messages.filter(m => m.role === 'user').length;
         const assistantMessages = messages.filter(m => m.role === 'assistant').length;
-        const toolCalls = messages.reduce((sum, m) => sum + m.toolCalls.length, 0);
+        const toolCalls = messages.reduce((sum, m) => sum + (m.toolCalls?.length ?? 0), 0);
         return { userMessages, assistantMessages, toolCalls, estimatedTokens };
     }, [messages]);
 

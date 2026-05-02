@@ -43,6 +43,7 @@ import io.kairo.code.core.hook.UnfulfilledInstructionHook;
 import io.kairo.core.agent.AgentBuilder;
 import java.nio.file.Path;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.kairo.core.model.anthropic.AnthropicProvider;
 import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.TaskTool;
 import io.kairo.code.core.task.TaskToolDependencies;
@@ -164,7 +165,7 @@ public final class CodeAgentFactory {
         ModelProvider modelProvider =
                 options.modelProvider() != null
                         ? options.modelProvider()
-                        : buildOpenAIProvider(config.apiKey(), config.baseUrl());
+                        : buildModelProvider(config.apiKey(), config.baseUrl());
 
         DefaultToolRegistry registry = new DefaultToolRegistry();
         registry.registerTool(BashTool.class);
@@ -409,6 +410,13 @@ public final class CodeAgentFactory {
      * Find the ToolUsageTracker instance from the hooks list so it can be exposed
      * via CodeAgentSession for the :stats command.
      */
+    private static ModelProvider buildModelProvider(String apiKey, String baseUrl) {
+        if (baseUrl != null && baseUrl.toLowerCase().contains("anthropic")) {
+            return new AnthropicProvider(apiKey, baseUrl);
+        }
+        return buildOpenAIProvider(apiKey, baseUrl);
+    }
+
     // URLs already containing a version segment (e.g. /v4) need /chat/completions appended
     // directly; otherwise the standard /v1/chat/completions path is used.
     private static OpenAIProvider buildOpenAIProvider(String apiKey, String baseUrl) {

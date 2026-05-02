@@ -71,6 +71,9 @@ public class AgentService {
     }
 
     private String resolveBaseUrl(String provider, String propsBaseUrl) {
+        if (propsBaseUrl != null && !propsBaseUrl.isBlank()) {
+            return propsBaseUrl;
+        }
         if (provider == null || provider.isBlank()) {
             return propsBaseUrl;
         }

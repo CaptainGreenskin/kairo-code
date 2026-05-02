@@ -190,7 +190,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
         );
     }
 
-    const hasToolCalls = message.toolCalls.length > 0;
+    const hasToolCalls = (message.toolCalls?.length ?? 0) > 0;
     const { think: thinkBlocks, rest: mainContent } = extractThinkBlocks(debouncedContent);
     const hasContent = mainContent.length > 0;
 
@@ -322,7 +322,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                     )}
 
                     {hasToolCalls && (
-                        message.toolCalls.length === 1 ? (
+                        message.toolCalls!.length === 1 ? (
                             <div className="mt-2">
                                 <ToolCallCard
                                     toolCall={message.toolCalls[0]}
