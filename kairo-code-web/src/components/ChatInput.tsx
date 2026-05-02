@@ -19,13 +19,16 @@ interface ChatInputProps {
     onAppendConsumed?: () => void;
     sessionId?: string;
     initialDraft?: string;
+    pendingToolCount?: number;
+    autoApproveTools?: string[];
+    onScrollToPending?: () => void;
 }
 
 const AT_RE = /@([^\s]*)$/;
 const CHAR_WARN_THRESHOLD = 2000;
 const CHAR_MAX = 4000;
 
-export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sessionId, initialDraft }: ChatInputProps) {
+export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThinking, appendText, onAppendConsumed, sessionId, initialDraft, pendingToolCount = 0, autoApproveTools = [], onScrollToPending }: ChatInputProps) {
     const [text, setText] = useState(initialDraft ?? '');
     const [dragging, setDragging] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
@@ -346,6 +349,23 @@ export function ChatInput({ onSend, onInterruptAndSend, onStop, disabled, isThin
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
         >
+            {/* AutoApprove transparency row */}
+            {(pendingToolCount > 0 || autoApproveTools.length > 0) && (
+                <div
+                    className={`text-xs px-4 py-1 mb-2 cursor-pointer transition-colors ${
+                        pendingToolCount > 0
+                            ? 'text-amber-400 hover:text-amber-300'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    }`}
+                    onClick={() => pendingToolCount > 0 && onScrollToPending?.()}
+                    title={pendingToolCount > 0 ? 'Click to scroll to pending tool' : undefined}
+                >
+                    {pendingToolCount > 0
+                        ? `\u{1F7E1} Pending approval: ${pendingToolCount} tool${pendingToolCount > 1 ? 's' : ''}`
+                        : `\u2705 Auto-approving: ${autoApproveTools.join(', ')}`}
+                </div>
+            )}
+
             <div className="max-w-3xl mx-auto flex items-end gap-2 relative">
                 <div className="flex-1 relative">
                     <div
