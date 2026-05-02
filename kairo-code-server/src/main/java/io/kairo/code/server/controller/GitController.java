@@ -1,6 +1,6 @@
 package io.kairo.code.server.controller;
 
-import io.kairo.code.server.config.ServerConfig.ServerProperties;
+import io.kairo.code.service.AgentService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -26,10 +28,19 @@ public class GitController {
     private static final int MAX_DIFF_LINES = 500;
     private static final int GIT_TIMEOUT_SECONDS = 10;
 
-    private final Path workingDir;
+    private final AgentService agentService;
 
-    public GitController(ServerProperties serverProperties) {
-        this.workingDir = Paths.get(serverProperties.workingDir());
+    public GitController(AgentService agentService) {
+        this.agentService = agentService;
+    }
+
+    private Path getCurrentWorkingDir() {
+        String dir = agentService.getDefaultWorkingDir();
+        if (dir == null || dir.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Working directory not configured");
+        }
+        return Paths.get(dir);
     }
 
     /**
@@ -39,7 +50,7 @@ public class GitController {
      */
     @GetMapping("/status")
     public List<Map<String, String>> getStatus() {
-        String output = runGit("git", "status", "--porcelain");
+        String output = runGit(getCurrentWorkingDir(), "git", "status", "--porcelain");
         List<Map<String, String>> result = new ArrayList<>();
         for (String line : output.split("\n")) {
             if (line.isBlank() || line.length() < 3) continue;
@@ -57,10 +68,11 @@ public class GitController {
      */
     @GetMapping("/diff")
     public Map<String, String> getDiff(@RequestParam(defaultValue = "") String path) {
+        Path workingDir = getCurrentWorkingDir();
         String[] cmd = path.isBlank()
                 ? new String[]{"git", "diff", "HEAD"}
                 : new String[]{"git", "diff", "HEAD", "--", path};
-        String output = runGit(cmd);
+        String output = runGit(workingDir, cmd);
         String[] lines = output.split("\n");
         boolean truncated = lines.length > MAX_DIFF_LINES;
         String content = truncated
@@ -69,17 +81,34 @@ public class GitController {
         return Map.of("diff", content, "truncated", String.valueOf(truncated));
     }
 
-    private String runGit(String... cmd) {
+    private String runGit(Path workingDir, String... cmd) {
         Process proc = null;
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(workingDir.toFile());
-            pb.redirectErrorStream(true);
+            // Do NOT merge stderr into stdout — git errors on stderr must not
+            // leak into the porcelain status output.
             proc = pb.start();
+
+            // Drain stderr asynchronously so the OS buffer doesn't fill and block.
+            final Process finalProc = proc;
+            Thread stderrDrain = new Thread(() -> {
+                try { finalProc.getErrorStream().transferTo(OutputStream.nullOutputStream()); }
+                catch (IOException ignored) {}
+            });
+            stderrDrain.setDaemon(true);
+            stderrDrain.start();
+
             boolean finished = proc.waitFor(GIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!finished) {
                 proc.destroyForcibly();
                 throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "Git command timed out");
+            }
+            stderrDrain.join(1000);
+            int exitCode = proc.exitValue();
+            if (exitCode != 0) {
+                // Non-zero exit (e.g. not a git repo, no commits yet) → return empty.
+                return "";
             }
             return new String(proc.getInputStream().readAllBytes());
         } catch (ResponseStatusException e) {
