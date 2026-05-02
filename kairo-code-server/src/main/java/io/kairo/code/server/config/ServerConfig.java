@@ -128,6 +128,11 @@ public class ServerConfig {
             this.thinkingBudget = thinkingBudget;
         }
 
+        public ServerProperties(String provider, String model, String workingDir,
+                                String baseUrl, String apiKey) {
+            this(provider, model, workingDir, baseUrl, apiKey, null);
+        }
+
         public String provider() { return provider; }
         public String model() { return model; }
         public String workingDir() { return workingDir; }

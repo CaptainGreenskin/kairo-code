@@ -60,7 +60,7 @@ class DtoTest {
 
     @Test
     void serverConfigResponse_fields() {
-        ServerConfigResponse response = new ServerConfigResponse("openai", "gpt-4o", "/workspace", "https://api.openai.com", true);
+        ServerConfigResponse response = new ServerConfigResponse("openai", "gpt-4o", "/workspace", "https://api.openai.com", true, null);
 
         assertThat(response.provider()).isEqualTo("openai");
         assertThat(response.model()).isEqualTo("gpt-4o");
