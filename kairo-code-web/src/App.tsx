@@ -540,9 +540,22 @@ function App() {
     // Load the list of on-disk session snapshots once on mount.
     useEffect(() => { refreshPersistedSessions(); }, [refreshPersistedSessions]);
 
-    // Cross-tab refresh: when the server-side snapshot fails to restore via
-    // sessionStorage (e.g., new tab, cleared sessionStorage), fall back to the
-    // last-active session id stored in localStorage and rehydrate from disk.
+    // Cross-tab sync: when another tab creates or switches a session,
+    // refresh the sidebar's persisted session list. Do not switch the
+    // current tab's active session to avoid interrupting the user.
+    useEffect(() => {
+        const handler = (e: StorageEvent) => {
+            if (e.key === 'kairo-last-session') {
+                refreshPersistedSessions();
+            }
+        };
+        window.addEventListener('storage', handler);
+        return () => window.removeEventListener('storage', handler);
+    }, [refreshPersistedSessions]);
+
+    // Cross-tab restore: when the in-memory store is empty (e.g., new tab),
+    // fall back to the last-active session id stored in localStorage and
+    // rehydrate from the server-side snapshot.
     // Only run when the in-memory store is empty to avoid clobbering live state.
     useEffect(() => {
         if (sessionStorage.getItem('kairo-code-session-id')) return;
