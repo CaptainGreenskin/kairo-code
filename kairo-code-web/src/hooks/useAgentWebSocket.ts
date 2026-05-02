@@ -205,7 +205,11 @@ export function useAgentWebSocket(
             clientRef.current.deactivate();
             clientRef.current = null;
         }
-        reconnectAttemptsRef.current = 0;
+        // Note: reconnectAttemptsRef is NOT reset here. The exponential backoff
+        // counter is owned by onConnect (success → 0) and disconnect (explicit → 0).
+        // Resetting on every cleanup would defeat the backoff because cleanup() is
+        // called at the start of every createConnection() retry — the delay would
+        // stay pegged at 1s forever.
     }, []);
 
     const createConnection = useCallback(() => {
@@ -335,6 +339,7 @@ export function useAgentWebSocket(
         sessionIdRef.current = null;
         sessionStorage.removeItem(SESSION_STORAGE_KEY);
         cleanup();
+        reconnectAttemptsRef.current = 0;
         setIsConnected(false);
         setIsThinking(false);
         setConnectionStatus('disconnected');

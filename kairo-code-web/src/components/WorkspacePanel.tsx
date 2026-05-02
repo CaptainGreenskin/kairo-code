@@ -48,7 +48,12 @@ export function WorkspacePanel({ currentSessionId, onSelectSession }: WorkspaceP
                                                       'bg-[var(--text-muted)]'
                         }`} />
                         <span className="truncate text-[var(--text-secondary)]" title={ws.workingDir}>
-                            {ws.workingDir.split('/').pop() || ws.workingDir}
+                            {(() => {
+                                const wd = ws.workingDir;
+                                if (!wd || wd === '.' || wd === './') return '(current dir)';
+                                const tail = wd.split('/').filter(Boolean).pop();
+                                return tail || wd;
+                            })()}
                         </span>
                         {ws.messageCount > 0 && (
                             <span className="ml-auto text-[var(--text-muted)] flex-shrink-0">

@@ -668,7 +668,7 @@ function App() {
             // Create session if needed
             if (!sessionId) {
                 connect();
-                createSession('.')
+                createSession(serverConfig?.workingDir || '.')
                     .then((newId) => {
                         setSessionId(newId);
                         // Auto-title from first user message via backend heuristic
@@ -697,7 +697,7 @@ function App() {
                 sendMessage(sessionId, text, image?.data, image?.mediaType);
             }
         },
-        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions],
+        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions, serverConfig],
     );
 
     const handleStop = useCallback(() => {
@@ -1397,7 +1397,7 @@ function App() {
                 isToolRunning={agentPhase === 'tool'}
                 isMobile={isMobile}
                 onMenuClick={handleMenuClick}
-                connectionStatus={connectionStatus}
+                connectionStatus={sessionId ? connectionStatus : undefined}
             />
 
             <SearchBar
