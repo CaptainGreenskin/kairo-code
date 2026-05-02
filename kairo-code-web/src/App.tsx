@@ -469,6 +469,24 @@ function App() {
         setThinking(wsThinking);
     }, [wsThinking, setThinking]);
 
+    // Safety valve: if isThinking stays true for >6 minutes (server MAX_DURATION=5min + buffer),
+    // reset it locally. Guards against AGENT_ERROR messages dropped by WebSocket transport errors.
+    const thinkingStartRef = useRef<number | null>(null);
+    useEffect(() => {
+        if (isThinking) {
+            if (!thinkingStartRef.current) thinkingStartRef.current = Date.now();
+            const timer = setTimeout(() => {
+                setThinking(false);
+                setAgentPhase('thinking');
+                addToast('warning', 'Agent response timed out. Please try again.');
+                thinkingStartRef.current = null;
+            }, 6 * 60 * 1000); // 6 minutes
+            return () => clearTimeout(timer);
+        } else {
+            thinkingStartRef.current = null;
+        }
+    }, [isThinking, setThinking, addToast]);
+
     // Toast on connection status changes — only after at least one successful connection
     useEffect(() => {
         if (connectionStatus === 'connected') {
