@@ -5,33 +5,52 @@ import { X, Minimize2, Maximize2, RotateCcw } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 
 interface ShellPanelProps {
-    stompClient: import('@stomp/stompjs').Client | null;
     onClose: () => void;
     externalCommand?: string;
 }
 
-const SHELL_TOPIC_PREFIX = '/topic/shell/';
-const SHELL_APP_PREFIX = '/app/shell/';
-
-function generateShellId() {
-    return 'shell-' + Math.random().toString(36).slice(2, 10);
-}
-
-export function ShellPanel({ stompClient, onClose, externalCommand }: ShellPanelProps) {
+export function ShellPanel({ onClose, externalCommand }: ShellPanelProps) {
     const termRef = useRef<HTMLDivElement>(null);
     const termInstance = useRef<Terminal | null>(null);
     const fitAddon = useRef<FitAddon | null>(null);
-    const shellIdRef = useRef<string>(generateShellId());
-    const lineBufferRef = useRef('');
+    const wsRef = useRef<WebSocket | null>(null);
     const [isMaximized, setIsMaximized] = useState(false);
     const [panelHeight, setPanelHeight] = useState(280);
-    const subscriptions = useRef<import('@stomp/stompjs').StompSubscription[]>([]);
 
-    const writeToTerm = useCallback((text: string) => {
-        termInstance.current?.write(text);
+    // Connect WebSocket to /ws/shell
+    const connectWs = useCallback(() => {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/shell`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+            termInstance.current?.write('\x1b[32m● Shell connected\x1b[0m\r\n');
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'data') {
+                    termInstance.current?.write(msg.data);
+                } else if (msg.type === 'exit') {
+                    termInstance.current?.write(
+                        `\r\n\x1b[33m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`
+                    );
+                }
+            } catch {
+                // ignore parse errors
+            }
+        };
+
+        ws.onclose = () => {
+            // Auto-reconnect after 2s
+            setTimeout(() => {
+                if (termRef.current) connectWs();
+            }, 2000);
+        };
     }, []);
 
-    // Initialize xterm
+    // Initialize xterm + connect WebSocket on mount
     useEffect(() => {
         if (!termRef.current) return;
         const term = new Terminal({
@@ -54,72 +73,20 @@ export function ShellPanel({ stompClient, onClose, externalCommand }: ShellPanel
         termInstance.current = term;
         fitAddon.current = fit;
 
-        // Handle user input — accumulate until Enter
+        // User input: send raw bytes to shell via WebSocket
         term.onData((data) => {
-            if (data === '\r') {
-                // Enter pressed — send line
-                const line = lineBufferRef.current;
-                lineBufferRef.current = '';
-                term.write('\r\n');
-                if (stompClient?.connected) {
-                    stompClient.publish({
-                        destination: SHELL_APP_PREFIX + 'input',
-                        body: JSON.stringify({ shellId: shellIdRef.current, line }),
-                    });
-                }
-            } else if (data === '\x7f') {
-                // Backspace
-                if (lineBufferRef.current.length > 0) {
-                    lineBufferRef.current = lineBufferRef.current.slice(0, -1);
-                    term.write('\b \b');
-                }
-            } else if (data >= ' ') {
-                lineBufferRef.current += data;
-                term.write(data);
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ type: 'input', data }));
             }
         });
 
-        return () => { term.dispose(); };
-    }, [stompClient]);
-
-    // STOMP subscriptions + shell create
-    useEffect(() => {
-        if (!stompClient?.connected) return;
-        const shellId = shellIdRef.current;
-
-        const outSub = stompClient.subscribe(
-            SHELL_TOPIC_PREFIX + shellId + '/out',
-            (msg) => {
-                const { line } = JSON.parse(msg.body) as { line: string; isError: boolean };
-                writeToTerm(line + '\r\n');
-            },
-        );
-        const metaSub = stompClient.subscribe(
-            SHELL_TOPIC_PREFIX + shellId + '/meta',
-            (msg) => {
-                const { type, exitCode } = JSON.parse(msg.body) as { type: string; exitCode?: number };
-                if (type === 'ready') {
-                    writeToTerm('\x1b[32m● Shell ready\x1b[0m\r\n');
-                } else if (type === 'exit') {
-                    writeToTerm(`\r\n\x1b[33m[Process exited with code ${exitCode}]\x1b[0m\r\n`);
-                }
-            },
-        );
-        subscriptions.current = [outSub, metaSub];
-
-        stompClient.publish({
-            destination: SHELL_APP_PREFIX + 'create',
-            body: JSON.stringify({ shellId }),
-        });
+        connectWs();
 
         return () => {
-            subscriptions.current.forEach(s => s.unsubscribe());
-            stompClient.publish({
-                destination: SHELL_APP_PREFIX + 'close',
-                body: JSON.stringify({ shellId }),
-            });
+            wsRef.current?.close();
+            term.dispose();
         };
-    }, [stompClient, writeToTerm]);
+    }, [connectWs]);
 
     // Resize observer
     useEffect(() => {
@@ -129,47 +96,21 @@ export function ShellPanel({ stompClient, onClose, externalCommand }: ShellPanel
         return () => ro.disconnect();
     }, []);
 
-    // Handle external commands (e.g., from code block Run button)
-    const prevExternalCommand = useRef<string | undefined>(undefined);
+    // Handle external command injection
     useEffect(() => {
-        if (!externalCommand || externalCommand === prevExternalCommand.current) return;
-        prevExternalCommand.current = externalCommand;
-        if (stompClient?.connected) {
-            const line = externalCommand;
-            termInstance.current?.writeln(line);
-            stompClient.publish({
-                destination: SHELL_APP_PREFIX + 'input',
-                body: JSON.stringify({ shellId: shellIdRef.current, line }),
-            });
+        if (!externalCommand) return;
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            termInstance.current?.writeln(externalCommand);
+            wsRef.current.send(JSON.stringify({ type: 'input', data: externalCommand + '\n' }));
         }
-    }, [externalCommand, stompClient]);
+    }, [externalCommand]);
 
+    // Restart: close current WS and reconnect
     const handleRestart = useCallback(() => {
-        if (!stompClient?.connected) return;
-        const old = shellIdRef.current;
-        stompClient.publish({ destination: SHELL_APP_PREFIX + 'close', body: JSON.stringify({ shellId: old }) });
-        shellIdRef.current = generateShellId();
+        wsRef.current?.close();
         termInstance.current?.clear();
-        // Re-subscribe with new shellId
-        const shellId = shellIdRef.current;
-        subscriptions.current.forEach(s => s.unsubscribe());
-        const outSub = stompClient.subscribe(
-            SHELL_TOPIC_PREFIX + shellId + '/out',
-            (msg) => {
-                const { line } = JSON.parse(msg.body) as { line: string };
-                writeToTerm(line + '\r\n');
-            },
-        );
-        const metaSub = stompClient.subscribe(
-            SHELL_TOPIC_PREFIX + shellId + '/meta',
-            (msg) => {
-                const { type } = JSON.parse(msg.body) as { type: string };
-                if (type === 'ready') writeToTerm('\x1b[32m● Shell ready\x1b[0m\r\n');
-            },
-        );
-        subscriptions.current = [outSub, metaSub];
-        stompClient.publish({ destination: SHELL_APP_PREFIX + 'create', body: JSON.stringify({ shellId }) });
-    }, [stompClient, writeToTerm]);
+        connectWs();
+    }, [connectWs]);
 
     // Drag-to-resize handle
     const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -203,7 +144,7 @@ export function ShellPanel({ stompClient, onClose, externalCommand }: ShellPanel
 
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)] shrink-0">
-                <span className="text-xs font-mono text-[var(--text-muted)]">bash — {shellIdRef.current}</span>
+                <span className="text-xs font-mono text-[var(--text-muted)]">bash</span>
                 <div className="flex items-center gap-1">
                     <button
                         onClick={handleRestart}

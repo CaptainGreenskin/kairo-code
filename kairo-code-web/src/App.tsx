@@ -476,7 +476,6 @@ function App() {
         isConnected,
         isThinking: wsThinking,
         connectionStatus,
-        stompClient,
         connect,
         disconnect,
         sendMessage,
@@ -1671,7 +1670,6 @@ function App() {
             {showShell && (
                 <Suspense fallback={null}>
                     <ShellPanel
-                        stompClient={stompClient}
                         onClose={() => setShowShell(false)}
                         externalCommand={shellExternalCommand}
                     />
