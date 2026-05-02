@@ -9,5 +9,6 @@ public record UpdateConfigRequest(
         String model,
         String provider,
         String baseUrl,
-        String workingDir
+        String workingDir,
+        Integer thinkingBudget
 ) {}

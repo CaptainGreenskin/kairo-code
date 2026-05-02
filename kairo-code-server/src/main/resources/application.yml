@@ -14,6 +14,7 @@ kairo:
     model: ${KAIRO_MODEL:gpt-4o}
     provider: ${KAIRO_PROVIDER:openai}
     base-url: ${KAIRO_BASE_URL:https://api.openai.com}
+    # thinking-budget: ${KAIRO_THINKING_BUDGET:0}   # 0 = disabled; 8000+ for claude-3.7+
 
 management:
   endpoints:

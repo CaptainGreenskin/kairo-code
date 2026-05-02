@@ -8,5 +8,6 @@ public record ServerConfigResponse(
         String model,
         String workingDir,
         String baseUrl,
-        boolean apiKeySet
+        boolean apiKeySet,
+        Integer thinkingBudget
 ) {}

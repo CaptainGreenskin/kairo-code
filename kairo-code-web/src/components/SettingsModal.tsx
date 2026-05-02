@@ -31,6 +31,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
     const [model, setModel] = useState(config.model || '');
     const [baseUrl, setBaseUrl] = useState(config.baseUrl || '');
     const [workingDir, setWorkingDir] = useState(config.workingDir || '');
+    const [localThinkingBudget, setLocalThinkingBudget] = useState(String(config.thinkingBudget ?? 0));
     const [showDirPicker, setShowDirPicker] = useState(false);
     const [showApiKey, setShowApiKey] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -82,6 +83,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
             if (provider) req.provider = provider;
             if ((provider === 'custom' || PROVIDER_BASE_URLS[provider]) && baseUrl) req.baseUrl = baseUrl;
             if (workingDir) req.workingDir = workingDir;
+            req.thinkingBudget = parseInt(localThinkingBudget) || 0;
 
             const newConfig = await updateConfig(req);
             setSaved(true);
@@ -231,6 +233,23 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
                                 onClose={() => setShowDirPicker(false)}
                             />
                         )}
+                    </div>
+
+                    {/* Extended Thinking Budget */}
+                    <div>
+                        <label className={labelClass}>Extended Thinking Budget (tokens)</label>
+                        <input
+                            type="number"
+                            min="0"
+                            max="32000"
+                            step="1000"
+                            className={inputClass}
+                            value={localThinkingBudget}
+                            onChange={(e) => setLocalThinkingBudget(e.target.value)}
+                        />
+                        <p className="text-xs text-[var(--text-muted)] mt-1">
+                            0 = disabled. Requires claude-3.7+ or claude-sonnet-4.
+                        </p>
                     </div>
 
                     {/* Actions */}

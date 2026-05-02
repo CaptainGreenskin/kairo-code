@@ -45,6 +45,7 @@ export interface UpdateConfigRequest {
     provider?: string;
     baseUrl?: string;
     workingDir?: string;
+    thinkingBudget?: number | null;
 }
 
 export async function updateConfig(req: UpdateConfigRequest): Promise<ServerConfig> {
