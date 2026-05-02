@@ -994,6 +994,11 @@ function App() {
         setBookmarks(sessionId ? new Set(getBookmarks(sessionId)) : new Set());
     }, [sessionId]);
 
+    // Clear plan steps when switching/leaving sessions so old plans don't bleed across.
+    useEffect(() => {
+        clearPlan();
+    }, [sessionId, clearPlan]);
+
     const handleToggleBookmark = useCallback((messageId: string) => {
         if (!sessionId) return;
         toggleBookmark(sessionId, messageId);
@@ -1588,8 +1593,9 @@ function App() {
                         </>
                     )}
 
-                    {/* Connection status bar */}
-                    {sessionId && !isConnected && (
+                    {/* Connection status bar — only after a real prior connection,
+                        so snapshot-restored sessions (no live WS) don't flash it. */}
+                    {sessionId && !isConnected && wasConnectedRef.current && (
                         <div className="px-4 py-1 text-xs text-center bg-[var(--color-warning-bg)] text-[var(--color-warning)]">
                             Reconnecting...
                         </div>

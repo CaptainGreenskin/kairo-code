@@ -319,7 +319,8 @@ export function useAgentWebSocket(
                     }
                 },
                 onWebSocketError: (event) => {
-                    console.error('[WebSocket] WS error:', event);
+                    // Transient errors are expected during reconnects — keep at warn level.
+                    console.warn('[WebSocket] WS error:', event);
                     setConnectionStatus('error');
                 },
             });
