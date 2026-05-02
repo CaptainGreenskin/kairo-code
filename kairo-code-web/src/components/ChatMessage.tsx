@@ -32,6 +32,8 @@ interface ChatMessageProps {
     onToggleBookmark?: (messageId: string) => void;
     isCollapsed?: boolean;
     onToggleCollapse?: () => void;
+    onRunCommand?: (cmd: string) => void;
+    onOpenFile?: (path: string) => void;
 }
 
 function extractThinkBlocks(content: string): { think: string[]; rest: string } {
@@ -77,7 +79,7 @@ function renderWithTables(content: string, mkComponents: React.ComponentProps<ty
     );
 }
 
-export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch, isBookmarked, onToggleBookmark, isCollapsed, onToggleCollapse }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch, isBookmarked, onToggleBookmark, isCollapsed, onToggleCollapse, onRunCommand, onOpenFile }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
     const [editing, setEditing] = useState(false);
     const [editText, setEditText] = useState(message.content);
@@ -273,8 +275,35 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                                 meta={propsRecord.meta as string | undefined}
                                                 onInsertToChat={onInsertToChat}
                                                 onApplyToFile={onApplyToFile}
+                                                onRun={onRunCommand}
                                             />
                                         );
+                                    }
+                                    // Inline code — check if it looks like a file path
+                                    if (propsRecord.inline) {
+                                        const text = String(children);
+                                        const filePathRegex = /^\.?\/?([\w.-]+\/)*[\w.-]+\.[a-zA-Z]{1,10}$/;
+                                        if (filePathRegex.test(text)) {
+                                            return (
+                                                <code className={className} {...rest}>
+                                                    <a
+                                                        className="file-link"
+                                                        data-path={text}
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            onOpenFile?.(text);
+                                                        }}
+                                                        style={{
+                                                            color: 'var(--accent)',
+                                                            textDecoration: 'underline',
+                                                            cursor: 'pointer',
+                                                        }}
+                                                    >
+                                                        {children}
+                                                    </a>
+                                                </code>
+                                            );
+                                        }
                                     }
                                     return (
                                         <code className={className} {...rest}>

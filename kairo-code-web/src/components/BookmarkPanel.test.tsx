@@ -11,6 +11,8 @@ const makeMessage = (id: string, content: string): Message => ({
     id,
     role: 'assistant' as const,
     content,
+    toolCalls: [],
+    timestamp: Date.now(),
 });
 
 describe('BookmarkPanel', () => {
@@ -86,8 +88,6 @@ describe('BookmarkPanel', () => {
                 onScrollToMessage={vi.fn()}
             />
         );
-        const closeBtn = document.querySelector('button[title]') ??
-            document.querySelectorAll('button')[0];
         // The X icon button is the second button in the panel
         const buttons = document.querySelectorAll('button');
         // Find the button with the X icon (close button)
