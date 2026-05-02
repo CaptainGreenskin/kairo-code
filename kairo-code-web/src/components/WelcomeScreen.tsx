@@ -1,4 +1,4 @@
-import { Code2, GitBranch, Search, Wrench, Bug, FileText } from 'lucide-react';
+import { Code2, GitBranch, Search, Wrench, Bug, FileText, Clock } from 'lucide-react';
 
 interface QuickPrompt {
     icon: React.ReactNode;
@@ -39,12 +39,38 @@ const QUICK_PROMPTS: QuickPrompt[] = [
     },
 ];
 
+export interface RecentSession {
+    id: string;
+    name: string;
+    lastMessage?: string;
+    updatedAt?: number;
+}
+
 interface WelcomeScreenProps {
     onSelectPrompt: (prompt: string) => void;
     appVersion?: string;
+    recentSessions?: RecentSession[];
+    onSelectSession?: (id: string) => void;
 }
 
-export function WelcomeScreen({ onSelectPrompt, appVersion }: WelcomeScreenProps) {
+function formatRelativeTime(timestamp: number): string {
+    const now = Date.now();
+    const diffMs = now - timestamp;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHr = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHr / 24);
+
+    if (diffSec < 60) return 'just now';
+    if (diffMin < 60) return `${diffMin} ${diffMin === 1 ? 'minute' : 'minutes'} ago`;
+    if (diffHr < 24) return `${diffHr} ${diffHr === 1 ? 'hour' : 'hours'} ago`;
+    if (diffDay < 7) return `${diffDay} ${diffDay === 1 ? 'day' : 'days'} ago`;
+    return new Date(timestamp).toLocaleDateString();
+}
+
+export function WelcomeScreen({ onSelectPrompt, appVersion, recentSessions, onSelectSession }: WelcomeScreenProps) {
+    const showRecentSessions = recentSessions && recentSessions.length > 0;
+
     return (
         <div className="flex flex-col items-center justify-center h-full px-6 py-12 select-none">
             {/* Brand */}
@@ -64,6 +90,45 @@ export function WelcomeScreen({ onSelectPrompt, appVersion }: WelcomeScreenProps
                 AI coding agent in your browser.{' '}
                 <span className="text-[var(--text-muted)]">Ask anything about your codebase.</span>
             </p>
+
+            {/* Recent sessions */}
+            {showRecentSessions && (
+                <div className="w-full max-w-lg mb-6">
+                    <div className="flex items-center gap-2 mb-2">
+                        <Clock size={13} className="text-[var(--text-muted)]" />
+                        <span className="text-xs font-medium text-[var(--text-secondary)]">Recent sessions</span>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        {recentSessions.slice(0, 5).map((session) => (
+                            <button
+                                key={session.id}
+                                onClick={() => onSelectSession?.(session.id)}
+                                className="group w-full flex flex-col items-start p-2.5 rounded-lg border border-[var(--border)]
+                                    bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)]
+                                    hover:border-[var(--accent)]/40 transition-all text-left"
+                            >
+                                <div className="flex items-center justify-between w-full">
+                                    <span className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors truncate">
+                                        {session.name}
+                                    </span>
+                                    {session.updatedAt && (
+                                        <span className="text-[10px] text-[var(--text-muted)] flex-shrink-0 ml-2">
+                                            {formatRelativeTime(session.updatedAt)}
+                                        </span>
+                                    )}
+                                </div>
+                                {session.lastMessage && (
+                                    <span className="text-[11px] text-[var(--text-muted)] truncate mt-0.5 w-full leading-snug">
+                                        {session.lastMessage.length > 80
+                                            ? session.lastMessage.slice(0, 80) + '…'
+                                            : session.lastMessage}
+                                    </span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Quick prompts grid */}
             <div className="w-full max-w-lg grid grid-cols-2 gap-2">

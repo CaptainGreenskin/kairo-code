@@ -1397,6 +1397,8 @@ function App() {
                     onMentionFile={handleMentionFile}
                     onOpenInEditor={(path) => setEditorFile(path)}
                     width={isNarrow ? 200 : 240}
+                    trackedFiles={trackedFiles.map(f => f.path)}
+                    onOpenFile={handleOpenFile}
                 />
 
                 <main className="relative flex-1 flex flex-col min-w-0" style={{ minWidth: 0 }}>
@@ -1413,6 +1415,12 @@ function App() {
                         <WelcomeScreen
                             onSelectPrompt={handleSend}
                             appVersion={__APP_VERSION__}
+                            recentSessions={persistedSessions.slice(0, 5).map((s) => ({
+                                id: s.sessionId,
+                                name: s.name,
+                                updatedAt: s.savedAt,
+                            }))}
+                            onSelectSession={handleSelectSession}
                         />
                     ) : (
                         <>
