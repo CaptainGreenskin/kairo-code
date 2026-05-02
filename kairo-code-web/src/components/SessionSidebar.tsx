@@ -4,6 +4,7 @@ import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, 
 import { listSessions, deleteSession as apiDeleteSession, renameSession as apiRenameSession } from '@api/config';
 import type { SessionInfo } from '@/types/agent';
 import { NewSessionDialog } from './NewSessionDialog';
+import { WorkspacePanel } from './WorkspacePanel';
 import { formatRelativeTime } from '@utils/formatTime';
 import { getSessionName, setSessionName, removeSessionName } from '@utils/sessionNames';
 import { pinSession, unpinSession, isSessionPinned, getPinnedSessions } from '@utils/sessionPins';
@@ -497,6 +498,10 @@ export const SessionSidebar = React.memo(function SessionSidebar({
     return (
         <>
             <aside className="w-64 border-r border-[var(--border)] bg-[var(--bg-secondary)] flex flex-col shrink-0 hidden lg:flex">
+                <WorkspacePanel
+                    currentSessionId={activeSessionId}
+                    onSelectSession={onSelectSession}
+                />
                 <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
                     <button
                         onClick={() => setShowNewDialog(true)}
