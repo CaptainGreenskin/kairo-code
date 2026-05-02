@@ -7,6 +7,32 @@ import { getToolRisk, RISK_LABELS, RISK_COLORS, RISK_BADGE_COLORS } from '@utils
 import { extractFileWriteInfo, getToolRiskLevel } from '@utils/toolPreview';
 import { FileContentPreview } from './FileContentPreview';
 
+const FILE_WRITE_TOOLS = new Set([
+    'write_file', 'create_file', 'patch_file', 'apply_diff', 'edit_file', 'str_replace_editor',
+]);
+
+const COLLAPSE_LINES = 5;
+
+/** Check if a string contains unified diff content. */
+function hasUnifiedDiff(text: string): boolean {
+    return /^\-\-\- a\//m.test(text) || /^\-\-\- \S/m.test(text);
+}
+
+/** Extract the file path from unified diff header. */
+function extractDiffFilePath(text: string): string {
+    const match = text.match(/^\-\-\- a\/(.+)/m) || text.match(/^\+\+\+ b\/(.+)/m);
+    return match ? match[1] : 'file';
+}
+
+/** Split result into lines; return { visibleLines, hiddenCount } based on collapse state. */
+function collapseLines(result: string, expanded: boolean): { lines: string[]; hiddenCount: number } {
+    const lines = result.split('\n');
+    if (expanded || lines.length <= COLLAPSE_LINES) {
+        return { lines, hiddenCount: 0 };
+    }
+    return { lines: lines.slice(0, COLLAPSE_LINES), hiddenCount: lines.length - COLLAPSE_LINES };
+}
+
 function ToolRiskBadge({ toolName }: { toolName: string }) {
     const level = getToolRiskLevel(toolName);
     const config = {
@@ -30,8 +56,6 @@ interface ToolCallCardProps {
     approvalTimeout?: number;
 }
 
-const MAX_PREVIEW = 200;
-
 interface ResultOutputProps {
     toolName: string;
     result: string;
@@ -39,80 +63,148 @@ interface ResultOutputProps {
 }
 
 function ResultOutput({ toolName, result, input }: ResultOutputProps) {
-    const [expanded, setExpanded] = useState(false);
-    const preview = result.slice(0, MAX_PREVIEW);
-    const hasMore = result.length > MAX_PREVIEW;
+    const [resultExpanded, setResultExpanded] = useState(false);
+    const { lines: visibleLines, hiddenCount } = collapseLines(result, resultExpanded);
+    const totalLines = result.split('\n').length;
+    const isLongOutput = totalLines > COLLAPSE_LINES;
 
+    const isFileWriteTool = FILE_WRITE_TOOLS.has(toolName);
+    const containsDiff = hasUnifiedDiff(result);
+    const filePath = containsDiff
+        ? extractDiffFilePath(result)
+        : (input as { path?: string; file?: string })?.path ?? (input as { path?: string; file?: string })?.file ?? '';
+
+    // write_file: render diff view with empty original
+    if (toolName === 'write_file' && containsDiff) {
+        return (
+            <div className="border-t border-[var(--border)]">
+                <div className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] whitespace-pre-wrap break-all bg-[var(--code-bg)]">
+                    {visibleLines.join('\n')}
+                    {hiddenCount > 0 && !resultExpanded && (
+                        <span className="block text-[var(--accent)]">
+                            ... and {hiddenCount} more line{hiddenCount > 1 ? 's' : ''}
+                        </span>
+                    )}
+                </div>
+                {isLongOutput && (
+                    <button
+                        onClick={() => setResultExpanded((prev) => !prev)}
+                        className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
+                    >
+                        {resultExpanded ? '▴ Collapse' : `▾ Show ${hiddenCount} more lines`}
+                    </button>
+                )}
+                <div className="px-3 py-2">
+                    <FileDiffView
+                        fileName={filePath}
+                        original=""
+                        modified={result}
+                        mode="preview"
+                    />
+                </div>
+            </div>
+        );
+    }
+
+    // Other file-write tools: render inline diff if result contains unified diff
+    if (isFileWriteTool && containsDiff) {
+        return (
+            <div className="border-t border-[var(--border)]">
+                <div className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] whitespace-pre-wrap break-all bg-[var(--code-bg)]">
+                    {visibleLines.join('\n')}
+                    {hiddenCount > 0 && !resultExpanded && (
+                        <span className="block text-[var(--accent)]">
+                            ... and {hiddenCount} more line{hiddenCount > 1 ? 's' : ''}
+                        </span>
+                    )}
+                </div>
+                {isLongOutput && (
+                    <button
+                        onClick={() => setResultExpanded((prev) => !prev)}
+                        className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
+                    >
+                        {resultExpanded ? '▴ Collapse' : `▾ Show ${hiddenCount} more lines`}
+                    </button>
+                )}
+                <div className="px-3 py-2">
+                    <FileDiffView
+                        fileName={filePath}
+                        original={extractOriginal(result)}
+                        modified={extractModified(result)}
+                    />
+                </div>
+            </div>
+        );
+    }
+
+    // File-write tool without diff content but with path in input: show file path badge
+    if (isFileWriteTool && filePath) {
+        return (
+            <div className="border-t border-[var(--border)]">
+                <div className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] whitespace-pre-wrap break-all bg-[var(--code-bg)]">
+                    {visibleLines.join('\n')}
+                    {hiddenCount > 0 && !resultExpanded && (
+                        <span className="block text-[var(--accent)]">
+                            ... and {hiddenCount} more line{hiddenCount > 1 ? 's' : ''}
+                        </span>
+                    )}
+                </div>
+                {isLongOutput && (
+                    <button
+                        onClick={() => setResultExpanded((prev) => !prev)}
+                        className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
+                    >
+                        {resultExpanded ? '▴ Collapse' : `▾ Show ${hiddenCount} more lines`}
+                    </button>
+                )}
+                <div className="px-3 py-1.5 flex items-center gap-1.5">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-muted)] font-mono border border-[var(--border)]">
+                        {filePath}
+                    </span>
+                </div>
+            </div>
+        );
+    }
+
+    // bash tool: use TerminalOutput
     if (toolName === 'bash') {
         return (
             <div className="border-t border-[var(--border)]">
                 <div className="relative">
-                    <TerminalOutput output={expanded ? result : preview} />
-                    {hasMore && !expanded && (
+                    <TerminalOutput output={resultExpanded ? result : visibleLines.join('\n')} />
+                    {isLongOutput && !resultExpanded && (
                         <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[var(--code-bg)] to-transparent" />
                     )}
                 </div>
-                {hasMore && (
+                {isLongOutput && (
                     <button
-                        onClick={() => setExpanded((prev) => !prev)}
+                        onClick={() => setResultExpanded((prev) => !prev)}
                         className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
                     >
-                        {expanded ? 'Show less' : `Show ${result.length - MAX_PREVIEW} more chars…`}
+                        {resultExpanded ? '▴ Collapse' : `▾ Show ${hiddenCount} more lines`}
                     </button>
                 )}
             </div>
         );
     }
 
-    if (toolName === 'write_file') {
-        return (
-            <div className="border-t border-[var(--border)]">
-                <FileDiffView
-                    fileName={(input as { path?: string })?.path || 'file'}
-                    original=""
-                    modified={expanded ? result : preview}
-                    mode="preview"
-                />
-                {hasMore && (
-                    <button
-                        onClick={() => setExpanded((prev) => !prev)}
-                        className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
-                    >
-                        {expanded ? 'Show less' : `Show ${result.length - MAX_PREVIEW} more chars…`}
-                    </button>
-                )}
-            </div>
-        );
-    }
-
-    if (toolName === 'patch_apply') {
-        return (
-            <div className="border-t border-[var(--border)]">
-                <FileDiffView
-                    fileName={(input as { path?: string })?.path || 'file'}
-                    original={extractOriginal(result)}
-                    modified={extractModified(result)}
-                />
-            </div>
-        );
-    }
-
-    // Generic tool: show raw output with expand/collapse
+    // Generic tool: show raw output with line-based expand/collapse
     return (
         <div className="border-t border-[var(--border)]">
-            <pre
-                className={`px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] whitespace-pre-wrap break-all ${
-                    !expanded && hasMore ? 'line-clamp-3' : 'max-h-96 overflow-auto'
-                }`}
-            >
-                {expanded ? result : preview}
+            <pre className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] whitespace-pre-wrap break-all">
+                {visibleLines.join('\n')}
+                {hiddenCount > 0 && !resultExpanded && (
+                    <span className="block text-[var(--accent)]">
+                        ... and {hiddenCount} more line{hiddenCount > 1 ? 's' : ''}
+                    </span>
+                )}
             </pre>
-            {hasMore && (
+            {isLongOutput && (
                 <button
-                    onClick={() => setExpanded((prev) => !prev)}
+                    onClick={() => setResultExpanded((prev) => !prev)}
                     className="w-full px-3 py-1 text-[10px] text-[var(--accent)] hover:underline text-left border-t border-[var(--border)]"
                 >
-                    {expanded ? 'Show less' : `Show ${result.length - MAX_PREVIEW} more chars…`}
+                    {resultExpanded ? '▴ Collapse' : `▾ Show ${hiddenCount} more lines`}
                 </button>
             )}
         </div>
@@ -195,6 +287,27 @@ function extractModified(diff: string): string {
     return modified.length > 0 ? modified.join('\n') : '';
 }
 
+/**
+ * Status indicator dot classes based on tool state.
+ * Maps to: executing/pending, completed, error, requires_approval.
+ */
+function statusDotClasses(tc: ToolCall): string {
+    if (tc.requiresApproval && tc.status === 'pending') {
+        return 'bg-blue-500 animate-pulse';
+    }
+    switch (tc.status) {
+        case 'pending':
+        case 'approved':
+            return 'bg-amber-400 animate-pulse';
+        case 'done':
+            return 'bg-green-500';
+        case 'error':
+            return 'bg-red-500';
+        case 'rejected':
+            return 'bg-red-500';
+    }
+}
+
 export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: ToolCallCardProps) {
     const config = statusConfig[toolCall.status];
     const risk = getToolRisk(toolCall.toolName);
@@ -271,6 +384,10 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
         <div className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}>
             <div className="px-3 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
+                    <span
+                        className={`w-1 h-1 rounded-full flex-shrink-0 ${statusDotClasses(toolCall)}`}
+                        title={toolCall.status}
+                    />
                     <code className="text-sm font-mono font-medium text-[var(--text-primary)]">
                         {toolCall.toolName}
                     </code>
