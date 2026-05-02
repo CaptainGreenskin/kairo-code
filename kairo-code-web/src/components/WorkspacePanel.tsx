@@ -19,8 +19,8 @@ export function WorkspacePanel({ currentSessionId, onSelectSession }: WorkspaceP
     useEffect(() => {
         const load = () =>
             fetch('/api/workspaces')
-                .then(r => r.json())
-                .then(setWorkspaces)
+                .then(r => r.ok ? r.json() : Promise.reject(r.status))
+                .then(data => setWorkspaces(Array.isArray(data) ? data : []))
                 .catch(() => {});
         load();
         const id = setInterval(load, 5000);
