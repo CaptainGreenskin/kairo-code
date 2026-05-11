@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import pkg from './package.json';
+import importMetaUrlPlugin from '@codingame/esbuild-import-meta-url-plugin';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
@@ -23,6 +24,9 @@ export default defineConfig(({ mode }) => {
                 '@hooks': path.resolve(__dirname, './src/hooks'),
                 '@types': path.resolve(__dirname, './src/types'),
                 '@utils': path.resolve(__dirname, './src/utils'),
+                // monaco-vscode-api wildcard exports (./vscode/* → ./vscode/src/*) are not
+                // fully resolved by Rollup in production builds. This alias bridges the gap.
+                '@codingame/monaco-vscode-api/vscode/vs': path.resolve(__dirname, 'node_modules/@codingame/monaco-vscode-api/vscode/src/vs'),
             },
         },
 
@@ -44,6 +48,25 @@ export default defineConfig(({ mode }) => {
             },
         },
 
+        optimizeDeps: {
+            esbuildOptions: {
+                plugins: [importMetaUrlPlugin],
+            },
+            include: [
+                'monaco-editor',
+                '@codingame/monaco-vscode-api',
+                '@codingame/monaco-vscode-textmate-service-override',
+                '@codingame/monaco-vscode-theme-service-override',
+                '@codingame/monaco-vscode-languages-service-override',
+                '@codingame/monaco-vscode-model-service-override',
+                '@codingame/monaco-vscode-configuration-service-override',
+            ],
+        },
+
+        worker: {
+            format: 'es',
+        },
+
         build: {
             outDir: 'dist',
             sourcemap: mode === 'development',
@@ -55,7 +78,7 @@ export default defineConfig(({ mode }) => {
                         'markdown': ['react-markdown'],
                         'syntax-highlighter': ['react-syntax-highlighter'],
                         'virtuoso': ['react-virtuoso'],
-                        'websocket': ['@stomp/stompjs', 'sockjs-client'],
+                        'monaco': ['monaco-editor', '@codingame/monaco-vscode-api'],
                     },
                 },
             },

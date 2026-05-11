@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { Editor, DiffEditor } from '@monaco-editor/react';
+import { useState, useEffect, useRef } from 'react';
+import * as monaco from 'monaco-editor';
 import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
 
 const LANG_BY_EXT: Record<string, string> = {
@@ -44,6 +44,86 @@ interface FileDiffViewProps {
     mode?: 'diff' | 'preview';
 }
 
+/** Inline preview editor (read-only, single file). */
+function PreviewPanel({ language, value, collapsed }: { language: string; value: string; collapsed: boolean }) {
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+
+    useEffect(() => {
+        if (collapsed) return;
+        if (!containerRef.current) return;
+        if (editorRef.current) return;
+
+        const model = monaco.editor.createModel(value, language);
+        const editor = monaco.editor.create(containerRef.current, {
+            model,
+            theme: 'vs-dark',
+            readOnly: true,
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            fontSize: 12,
+            lineNumbers: 'on',
+            wordWrap: 'off',
+            automaticLayout: true,
+        });
+        editorRef.current = editor;
+
+        return () => {
+            editor.dispose();
+            model.dispose();
+            editorRef.current = null;
+        };
+    }, [collapsed, language, value]);
+
+    if (collapsed) return null;
+    return (
+        <div style={{ height: '300px' }}>
+            <div ref={containerRef} className="w-full h-full" />
+        </div>
+    );
+}
+
+/** Side-by-side diff editor. */
+function DiffPanel({ language, original, modified, collapsed }: { language: string; original: string; modified: string; collapsed: boolean }) {
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+
+    useEffect(() => {
+        if (collapsed) return;
+        if (!containerRef.current) return;
+        if (editorRef.current) return;
+
+        const originalModel = monaco.editor.createModel(original, language);
+        const modifiedModel = monaco.editor.createModel(modified, language);
+
+        const editor = monaco.editor.createDiffEditor(containerRef.current, {
+            readOnly: true,
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            fontSize: 12,
+            renderSideBySide: true,
+            theme: 'vs-dark',
+            automaticLayout: true,
+        });
+        editor.setModel({ original: originalModel, modified: modifiedModel });
+        editorRef.current = editor;
+
+        return () => {
+            editor.dispose();
+            originalModel.dispose();
+            modifiedModel.dispose();
+            editorRef.current = null;
+        };
+    }, [collapsed, language, original, modified]);
+
+    if (collapsed) return null;
+    return (
+        <div style={{ height: '400px' }}>
+            <div ref={containerRef} className="w-full h-full" />
+        </div>
+    );
+}
+
 export function FileDiffView({
     fileName = 'file',
     original,
@@ -52,10 +132,6 @@ export function FileDiffView({
 }: FileDiffViewProps) {
     const [collapsed, setCollapsed] = useState(false);
     const language = detectLanguage(fileName);
-
-    const handleEditorDidMount = useCallback((_editor: unknown) => {
-        // Monaco editor auto-mounted
-    }, []);
 
     if (mode === 'preview') {
         return (
@@ -78,25 +154,7 @@ export function FileDiffView({
                     </div>
                 </div>
 
-                {!collapsed && (
-                    <div style={{ height: '300px' }}>
-                        <Editor
-                            height="100%"
-                            language={language}
-                            value={modified}
-                            options={{
-                                readOnly: true,
-                                minimap: { enabled: false },
-                                scrollBeyondLastLine: false,
-                                fontSize: 12,
-                                lineNumbers: 'on',
-                                wordWrap: 'off',
-                            }}
-                            onMount={handleEditorDidMount}
-                            theme="vs-dark"
-                        />
-                    </div>
-                )}
+                <PreviewPanel language={language} value={modified} collapsed={collapsed} />
             </div>
         );
     }
@@ -119,25 +177,7 @@ export function FileDiffView({
                 </button>
             </div>
 
-            {!collapsed && (
-                <div style={{ height: '400px' }}>
-                    <DiffEditor
-                        height="100%"
-                        original={original}
-                        modified={modified}
-                        language={language}
-                        options={{
-                            readOnly: true,
-                            minimap: { enabled: false },
-                            scrollBeyondLastLine: false,
-                            fontSize: 12,
-                            renderSideBySide: true,
-                        }}
-                        onMount={handleEditorDidMount}
-                        theme="vs-dark"
-                    />
-                </div>
-            )}
+            <DiffPanel language={language} original={original} modified={modified} collapsed={collapsed} />
         </div>
     );
 }
