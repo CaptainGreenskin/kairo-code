@@ -6,9 +6,11 @@ interface ModelSelectorProps {
     currentModel: string | null;
     onChange: (model: string) => void;
     disabled?: boolean;
+    /** Pop the menu upward (for footer placement). */
+    dropUp?: boolean;
 }
 
-export function ModelSelector({ models, currentModel, onChange, disabled }: ModelSelectorProps) {
+export function ModelSelector({ models, currentModel, onChange, disabled, dropUp = false }: ModelSelectorProps) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
 
@@ -38,7 +40,11 @@ export function ModelSelector({ models, currentModel, onChange, disabled }: Mode
             </button>
 
             {open && (
-                <div className="absolute top-full right-0 mt-1 py-1 min-w-[200px] rounded-lg shadow-lg bg-[var(--bg-primary)] border border-[var(--border)] z-50">
+                <div
+                    className={`absolute right-0 py-1 min-w-[200px] rounded-lg shadow-lg bg-[var(--bg-primary)] border border-[var(--border)] z-50 ${
+                        dropUp ? 'bottom-full mb-1' : 'top-full mt-1'
+                    }`}
+                >
                     {models.map(m => (
                         <button
                             key={m}

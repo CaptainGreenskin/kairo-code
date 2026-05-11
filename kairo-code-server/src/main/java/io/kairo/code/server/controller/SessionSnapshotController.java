@@ -3,7 +3,7 @@ package io.kairo.code.server.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.kairo.code.server.config.ServerConfig.ServerProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -34,8 +34,9 @@ import java.util.stream.Stream;
 /**
  * REST API for persisting and restoring session message snapshots.
  *
- * <p>Snapshots are stored as JSON files at:
- * {@code {workingDir}/.kairo-code/sessions/{sessionId}.json}.
+ * <p>Snapshots are stored as JSON files at: {@code ~/.kairo-code/sessions/{sessionId}.json}.
+ * Centralizing under the user home keeps user project trees clean — workspaces are now
+ * first-class entities and individual workspace dirs no longer host runtime metadata.
  *
  * <p>Snapshots are bounded to {@link #MAX_SESSIONS_ON_DISK}; older entries are
  * evicted on each save.
@@ -50,8 +51,14 @@ public class SessionSnapshotController {
     private final Path sessionsDir;
     private final ObjectMapper objectMapper;
 
-    public SessionSnapshotController(ServerProperties props, ObjectMapper objectMapper) {
-        this.sessionsDir = Paths.get(props.workingDir(), ".kairo-code", "sessions");
+    @Autowired
+    public SessionSnapshotController(ObjectMapper objectMapper) {
+        this(Paths.get(System.getProperty("user.home"), ".kairo-code", "sessions"), objectMapper);
+    }
+
+    /** Test-only — direct sessionsDir override. */
+    public SessionSnapshotController(Path sessionsDir, ObjectMapper objectMapper) {
+        this.sessionsDir = sessionsDir;
         this.objectMapper = objectMapper;
     }
 

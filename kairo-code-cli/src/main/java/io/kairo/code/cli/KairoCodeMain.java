@@ -104,6 +104,10 @@ public class KairoCodeMain implements Callable<Integer> {
                     + "Overrides KAIRO_CODE_TOOL_BUDGET_FORCE env var.")
     private int toolBudget = 0;
 
+    @Option(names = "--thinking-budget",
+            description = "Anthropic extended thinking budget in tokens (null = disabled)")
+    private Integer thinkingBudget;
+
     @Option(names = "--no-hooks",
             description = "Disable all auto-registered hooks (for debugging / testing)")
     private boolean noHooks = false;
@@ -216,7 +220,7 @@ public class KairoCodeMain implements Callable<Integer> {
 
             CodeAgentConfig config = new CodeAgentConfig(
                     resolvedApiKey, resolvedBaseUrl, resolvedModel,
-                    maxIterations, resolvedWorkingDir, mcpConfig, toolBudget, 0);
+                    maxIterations, resolvedWorkingDir, mcpConfig, toolBudget, 0, thinkingBudget);
             ModelProvider modelProvider = buildModelProvider(
                     resolvedProvider, resolvedApiKey, resolvedBaseUrl, resolvedChatPath);
 

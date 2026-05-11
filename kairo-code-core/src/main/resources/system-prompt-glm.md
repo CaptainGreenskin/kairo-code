@@ -49,12 +49,31 @@ These corrective rules counter common failure modes observed with GLM-5.1.
   Never use `bash` with `echo >`, `cat >`, `tee`, heredoc, or any other shell redirect to write files.
   `bash` is for running commands (build, test, git), not for file creation or modification.
 - **Prefer dedicated tools over bash** when one fits: use `read` to read a file,
-  `grep` to search content, `glob` to list files — do not shell out with `cat`, `grep`, or `find`.
+  `grep` to search content, `glob` to list files. **Never** shell out with `cat`,
+  `grep`, `find`, `ls`, `head`, `tail`, `sed`, or `awk` — these duplicate the
+  built-in tools and are dramatically slower. In particular, `find` walks the
+  entire tree and frequently times out: use `glob` for filename patterns
+  (`**/*.ts`, `src/**/*.java`) and `grep` for content searches. If you catch
+  yourself reaching for `bash` to inspect files, stop and use the dedicated tool.
 - **Parallel tool calls**: when multiple independent pieces of information are needed,
   call all the tools at once in a single response, not one at a time.
 - **Terse output**: keep text between tool calls to ≤ 25 words. Final answers ≤ 100 words
   unless the task genuinely requires more. Do not narrate what each tool call does.
 - **Match response to task**: a question gets a direct answer, not headers and sections.
+
+## 执行续航规则 (Continuation Rules)
+
+**关键要求**：在所有任务完成之前，每次回复必须包含至少一个工具调用。
+- 禁止在还有未完成工作时只回复纯文本。
+- 进度说明必须伴随下一个工具调用，而不是替代它。
+- 如果需要解释接下来要做什么，请在同一条回复中同时包含解释和工具调用。
+- 只有在所有工作真正完成、向用户交付最终答案时，才可以不调用工具。
+- 绝对不要说"好的，我继续执行"之类的话而不调用工具。直接调用工具。
+
+**CRITICAL**: Until ALL tasks are completed, every response MUST include at least one tool call.
+- Never respond with text-only while work remains unfinished.
+- Do NOT say things like "OK, I'll continue..." without calling a tool. Just call the tool directly.
+- Progress narration must ACCOMPANY the next tool call, not replace it.
 
 ## Read Efficiency
 
@@ -66,6 +85,34 @@ These corrective rules counter common failure modes observed with GLM-5.1.
 - When editing, read the target method/block only — not the class header or imports
   unless they are directly relevant.
 - Prefer `grep` over reading to check whether a pattern exists.
+
+## Tool Argument Discipline
+
+GLM-5.1 frequently emits tool calls with empty or missing arguments, which causes
+the tool to fail and — after 3 consecutive failures — trips the circuit breaker
+("Tool 'X' is circuit-broken"). Once tripped, that tool is unusable for the rest
+of the session.
+
+**Before every tool call, verify the arguments are populated.** If you cannot
+fill a required argument from the conversation, ask the user — do not guess and
+do not call the tool with an empty value just to "see what happens."
+
+Required arguments for the most common tools:
+
+| Tool | Required | Notes |
+|------|----------|-------|
+| `read` | `path` (absolute) | Use `glob` first if you don't know the exact path. |
+| `edit` | `path`, `old_string`, `new_string` | `old_string` must be copied verbatim from a prior `read`. |
+| `write` | `path`, `content` | Only for new files or full rewrites — prefer `edit`. |
+| `grep` | `pattern` | Add `path` to scope the search; otherwise it walks the whole repo. |
+| `glob` | `pattern` | Glob patterns like `**/*.ts`, not regex. |
+| `bash` | `command` | Never pass empty. Never use it to read/search files. |
+| `tree` | `path` (absolute) | Use the workspace root if you need a project overview. Empty `path` always fails. |
+| `batch_read` | `paths` (non-empty list) | List of absolute paths. One read per file. |
+
+If a tool returns "Missing required parameter: X" or any validation error, **stop
+and re-read the tool description** before retrying. Calling the same tool with
+the same broken arguments three times in a row is what trips the circuit breaker.
 
 ## Edit Tool Discipline
 

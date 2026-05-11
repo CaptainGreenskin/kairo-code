@@ -36,7 +36,7 @@ class ConfigControllerTest {
         ServerProperties props = new ServerProperties(
                 "openai", "gpt-4o", tempDir.toString(),
                 "https://api.openai.com", "sk-test");
-        controller = new ConfigController(props, null, null);
+        controller = new ConfigController(props, null, null, null);
     }
 
     @Test
@@ -46,7 +46,6 @@ class ConfigControllerTest {
         assertThat(response.model()).isEqualTo("gpt-4o");
         assertThat(response.provider()).isEqualTo("openai");
         assertThat(response.baseUrl()).isEqualTo("https://api.openai.com");
-        assertThat(response.workingDir()).isEqualTo(tempDir.toString());
         // apiKey must NOT be exposed — only a boolean flag
         assertThat(response.apiKeySet()).isTrue();
     }
@@ -56,7 +55,7 @@ class ConfigControllerTest {
         ServerProperties propsNoKey = new ServerProperties(
                 "anthropic", "claude-sonnet-4-20250514", tempDir.toString(),
                 "https://api.anthropic.com", "");
-        ConfigController c = new ConfigController(propsNoKey, null, null);
+        ConfigController c = new ConfigController(propsNoKey, null, null, null);
 
         var response = c.getConfig();
 
@@ -70,7 +69,7 @@ class ConfigControllerTest {
         ServerProperties propsNoKey = new ServerProperties(
                 "anthropic", "claude-3-5-sonnet-20241022", tempDir.toString(),
                 "https://api.anthropic.com", "");
-        ConfigController ctrlNoKey = new ConfigController(propsNoKey, null, null);
+        ConfigController ctrlNoKey = new ConfigController(propsNoKey, null, null, null);
 
         var config = ctrlNoKey.getConfig();
 
@@ -85,20 +84,19 @@ class ConfigControllerTest {
         ServerProperties props = new ServerProperties(
                 "anthropic", "claude-3-5-sonnet-20241022", tempDir.toString(),
                 "https://api.anthropic.com", null);
-        ConfigController c = new ConfigController(props, null, null);
+        ConfigController c = new ConfigController(props, null, null, null);
 
         var response = c.getConfig();
 
         assertThat(response.provider()).isEqualTo("anthropic");
         assertThat(response.model()).isEqualTo("claude-3-5-sonnet-20241022");
         assertThat(response.baseUrl()).isEqualTo("https://api.anthropic.com");
-        assertThat(response.workingDir()).isEqualTo(tempDir.toString());
         assertThat(response.apiKeySet()).isFalse();
     }
 
     @Test
     void listFiles_returnsRootEntries() {
-        var entries = controller.listFiles("");
+        var entries = controller.listFiles("", null);
 
         assertThat(entries).hasSize(3);
         assertThat(entries).extracting("name").containsExactlyInAnyOrder(
@@ -114,7 +112,7 @@ class ConfigControllerTest {
 
     @Test
     void listFiles_returnsSubDirectoryEntries() {
-        var entries = controller.listFiles("subdir");
+        var entries = controller.listFiles("subdir", null);
 
         assertThat(entries).hasSize(1);
         assertThat(entries.get(0).name()).isEqualTo("nested.py");
@@ -123,7 +121,7 @@ class ConfigControllerTest {
 
     @Test
     void listFiles_preventsPathTraversal() {
-        assertThatThrownBy(() -> controller.listFiles("../../etc"))
+        assertThatThrownBy(() -> controller.listFiles("../../etc", null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> {
                     var ex = (ResponseStatusException) e;
@@ -133,7 +131,7 @@ class ConfigControllerTest {
 
     @Test
     void listFiles_nonExistentDirectory_returns404() {
-        assertThatThrownBy(() -> controller.listFiles("nonexistent"))
+        assertThatThrownBy(() -> controller.listFiles("nonexistent", null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> {
                     var ex = (ResponseStatusException) e;
@@ -143,17 +141,17 @@ class ConfigControllerTest {
 
     @Test
     void getFileContent_returnsContent() {
-        var response = controller.getFileContent("hello.txt");
+        var response = controller.getFileContent("hello.txt", null);
 
         assertThat(response.path()).isEqualTo("hello.txt");
         assertThat(response.content()).isEqualTo("Hello, World!");
         assertThat(response.language()).isEqualTo("");
 
-        var javaResponse = controller.getFileContent("test.java");
+        var javaResponse = controller.getFileContent("test.java", null);
         assertThat(javaResponse.content()).isEqualTo("public class Test {}");
         assertThat(javaResponse.language()).isEqualTo("java");
 
-        var pyResponse = controller.getFileContent("subdir/nested.py");
+        var pyResponse = controller.getFileContent("subdir/nested.py", null);
         assertThat(pyResponse.content()).isEqualTo("print('hello')");
         assertThat(pyResponse.language()).isEqualTo("python");
     }
@@ -165,7 +163,7 @@ class ConfigControllerTest {
         byte[] data = new byte[100_001];
         Files.write(largeFile, data);
 
-        assertThatThrownBy(() -> controller.getFileContent("large.bin"))
+        assertThatThrownBy(() -> controller.getFileContent("large.bin", null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> {
                     var ex = (ResponseStatusException) e;
@@ -175,7 +173,7 @@ class ConfigControllerTest {
 
     @Test
     void getFileContent_preventsPathTraversal() {
-        assertThatThrownBy(() -> controller.getFileContent("../../etc/passwd"))
+        assertThatThrownBy(() -> controller.getFileContent("../../etc/passwd", null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> {
                     var ex = (ResponseStatusException) e;
@@ -185,7 +183,7 @@ class ConfigControllerTest {
 
     @Test
     void getFileContent_nonExistentFile_returns404() {
-        assertThatThrownBy(() -> controller.getFileContent("nonexistent.txt"))
+        assertThatThrownBy(() -> controller.getFileContent("nonexistent.txt", null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> {
                     var ex = (ResponseStatusException) e;
@@ -198,7 +196,7 @@ class ConfigControllerTest {
         String testPath = "test-memory.md";
         String testContent = "# Test Memory\n\nHello world";
 
-        var result = controller.putFileContent(testPath, testContent);
+        var result = controller.putFileContent(testPath, null, testContent);
 
         assertThat(result.get("status")).isEqualTo("ok");
 
@@ -211,7 +209,7 @@ class ConfigControllerTest {
         String testPath = "nested/dir/memory.md";
         String testContent = "# Nested";
 
-        controller.putFileContent(testPath, testContent);
+        controller.putFileContent(testPath, null, testContent);
 
         Path written = tempDir.resolve(testPath);
         assertThat(Files.readString(written)).isEqualTo(testContent);
@@ -219,7 +217,7 @@ class ConfigControllerTest {
 
     @Test
     void putFileContent_preventsPathTraversal() {
-        assertThatThrownBy(() -> controller.putFileContent("../../etc/passwd", "bad content"))
+        assertThatThrownBy(() -> controller.putFileContent("../../etc/passwd", null, "bad content"))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> {
                     var ex = (ResponseStatusException) e;

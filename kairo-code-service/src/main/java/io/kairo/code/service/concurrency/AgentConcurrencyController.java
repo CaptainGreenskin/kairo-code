@@ -4,7 +4,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -14,6 +13,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   <li>Per-session counter — max 10 concurrent agents per session</li>
  *   <li>Nesting depth — max 3 (prevents runaway sub-agent recursion)</li>
  * </ol>
+ *
+ * <p>Depth is tracked per-thread via a thread-id keyed map (NOT a ThreadLocal).
+ * Reactor's {@link reactor.core.scheduler.Schedulers#boundedElastic()} can run
+ * the {@code Flux.create} producer on one thread and {@code doFinally} on another;
+ * a ThreadLocal would leak +1 on the producer thread and -1 on the close thread,
+ * eventually pinning every bounded scheduler thread at depth=3 and rejecting all
+ * new requests. The map is keyed by the <em>acquiring</em> thread's id, captured
+ * at acquire time and replayed on close, so the count balances regardless of
+ * which thread runs the release.</p>
  */
 @Component
 public class AgentConcurrencyController {
@@ -24,7 +32,7 @@ public class AgentConcurrencyController {
 
     private final Semaphore globalSlots = new Semaphore(GLOBAL_MAX, true);
     private final ConcurrentHashMap<String, AtomicInteger> sessionCounters = new ConcurrentHashMap<>();
-    private final ThreadLocal<Integer> nestingDepth = ThreadLocal.withInitial(() -> 0);
+    private final ConcurrentHashMap<Long, AtomicInteger> threadDepths = new ConcurrentHashMap<>();
 
     /**
      * Acquire a slot for the given session. Call this before spawning any agent.
@@ -34,9 +42,10 @@ public class AgentConcurrencyController {
      * @throws AgentConcurrencyException if any limit is exceeded
      */
     public AgentSlot acquire(String sessionId) {
-        // 1. Depth check
-        int currentDepth = nestingDepth.get();
-        if (currentDepth >= DEPTH_MAX) {
+        // 1. Depth check — keyed by current thread id (the acquirer)
+        long tid = Thread.currentThread().getId();
+        AtomicInteger depth = threadDepths.computeIfAbsent(tid, k -> new AtomicInteger(0));
+        if (depth.get() >= DEPTH_MAX) {
             throw new AgentConcurrencyException(
                     AgentConcurrencyException.Reason.DEPTH_LIMIT,
                     "Max agent nesting depth " + DEPTH_MAX + " exceeded in session " + sessionId);
@@ -60,11 +69,18 @@ public class AgentConcurrencyController {
                     "Global agent limit " + GLOBAL_MAX + " exceeded");
         }
 
-        // 4. Increment depth
-        nestingDepth.set(currentDepth + 1);
+        // 4. Increment depth on the acquirer's bucket
+        depth.incrementAndGet();
+        final long acquirerTid = tid;
+        final AtomicInteger acquirerDepth = depth;
 
         return new AgentSlot(sessionId, () -> {
-            nestingDepth.set(nestingDepth.get() - 1);
+            // Decrement the acquirer's depth, regardless of which thread runs close.
+            // CAS-remove the bucket once it hits zero to prevent unbounded growth.
+            int remainingDepth = acquirerDepth.decrementAndGet();
+            if (remainingDepth <= 0) {
+                threadDepths.remove(acquirerTid, acquirerDepth);
+            }
             globalSlots.release();
             int remaining = counter.decrementAndGet();
             if (remaining <= 0) {
@@ -89,9 +105,11 @@ public class AgentConcurrencyController {
     }
 
     /**
-     * Current nesting depth on this thread.
+     * Current nesting depth on this thread (i.e., agents currently nested in
+     * this thread's call stack).
      */
     public int currentDepth() {
-        return nestingDepth.get();
+        AtomicInteger d = threadDepths.get(Thread.currentThread().getId());
+        return d != null ? d.get() : 0;
     }
 }

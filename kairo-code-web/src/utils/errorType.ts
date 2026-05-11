@@ -8,6 +8,19 @@ export function inferErrorType(message: string): ErrorType {
     if (lower.includes('context') && (lower.includes('length') || lower.includes('long') || lower.includes('limit'))) {
         return 'context_length';
     }
+    if (
+        lower.includes('http 401')
+        || lower.includes('http 403')
+        || lower.includes('unauthorized')
+        || lower.includes('forbidden')
+        || lower.includes('invalid api key')
+        || lower.includes('api key')
+        || lower.includes('credential')
+        || lower.includes('auth_failure')
+        || lower.includes('authentication')
+    ) {
+        return 'auth';
+    }
     if (lower.includes('network') || lower.includes('timeout') || lower.includes('connection')) {
         return 'network';
     }

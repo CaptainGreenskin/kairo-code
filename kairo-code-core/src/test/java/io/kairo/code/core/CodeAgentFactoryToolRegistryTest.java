@@ -43,7 +43,7 @@ class CodeAgentFactoryToolRegistryTest {
 
     private static CodeAgentConfig minimalConfig() {
         return new CodeAgentConfig(
-                "test-key", "https://api.openai.com", "gpt-4o", 10, null, null, 0, 0);
+                "test-key", "https://api.openai.com", "gpt-4o", 10, null, null, 0, 0, null);
     }
 
     private static List<String> toolNames() {

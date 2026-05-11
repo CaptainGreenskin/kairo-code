@@ -1,7 +1,6 @@
 package io.kairo.code.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.controller.SessionSnapshotController;
 import io.kairo.code.server.controller.SessionSnapshotController.AutoNameRequest;
 import io.kairo.code.server.controller.SessionSnapshotController.AutoNameResponse;
@@ -21,10 +20,9 @@ class SessionAutoNameTest {
 
     @BeforeEach
     void setUp() {
-        ServerProperties props = new ServerProperties(
-                "openai", "gpt-4o", tempDir.toString(),
-                "https://api.openai.com", "sk-test");
-        controller = new SessionSnapshotController(props, new ObjectMapper());
+        controller = new SessionSnapshotController(
+                tempDir.resolve(".kairo-code").resolve("sessions"),
+                new ObjectMapper());
     }
 
     @Test

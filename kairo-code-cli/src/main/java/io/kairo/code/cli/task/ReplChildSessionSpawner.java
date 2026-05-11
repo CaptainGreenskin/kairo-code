@@ -87,7 +87,8 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
                         workingDir.toString(),
                         parentConfig.mcpConfig(),
                         parentConfig.toolBudgetForce(),
-                        parentConfig.repetitiveToolThreshold());
+                        parentConfig.repetitiveToolThreshold(),
+                        parentConfig.thinkingBudget());
 
         // Inherit parent's chat-path configuration for the child session.
         io.kairo.api.model.ModelProvider modelProvider;

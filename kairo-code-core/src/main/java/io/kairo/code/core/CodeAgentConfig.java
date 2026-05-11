@@ -8,7 +8,8 @@ import io.kairo.code.core.mcp.McpConfig;
  * @param apiKey       the API key for the model provider (required)
  * @param baseUrl      the base URL for the OpenAI-compatible API (default: "https://api.openai.com")
  * @param modelName    the model name to use (default: "gpt-4o")
- * @param maxIterations maximum ReAct loop iterations (default: 50)
+ * @param maxIterations maximum ReAct loop iterations (default: unlimited — the agent stops when
+ *   the model returns no tool calls; loop runaway is caught by LoopDetector, not by this cap)
  * @param workingDir   the working directory for file/exec tools (nullable)
  * @param mcpConfig    MCP server config from ~/.kairo-code/mcp.json (nullable)
  * @param toolBudgetForce max tool calls before hard stop (0 = use default from ToolBudgetHook)
@@ -44,7 +45,10 @@ public record CodeAgentConfig(
             modelName = "gpt-4o";
         }
         if (maxIterations <= 0) {
-            maxIterations = 50;
+            // Mirrors opencode / claude-code: no hard cap. The model decides when to stop
+            // (no tool_calls = done); LoopDetector catches doom loops, ContextCompactionEngine
+            // handles overflow, per-tool timeouts catch stuck operations.
+            maxIterations = Integer.MAX_VALUE;
         }
         if (toolBudgetForce < 0) {
             toolBudgetForce = 0;

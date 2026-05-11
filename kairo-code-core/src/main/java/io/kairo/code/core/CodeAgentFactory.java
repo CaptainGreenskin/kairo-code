@@ -41,7 +41,10 @@ import io.kairo.code.core.hook.TextOnlyStallHook;
 import io.kairo.code.core.hook.ToolBudgetHook;
 import io.kairo.code.core.hook.UnfulfilledInstructionHook;
 import io.kairo.core.agent.AgentBuilder;
+import io.kairo.core.context.CompactionThresholds;
+import io.kairo.core.model.ModelRegistry;
 import java.nio.file.Path;
+import java.time.Duration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kairo.core.model.anthropic.AnthropicProvider;
 import io.kairo.core.model.openai.OpenAIProvider;
@@ -270,7 +273,29 @@ public final class CodeAgentFactory {
                         .toolExecutor(executor)
                         .modelName(config.modelName())
                         .systemPrompt(systemPrompt)
-                        .maxIterations(config.maxIterations());
+                        .maxIterations(config.maxIterations())
+                        // Pin tokenBudget to the model's actual contextWindow so IterationGuards'
+                        // hard wall matches reality. AgentConfig's hardcoded 200K default
+                        // misaligns silently for non-Anthropic models (gpt-4o=128K, 1M variants,
+                        // etc.) — burn through then GRACEFUL_EXIT fires either too early or
+                        // too late. ModelRegistry returns sensible defaults for unknown models.
+                        .tokenBudget(ModelRegistry.getContextWindow(config.modelName()))
+                        // 4h ceiling — coding sessions involve human review (plan approval,
+                        // tool approval, edit confirmation) that easily exceeds the 10min
+                        // AgentConfig default. The user can always interrupt explicitly via
+                        // AgentService.stopAgent(); this just prevents spurious timeouts.
+                        .timeout(Duration.ofHours(4))
+                        // Wire the 6-stage ContextCompactionEngine. Without this, contextManager
+                        // stays null and CompactionTrigger short-circuits — long sessions blow
+                        // through the 200K budget and IterationGuards fires GRACEFUL_EXIT.
+                        // Defaults trigger snip@0.80 → micro@0.85 → collapse@0.90 → auto@0.95
+                        // → partial@0.98 of effective budget (context − maxOutput − 13K buffer).
+                        .compactionThresholds(CompactionThresholds.DEFAULTS)
+                        // Enable smart continuation: when the model emits text-only
+                        // narration (zero tool calls) mid-task, nudge it to keep going
+                        // instead of terminating prematurely. Critical for chatty models
+                        // like glm-5.1 that narrate between tool rounds.
+                        .withSmartContinuation();
 
         if (taskDeps != null && !options.childSession()) {
             Map<String, Object> deps = new LinkedHashMap<>();

@@ -202,4 +202,39 @@ class AgentConcurrencyControllerTest {
             assertEquals(1, controller.currentDepth());
         }
     }
+
+    /**
+     * Regression: Reactor's bounded scheduler can run {@code Flux.create} on
+     * thread T1 (acquire) and {@code doFinally} on thread T2 (close). Before
+     * the fix, close decremented T2's ThreadLocal — leaving T1 stuck at +1
+     * forever, until any 3 cycles on the same T1 pinned it at DEPTH_MAX
+     * and rejected every subsequent acquire on that thread.
+     */
+    @Test
+    void closeFromDifferentThreadStillBalancesDepth() throws Exception {
+        // Simulate the reactive scheduler scenario by acquiring on a fixed
+        // worker and closing from a separate worker, repeatedly. Before the
+        // fix, after 3 cycles the next acquire on the same worker threw
+        // DEPTH_LIMIT.
+        ExecutorService acquirer = Executors.newSingleThreadExecutor();
+        ExecutorService releaser = Executors.newSingleThreadExecutor();
+
+        for (int i = 0; i < 5; i++) {
+            AgentSlot slot = acquirer.submit(() -> controller.acquire("xthread")).get(2, TimeUnit.SECONDS);
+            releaser.submit(slot::close).get(2, TimeUnit.SECONDS);
+        }
+
+        // Acquirer thread should NOT have a stuck depth.
+        Integer depthOnAcquirer = acquirer.submit(controller::currentDepth).get(2, TimeUnit.SECONDS);
+        assertEquals(0, depthOnAcquirer.intValue(),
+                "Acquirer thread should be back to depth=0 after each balanced cycle");
+
+        // And we can still acquire freely on the acquirer thread.
+        AgentSlot fresh = acquirer.submit(() -> controller.acquire("xthread")).get(2, TimeUnit.SECONDS);
+        fresh.close();
+
+        acquirer.shutdown();
+        releaser.shutdown();
+        assertEquals(0, controller.globalActiveCount());
+    }
 }

@@ -260,7 +260,8 @@ public class ReplContext {
                         config.workingDir(),
                         config.mcpConfig(),
                         config.toolBudgetForce(),
-                        config.repetitiveToolThreshold());
+                        config.repetitiveToolThreshold(),
+                        config.thinkingBudget());
         rebuildSession(null);
     }
 

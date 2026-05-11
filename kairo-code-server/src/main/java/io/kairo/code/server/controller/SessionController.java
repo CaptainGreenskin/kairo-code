@@ -32,8 +32,8 @@ public class SessionController {
 
     /**
      * Cancel (stop) a running agent session via REST.
-     * This is an alternative to the STOMP /app/agent/stop endpoint,
-     * usable when the WebSocket connection is unavailable or broken.
+     * Alternative to the WS "stop" action, usable when the WebSocket
+     * connection is unavailable or broken.
      *
      * POST /api/sessions/{sessionId}/cancel → 204 No Content
      */

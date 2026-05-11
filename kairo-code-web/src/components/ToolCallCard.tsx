@@ -1,17 +1,67 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Check, X, Loader2, AlertCircle } from 'lucide-react';
-import type { ToolCall } from '@/types/agent';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Check, X, Loader2, AlertCircle, ClipboardList, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import type { PlanItem, ToolCall } from '@/types/agent';
 import { TerminalOutput } from './TerminalOutput';
 import { FileDiffView } from './FileDiffView';
 import { getToolRisk, RISK_LABELS, RISK_COLORS, RISK_BADGE_COLORS } from '@utils/toolRisk';
 import { extractFileWriteInfo, getToolRiskLevel } from '@utils/toolPreview';
 import { FileContentPreview } from './FileContentPreview';
+import { InlineTodoCard, parseTodoWriteInput } from './InlineTodoCard';
+import { LazyMarkdown } from './LazyMarkdown';
 
 const FILE_WRITE_TOOLS = new Set([
+    'write', 'edit', 'multi_edit',
     'write_file', 'create_file', 'patch_file', 'apply_diff', 'edit_file', 'str_replace_editor',
 ]);
 
 const COLLAPSE_LINES = 5;
+
+/**
+ * Drop the synthetic `_streaming_result` marker from tool input. The backend uses it to feed
+ * eager-streaming tool results back into the model loop; legacy snapshots written before the
+ * cleanup landed still carry the marker, so guard at render time.
+ */
+function stripStreamingMarker(input: unknown): unknown {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+    const rec = input as Record<string, unknown>;
+    if (!('_streaming_result' in rec)) return input;
+    const { _streaming_result: _ignored, ...rest } = rec;
+    return rest;
+}
+
+/**
+ * Parse the {@code items} field from an exit_plan_mode tool input. Backend accepts both
+ * a JSON array and a stringified JSON array — we mirror that here so the approval card
+ * shows real items regardless of which shape the model picked.
+ */
+function parseExitPlanItems(input: Record<string, unknown> | undefined): PlanItem[] {
+    if (!input) return [];
+    let raw: unknown = input.items;
+    if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (!trimmed) return [];
+        try {
+            raw = JSON.parse(trimmed);
+        } catch {
+            return [];
+        }
+    }
+    if (!Array.isArray(raw)) return [];
+    const result: PlanItem[] = [];
+    for (const elem of raw) {
+        if (!elem || typeof elem !== 'object') continue;
+        const obj = elem as Record<string, unknown>;
+        const content = typeof obj.content === 'string' ? obj.content.trim() : '';
+        if (!content) continue;
+        const priorityRaw = typeof obj.priority === 'string' ? obj.priority : undefined;
+        const priority =
+            priorityRaw === 'high' || priorityRaw === 'medium' || priorityRaw === 'low'
+                ? (priorityRaw as PlanItem['priority'])
+                : undefined;
+        result.push({ content, ...(priority ? { priority } : {}) });
+    }
+    return result;
+}
 
 /** Check if a string contains unified diff content. */
 function hasUnifiedDiff(text: string): boolean {
@@ -33,6 +83,60 @@ function collapseLines(result: string, expanded: boolean): { lines: string[]; hi
     return { lines: lines.slice(0, COLLAPSE_LINES), hiddenCount: lines.length - COLLAPSE_LINES };
 }
 
+/**
+ * Renders a typed chip when a TOOL_RESULT carries a {@code failureReason} (mirrors backend
+ * {@code FailureReason} enum). Without this, every non-success tool result rendered as an
+ * undifferentiated red error — a timeout looked the same as a handler exception, making
+ * long-task incidents (the original {@code exit_plan_mode} hang) hard to triage from the UI.
+ */
+function FailureReasonChip({ toolCall }: { toolCall: ToolCall }) {
+    if (!toolCall.failureReason) return null;
+    const cfg = {
+        TIMEOUT:        { label: 'timed out',  cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+        USER_CANCELLED: { label: 'cancelled',  cls: 'bg-slate-500/15 text-slate-400 border-slate-500/30' },
+        INTERRUPTED:    { label: 'interrupted',cls: 'bg-slate-500/15 text-slate-400 border-slate-500/30' },
+        HANDLER_ERROR:  { label: 'error',      cls: 'bg-red-500/15 text-red-400 border-red-500/30' },
+        VALIDATION:     { label: 'invalid',    cls: 'bg-rose-500/15 text-rose-400 border-rose-500/30' },
+    }[toolCall.failureReason];
+    return (
+        <span
+            className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${cfg.cls}`}
+            title={`failureReason: ${toolCall.failureReason}`}
+        >
+            {cfg.label}
+        </span>
+    );
+}
+
+/**
+ * Live waiting indicator. The backend emits TOOL_PROGRESS heartbeats (~5s) for any tool
+ * still in flight after a 30s threshold; we show elapsed time + phase so the user can tell
+ * "still alive, waiting for approval" from "stuck/hung".
+ */
+function ProgressChip({ toolCall }: { toolCall: ToolCall }) {
+    if (toolCall.status === 'done' || toolCall.status === 'error' || toolCall.status === 'rejected') {
+        return null;
+    }
+    if (toolCall.progressElapsedMs === undefined || !toolCall.progressPhase) return null;
+    const seconds = Math.floor(toolCall.progressElapsedMs / 1000);
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    const elapsed = mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
+    const phaseLabel = {
+        EXECUTING:         'running',
+        AWAITING_APPROVAL: 'awaiting approval',
+        STREAMING:         'streaming',
+    }[toolCall.progressPhase];
+    return (
+        <span
+            className="text-[10px] px-1.5 py-0.5 rounded border font-mono bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse"
+            title={`${phaseLabel} · ${elapsed}`}
+        >
+            {phaseLabel} · {elapsed}
+        </span>
+    );
+}
+
 function ToolRiskBadge({ toolName }: { toolName: string }) {
     const level = getToolRiskLevel(toolName);
     const config = {
@@ -51,7 +155,12 @@ function ToolRiskBadge({ toolName }: { toolName: string }) {
 
 interface ToolCallCardProps {
     toolCall: ToolCall;
-    onApprove?: (toolCallId: string, approved: boolean) => void;
+    onApprove?: (
+        toolCallId: string,
+        approved: boolean,
+        reason?: string,
+        editedArgs?: Record<string, unknown>,
+    ) => void;
     /** Timeout in seconds before auto-reject. Default: 120. */
     approvalTimeout?: number;
 }
@@ -218,7 +327,7 @@ const statusConfig: Record<ToolCall['status'], { label: string; color: string; i
         icon: <Loader2 size={14} className="animate-spin" />,
     },
     approved: {
-        label: 'Approved',
+        label: 'Running',
         color: 'text-[var(--color-info)]',
         icon: <Loader2 size={14} className="animate-spin" />,
     },
@@ -349,10 +458,22 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
         }
     }, [hasTimedOut, onApprove, toolCall.id]);
 
-    // Keyboard shortcuts: y = approve, n = reject
+    // Keyboard shortcuts: y = approve, n = reject. Suppressed for exit_plan_mode because
+    // that card has inline-editable inputs/textareas — typing 'y' inside an item should
+    // type 'y', not approve the whole plan. Exit-plan card handles its own buttons.
     const handleKeyDown = useCallback(
         (e: KeyboardEvent) => {
             if (!isPending || !onApprove) return;
+            if (toolCall.toolName === 'exit_plan_mode') return;
+            const target = e.target as HTMLElement | null;
+            if (
+                target &&
+                (target.tagName === 'INPUT' ||
+                    target.tagName === 'TEXTAREA' ||
+                    target.isContentEditable)
+            ) {
+                return;
+            }
             if (e.key === 'y' || e.key === 'Y') {
                 e.preventDefault();
                 onApprove(toolCall.id, true);
@@ -361,7 +482,7 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                 onApprove(toolCall.id, false);
             }
         },
-        [isPending, onApprove, toolCall.id],
+        [isPending, onApprove, toolCall.id, toolCall.toolName],
     );
 
     useEffect(() => {
@@ -379,6 +500,23 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
         const s = seconds % 60;
         return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`;
     };
+
+    // Plan-mode approval: structured items list with inline editing + reject feedback.
+    // Backed by ExitPlanModeTool's {overview, items: [{content, priority?}]} schema.
+    // The card surfaces items as an editable checklist; on approve we send the user's
+    // current edits via editedArgs.items, on reject we send their feedback as `reason`.
+    if (toolCall.toolName === 'exit_plan_mode') {
+        return (
+            <ExitPlanModeCard
+                toolCall={toolCall}
+                onApprove={onApprove}
+                isPending={isPending}
+                timeRemaining={timeRemaining}
+                formatTime={formatTime}
+                progressPct={progressPct}
+            />
+        );
+    }
 
     return (
         <div className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}>
@@ -402,11 +540,15 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                         {config.label}
                     </span>
                 </div>
-                {toolCall.durationMs !== undefined && toolCall.status === 'done' && (
-                    <span className="text-xs text-[var(--text-muted)]">
-                        {(toolCall.durationMs / 1000).toFixed(1)}s
-                    </span>
-                )}
+                <div className="flex items-center gap-2">
+                    <FailureReasonChip toolCall={toolCall} />
+                    <ProgressChip toolCall={toolCall} />
+                    {toolCall.durationMs !== undefined && toolCall.status === 'done' && (
+                        <span className="text-xs text-[var(--text-muted)]">
+                            {(toolCall.durationMs / 1000).toFixed(1)}s
+                        </span>
+                    )}
+                </div>
             </div>
 
             <button
@@ -418,16 +560,25 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
 
             {expanded && (
                 <pre className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] max-h-48">
-                    {JSON.stringify(toolCall.input, null, 2)}
+                    {JSON.stringify(stripStreamingMarker(toolCall.input), null, 2)}
                 </pre>
             )}
 
-            {toolCall.result && toolCall.status === 'done' && (
-                <ResultOutput
-                    toolName={toolCall.toolName}
-                    result={toolCall.result}
-                    input={toolCall.input}
-                />
+            {toolCall.toolName === 'todo_write' ? (
+                <div className="px-3 pb-2 border-t border-[var(--border)] pt-2">
+                    {(() => {
+                        const { todos, overview } = parseTodoWriteInput(toolCall.input);
+                        return <InlineTodoCard todos={todos} overview={overview} />;
+                    })()}
+                </div>
+            ) : (
+                toolCall.result && toolCall.status === 'done' && (
+                    <ResultOutput
+                        toolName={toolCall.toolName}
+                        result={toolCall.result}
+                        input={toolCall.input}
+                    />
+                )
             )}
 
             {fileWriteInfo && <FileContentPreview info={fileWriteInfo} />}
@@ -477,6 +628,410 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                         <span>reject</span>
                     </div>
                 </div>
+            )}
+        </div>
+    );
+}
+
+interface ExitPlanModeCardProps {
+    toolCall: ToolCall;
+    onApprove?: (
+        toolCallId: string,
+        approved: boolean,
+        reason?: string,
+        editedArgs?: Record<string, unknown>,
+    ) => void;
+    isPending: boolean;
+    timeRemaining: number;
+    formatTime: (s: number) => string;
+    progressPct: number;
+}
+
+interface EditableItem extends PlanItem {
+    /** local-only key; backend doesn't read this */
+    key: string;
+    /** when false, item is excluded from approval payload */
+    enabled: boolean;
+}
+
+const PRIORITY_OPTIONS: { value: PlanItem['priority']; label: string }[] = [
+    { value: undefined, label: '—' },
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' },
+];
+
+const PRIORITY_BADGE: Record<NonNullable<PlanItem['priority']>, string> = {
+    high: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+    medium: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    low: 'bg-slate-500/15 text-slate-300 border-slate-500/30',
+};
+
+function ExitPlanModeCard({
+    toolCall,
+    onApprove,
+    isPending,
+    timeRemaining,
+    formatTime,
+    progressPct,
+}: ExitPlanModeCardProps) {
+    const input = (toolCall.input ?? {}) as Record<string, unknown>;
+    const overview = typeof input.overview === 'string' ? input.overview : '';
+    const planContent = typeof input.plan_content === 'string' ? input.plan_content : '';
+    const initialItems = useMemo(() => parseExitPlanItems(input), [toolCall.input]);
+
+    const [items, setItems] = useState<EditableItem[]>(() =>
+        initialItems.map((it, idx) => ({
+            ...it,
+            key: `init-${idx}`,
+            enabled: true,
+        })),
+    );
+    const [rejecting, setRejecting] = useState(false);
+    const [rejectReason, setRejectReason] = useState('');
+    // Plan body collapse: default expanded while pending so the user reads the rationale
+    // before approving; collapsed once a decision is recorded so the chat doesn't get
+    // dominated by stale plan markdown.
+    const [planBodyExpanded, setPlanBodyExpanded] = useState(isPending);
+    useEffect(() => {
+        if (!isPending) setPlanBodyExpanded(false);
+    }, [isPending]);
+
+    // Result text decides post-approval state. Backend echoes "Exited Plan Mode..."
+    // on approve and "Plan exit denied: <reason>\nStill in Plan Mode" on reject.
+    const result = toolCall.result ?? '';
+    const isApproved =
+        !isPending && /Exited Plan Mode|Write tools are now available/i.test(result);
+    const isRejected =
+        !isPending && /Plan exit denied|Still in Plan Mode|Keep researching/i.test(result);
+    const isErrored = !isPending && toolCall.isError;
+    const headerLabel = isPending
+        ? 'Plan ready for review'
+        : isApproved
+            ? 'Plan approved'
+            : isRejected
+                ? 'Plan rejected — keep researching'
+                : isErrored
+                    ? 'Plan submission failed'
+                    : 'Plan submitted';
+    const headerColor = isPending
+        ? 'text-purple-300'
+        : isApproved
+            ? 'text-emerald-300'
+            : isRejected
+                ? 'text-amber-300'
+                : isErrored
+                    ? 'text-rose-300'
+                    : 'text-purple-300';
+    const borderColor = isPending
+        ? 'border-purple-500/40'
+        : isApproved
+            ? 'border-emerald-500/30'
+            : isRejected
+                ? 'border-amber-500/30'
+                : 'border-[var(--border)]';
+    const bgTint = isPending
+        ? 'from-purple-500/5'
+        : isApproved
+            ? 'from-emerald-500/5'
+            : isRejected
+                ? 'from-amber-500/5'
+                : 'from-transparent';
+    const headerBg = isPending
+        ? 'bg-purple-500/10 border-b border-purple-500/30'
+        : isApproved
+            ? 'bg-emerald-500/10 border-b border-emerald-500/30'
+            : isRejected
+                ? 'bg-amber-500/10 border-b border-amber-500/30'
+                : 'bg-[var(--bg-secondary)] border-b border-[var(--border)]';
+    const HeaderIcon = isApproved ? Check : isRejected ? X : ClipboardList;
+
+    const updateItem = (key: string, patch: Partial<EditableItem>) => {
+        setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
+    };
+    const removeItem = (key: string) => {
+        setItems((prev) => prev.filter((it) => it.key !== key));
+    };
+    const addItem = () => {
+        setItems((prev) => [
+            ...prev,
+            { key: `new-${Date.now()}-${prev.length}`, content: '', enabled: true },
+        ]);
+    };
+
+    const enabledItems = items.filter((it) => it.enabled && it.content.trim());
+    const canApprove = isPending && !!onApprove && enabledItems.length > 0;
+
+    const handleApprove = () => {
+        if (!onApprove || !canApprove) return;
+        const payload = enabledItems.map((it) => ({
+            content: it.content.trim(),
+            ...(it.priority ? { priority: it.priority } : {}),
+        }));
+        // Items roundtrip as a JSON string because the backend ToolParam type is String.
+        // Sending a stringified array sidesteps Jackson's coercion of a list-shaped patch.
+        onApprove(toolCall.id, true, undefined, { items: JSON.stringify(payload) });
+    };
+
+    const handleConfirmReject = () => {
+        if (!onApprove) return;
+        const reason = rejectReason.trim() || 'User rejected the plan';
+        onApprove(toolCall.id, false, reason);
+    };
+
+    return (
+        <div
+            className={`my-2 border-2 ${borderColor} rounded-lg overflow-hidden bg-gradient-to-br ${bgTint} to-transparent`}
+        >
+            <div className={`px-3 py-2 flex items-center gap-2 ${headerBg}`}>
+                <HeaderIcon size={14} className={`${headerColor} shrink-0`} />
+                <span className={`text-sm font-semibold ${headerColor}`}>{headerLabel}</span>
+                <span className="text-[11px] text-[var(--text-muted)] ml-2">
+                    {enabledItems.length}/{items.length} item{items.length === 1 ? '' : 's'}
+                </span>
+                {isPending && (
+                    <span className="ml-auto text-[10px] font-mono text-[var(--text-muted)]">
+                        {formatTime(timeRemaining)}
+                    </span>
+                )}
+            </div>
+
+            {overview && (
+                <div className="px-3 py-2 text-xs text-[var(--text-secondary)] italic border-b border-[var(--border)]">
+                    {overview}
+                </div>
+            )}
+
+            {planContent && (
+                <div className="border-b border-[var(--border)] bg-[var(--bg-secondary)]/40">
+                    <button
+                        onClick={() => setPlanBodyExpanded((p) => !p)}
+                        className="w-full px-3 py-1.5 flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+                    >
+                        {planBodyExpanded ? (
+                            <ChevronUp size={12} className="text-[var(--text-muted)]" />
+                        ) : (
+                            <ChevronDown size={12} className="text-[var(--text-muted)]" />
+                        )}
+                        <span>Plan</span>
+                        <span className="text-[var(--text-muted)]">·</span>
+                        <span className="text-[var(--text-muted)] font-normal">
+                            {planBodyExpanded ? 'hide rationale' : 'show full rationale'}
+                        </span>
+                    </button>
+                    {planBodyExpanded && (
+                        <div className="px-3 py-2 max-h-[60vh] overflow-y-auto bg-[var(--bg-primary)] border-t border-[var(--border)]">
+                            <div className="prose prose-sm dark:prose-invert max-w-none text-[var(--text-primary)] text-[13px] leading-relaxed">
+                                <LazyMarkdown>{planContent}</LazyMarkdown>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className="px-3 py-2 space-y-1.5 bg-[var(--bg-primary)]">
+                {items.length === 0 && (
+                    <div className="text-xs text-[var(--text-muted)] italic py-2">
+                        No items in this plan.
+                    </div>
+                )}
+                {items.map((it, idx) => (
+                    <PlanItemRow
+                        key={it.key}
+                        index={idx + 1}
+                        item={it}
+                        editable={isPending}
+                        onChange={(patch) => updateItem(it.key, patch)}
+                        onRemove={() => removeItem(it.key)}
+                    />
+                ))}
+                {isPending && (
+                    <button
+                        onClick={addItem}
+                        className="flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] mt-1 transition-colors"
+                    >
+                        <Plus size={11} /> Add item
+                    </button>
+                )}
+            </div>
+
+            {isPending && rejecting && (
+                <div className="px-3 py-2 border-t border-[var(--border)] bg-[var(--bg-secondary)] space-y-2">
+                    <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
+                        What should the agent change? (sent back so the agent can refine the plan)
+                    </label>
+                    <textarea
+                        value={rejectReason}
+                        onChange={(e) => setRejectReason(e.target.value)}
+                        rows={3}
+                        autoFocus
+                        placeholder="e.g. split step 2 into smaller tasks, drop the migration step…"
+                        className="w-full text-xs px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] resize-y"
+                    />
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleConfirmReject}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-[var(--color-danger)] hover:bg-[var(--color-danger)]/90 rounded transition-colors"
+                        >
+                            <X size={13} />
+                            Send feedback & keep researching
+                        </button>
+                        <button
+                            onClick={() => {
+                                setRejecting(false);
+                                setRejectReason('');
+                            }}
+                            className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] px-2 py-1"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {isPending && !rejecting && onApprove && (
+                <div className="px-3 py-2 flex items-center gap-2 border-t border-[var(--border)]">
+                    <button
+                        onClick={handleApprove}
+                        disabled={!canApprove}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white rounded bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/40 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <Check size={13} />
+                        Approve & exit plan mode
+                    </button>
+                    <button
+                        onClick={() => setRejecting(true)}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] rounded transition-colors"
+                    >
+                        <X size={13} />
+                        Reject with feedback
+                    </button>
+                    <div className="ml-auto text-[10px] text-[var(--text-muted)]">
+                        edit items inline · reject sends a refinement note
+                    </div>
+                </div>
+            )}
+
+            {isPending && (
+                <div className="h-1 bg-[var(--bg-tertiary)] overflow-hidden">
+                    <div
+                        className="h-full bg-purple-500 transition-all duration-1000"
+                        style={{ width: `${100 - progressPct}%` }}
+                    />
+                </div>
+            )}
+
+            {!isPending && isRejected && result && (
+                <div className="px-3 py-2 text-[11px] text-[var(--text-muted)] border-t border-[var(--border)] bg-[var(--bg-secondary)] whitespace-pre-wrap font-mono">
+                    {result}
+                </div>
+            )}
+        </div>
+    );
+}
+
+interface PlanItemRowProps {
+    index: number;
+    item: EditableItem;
+    editable: boolean;
+    onChange: (patch: Partial<EditableItem>) => void;
+    onRemove: () => void;
+}
+
+function PlanItemRow({ index, item, editable, onChange, onRemove }: PlanItemRowProps) {
+    const dimmed = !item.enabled;
+    const taRef = useRef<HTMLTextAreaElement | null>(null);
+    // Auto-grow the textarea so multi-line plan items render without clipping. Resetting
+    // height to 'auto' first lets shrinking work when content gets shorter; the layout
+    // effect runs synchronously so the row never flashes at the wrong height.
+    useEffect(() => {
+        const el = taRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+    }, [item.content, editable]);
+    return (
+        <div
+            className={`flex items-start gap-2 px-2 py-1.5 rounded border ${
+                item.enabled
+                    ? 'border-transparent hover:border-[var(--border)] hover:bg-[var(--bg-secondary)]/40'
+                    : 'border-dashed border-[var(--border)] opacity-60'
+            } transition-colors`}
+        >
+            <input
+                type="checkbox"
+                checked={item.enabled}
+                disabled={!editable}
+                onChange={(e) => onChange({ enabled: e.target.checked })}
+                className="mt-1 cursor-pointer accent-purple-500 disabled:cursor-default"
+                title={item.enabled ? 'Include this item' : 'Skip this item'}
+            />
+            <span className="text-[11px] font-mono text-[var(--text-muted)] mt-1 w-4 shrink-0">
+                {index}.
+            </span>
+            <div className="flex-1 min-w-0">
+                {editable ? (
+                    <textarea
+                        ref={taRef}
+                        value={item.content}
+                        onChange={(e) => onChange({ content: e.target.value })}
+                        rows={1}
+                        placeholder="Plan item content"
+                        className={`w-full text-[13px] leading-snug px-2 py-1.5 rounded border bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none resize-none overflow-hidden ${
+                            dimmed
+                                ? 'border-transparent line-through'
+                                : 'border-[var(--border)] focus:border-[var(--accent)]'
+                        }`}
+                    />
+                ) : (
+                    <div
+                        className={`text-xs whitespace-pre-wrap ${
+                            dimmed
+                                ? 'text-[var(--text-muted)] line-through'
+                                : 'text-[var(--text-primary)]'
+                        }`}
+                    >
+                        {item.content || (
+                            <span className="italic text-[var(--text-muted)]">empty</span>
+                        )}
+                    </div>
+                )}
+            </div>
+            {editable ? (
+                <select
+                    value={item.priority ?? ''}
+                    onChange={(e) =>
+                        onChange({
+                            priority:
+                                (e.target.value as PlanItem['priority']) || undefined,
+                        })
+                    }
+                    className="text-[11px] px-1.5 py-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] cursor-pointer focus:outline-none focus:border-[var(--accent)]"
+                    title="Priority"
+                >
+                    {PRIORITY_OPTIONS.map((opt) => (
+                        <option key={opt.label} value={opt.value ?? ''}>
+                            {opt.label}
+                        </option>
+                    ))}
+                </select>
+            ) : (
+                item.priority && (
+                    <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded border ${PRIORITY_BADGE[item.priority]}`}
+                    >
+                        {item.priority}
+                    </span>
+                )
+            )}
+            {editable && (
+                <button
+                    onClick={onRemove}
+                    title="Remove item"
+                    className="text-[var(--text-muted)] hover:text-rose-400 transition-colors mt-1"
+                >
+                    <Trash2 size={12} />
+                </button>
             )}
         </div>
     );

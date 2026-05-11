@@ -5,6 +5,7 @@ export type FileWriteInfo = {
 };
 
 const WRITE_TOOL_NAMES = new Set([
+    'write', 'edit', 'multi_edit',
     'write_file', 'create_file', 'edit_file', 'str_replace_editor',
     'overwrite_file', 'patch_file',
 ]);
@@ -13,7 +14,8 @@ export function extractFileWriteInfo(toolName: string, input: Record<string, unk
     if (!WRITE_TOOL_NAMES.has(toolName)) return null;
 
     const filePath = (input.path ?? input.file_path ?? input.filename ?? '') as string;
-    const content = (input.content ?? input.new_content ?? input.file_text ?? '') as string;
+    // For write/edit: content from write OR newText from edit (replacement text)
+    const content = (input.content ?? input.new_content ?? input.file_text ?? input.newText ?? '') as string;
 
     if (!filePath || !content) return null;
 

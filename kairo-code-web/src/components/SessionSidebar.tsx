@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import React from 'react';
-import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, X, Archive } from 'lucide-react';
+import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, X, Archive, Sparkles } from 'lucide-react';
 import { listSessions, deleteSession as apiDeleteSession, renameSession as apiRenameSession } from '@api/config';
+import { useSessionStore } from '@store/sessionStore';
 import type { SessionInfo } from '@/types/agent';
-import { NewSessionDialog } from './NewSessionDialog';
-import { WorkspacePanel } from './WorkspacePanel';
 import { formatRelativeTime } from '@utils/formatTime';
 import { getSessionName, setSessionName, removeSessionName } from '@utils/sessionNames';
 import { pinSession, unpinSession, isSessionPinned, getPinnedSessions } from '@utils/sessionPins';
@@ -18,7 +17,7 @@ interface SessionSidebarProps {
     onSelectSession: (id: string) => void;
     onDeleteSession: (id: string) => void;
     onNewSession: (info: { sessionId: string; model: string }) => void;
-    onCreateSession: (workingDir: string) => Promise<{ sessionId: string }>;
+    onCreateSession: (workspaceId: string) => Promise<{ sessionId: string }>;
     onSessionsChange?: (sessions: SessionInfo[]) => void;
     sortOrder?: SessionSortOrder;
     onSortChange?: (order: SessionSortOrder) => void;
@@ -31,7 +30,14 @@ interface SessionSidebarProps {
     onLoadSnapshot?: (sessionId: string) => void;
     /** Called after a successful server-side rename to refresh the sidebar. */
     onRenameSuccess?: (id: string, name: string) => void;
+    /** Working directory of the current workspace (used to label the empty state, etc.) */
     defaultWorkingDir?: string;
+    /** Currently active workspace id — when set, the sidebar filters its session list by it. */
+    currentWorkspaceId?: string | null;
+    /** Called when the user wants to create a new workspace (from the empty state). */
+    onCreateWorkspace?: () => void;
+    /** When true, the sidebar renders without its own aside chrome — meant for embedding inside a unified tabbed sidebar. */
+    embedded?: boolean;
 }
 
 interface SessionItemProps {
@@ -49,6 +55,27 @@ interface SessionItemProps {
     onToggleSelect?: (sessionId: string) => void;
     isFocused?: boolean;
     onFocus?: () => void;
+}
+
+type DateBucket = 'pinned' | 'today' | 'last7' | 'last30' | 'older';
+
+const BUCKET_LABELS: Record<Exclude<DateBucket, 'pinned'>, string> = {
+    today: 'Today',
+    last7: 'Last 7 Days',
+    last30: 'Last 30 Days',
+    older: 'Older',
+};
+
+/** Categorize a session's createdAt timestamp into a Cursor-style bucket. */
+function bucketFor(createdAt: number, now: number): Exclude<DateBucket, 'pinned'> {
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    if (createdAt >= startOfToday.getTime()) return 'today';
+    const sevenAgo = startOfToday.getTime() - 7 * 86400_000;
+    if (createdAt >= sevenAgo) return 'last7';
+    const thirtyAgo = startOfToday.getTime() - 30 * 86400_000;
+    if (createdAt >= thirtyAgo) return 'last30';
+    return 'older';
 }
 
 function highlightMatch(text: string, query: string): React.ReactNode {
@@ -73,6 +100,11 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
     const [nameVersion, setNameVersion] = useState(0);
     const customName = useMemo(() => getSessionName(session.sessionId), [session.sessionId, nameVersion]);
     const tags = getSessionTags(session.sessionId);
+    // Cursor-style: show first user message preview under the active row.
+    // Only subscribe when active to avoid re-rendering every row on every message tick.
+    const activePreview = useSessionStore((s) =>
+        isActive ? (s.sessions[session.sessionId]?.messages.find(m => m.role === 'user')?.content ?? null) : null
+    );
     const [addingTag, setAddingTag] = useState(false);
     const [tagInput, setTagInput] = useState('');
 
@@ -139,10 +171,10 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                     setRenaming(true);
                 }
             }}
-            className={`group flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer transition-colors ${
+            className={`group relative flex items-center justify-between px-2.5 py-2 rounded-md cursor-pointer transition-colors ${
                 isActive
                     ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                    : 'hover:bg-[var(--bg-hover)]'
+                    : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
             } ${isFocused && !isActive ? 'ring-1 ring-[var(--accent)] ring-inset' : ''} ${isLoading ? 'opacity-60' : ''} ${selectMode && isSelected ? 'ring-1 ring-[var(--accent)]' : ''}`}
             onClick={selectMode ? () => onToggleSelect?.(session.sessionId) : () => onSelect(session.sessionId)}
         >
@@ -177,7 +209,7 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                         <>
                             {pinned && <Pin size={10} className="text-[var(--color-primary)] shrink-0" />}
                             <span
-                                className="text-sm font-mono truncate cursor-pointer"
+                                className={`text-sm truncate cursor-pointer ${customName ? '' : 'font-mono'}`}
                                 onDoubleClick={startRename}
                                 title={customName ?? session.sessionId}
                             >
@@ -189,10 +221,19 @@ function SessionItem({ session, isActive, isLoading, onSelect, onDelete, onPinCh
                         <Loader size={12} className="animate-spin shrink-0 text-[var(--color-primary)]" />
                     )}
                 </div>
-                <p className="text-[10px] text-[var(--text-muted)]">
-                    {session.model} · {formatRelativeTime(session.createdAt)}
-                    {session.running && ' · 运行中'}
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
+                    <span className="tabular-nums">{formatRelativeTime(session.createdAt)}</span>
+                    <span className="opacity-60"> · {session.model}</span>
+                    {session.running && <span className="ml-1 text-[var(--color-primary)]">● 运行中</span>}
                 </p>
+                {isActive && activePreview && (
+                    <p
+                        className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate opacity-80"
+                        title={activePreview}
+                    >
+                        {activePreview.replace(/\s+/g, ' ').trim().slice(0, 60)}
+                    </p>
+                )}
                 {tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-0.5">
                         {tags.slice(0, 3).map(tag => (
@@ -284,7 +325,7 @@ function SessionSortControl({ value, onChange }: SessionSortControlProps) {
         <select
             value={value}
             onChange={e => onChange(e.target.value as SessionSortOrder)}
-            className="text-[10px] text-[var(--text-muted)] bg-transparent border border-[var(--border)] rounded px-1.5 py-0.5 cursor-pointer hover:border-[var(--accent)] transition-colors focus:outline-none focus:ring-0"
+            className="text-[10px] text-[var(--text-muted)] bg-transparent border-0 cursor-pointer hover:text-[var(--text-primary)] transition-colors focus:outline-none focus:ring-0 -ml-1"
             title="Sort sessions"
         >
             {options.map(o => (
@@ -307,12 +348,16 @@ export const SessionSidebar = React.memo(function SessionSidebar({
     persistedSessions,
     onLoadSnapshot,
     onRenameSuccess,
-    defaultWorkingDir,
+    defaultWorkingDir: _defaultWorkingDir,
+    currentWorkspaceId,
+    onCreateWorkspace,
+    embedded = false,
 }: SessionSidebarProps) {
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [showNewDialog, setShowNewDialog] = useState(false);
+    const [creatingSession, setCreatingSession] = useState(false);
+    const [createError, setCreateError] = useState<string | null>(null);
     const [selectMode, setSelectMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [pins, setPins] = useState<string[]>(() => getPinnedSessions());
@@ -330,10 +375,17 @@ export const SessionSidebar = React.memo(function SessionSidebar({
         items?.[focusedIndex]?.scrollIntoView({ block: 'nearest' });
     }, [focusedIndex]);
 
+    const workspaceFilteredSessions = useMemo(() => {
+        if (!currentWorkspaceId) return sessions;
+        // Pre-M112 sessions have no workspaceId — keep them visible in every workspace
+        // (they will be hidden once they are deleted or replaced by workspace-aware sessions).
+        return sessions.filter(s => !s.workspaceId || s.workspaceId === currentWorkspaceId);
+    }, [sessions, currentWorkspaceId]);
+
     const sortedSessions = useMemo(() => {
         const pinSet = new Set(pins);
-        const pinned = sessions.filter(s => pinSet.has(s.sessionId));
-        const unpinned = sessions.filter(s => !pinSet.has(s.sessionId));
+        const pinned = workspaceFilteredSessions.filter(s => pinSet.has(s.sessionId));
+        const unpinned = workspaceFilteredSessions.filter(s => !pinSet.has(s.sessionId));
         // pinned 按 pins 数组顺序排列
         pinned.sort((a, b) => pins.indexOf(a.sessionId) - pins.indexOf(b.sessionId));
         // unpinned sorted by sortOrder via sortSessions
@@ -349,7 +401,7 @@ export const SessionSidebar = React.memo(function SessionSidebar({
             return ai - bi;
         });
         return [...pinned, ...sortedUnpinned];
-    }, [sessions, pins, sortOrder]);
+    }, [workspaceFilteredSessions, pins, sortOrder]);
 
     const displayedSessions = useMemo(() => {
         if (!activeTagFilter) return sortedSessions;
@@ -429,6 +481,13 @@ export const SessionSidebar = React.memo(function SessionSidebar({
         fetchSessions();
     }, [fetchSessions]);
 
+    // Refresh when the active session changes (e.g. App.tsx created one
+    // outside this component) or when the user switches workspace.
+    useEffect(() => {
+        if (!activeSessionId && !currentWorkspaceId) return;
+        fetchSessions();
+    }, [activeSessionId, currentWorkspaceId, fetchSessions]);
+
     // Cmd+Shift+S to focus sidebar search
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
@@ -486,68 +545,93 @@ export const SessionSidebar = React.memo(function SessionSidebar({
         exitSelectMode();
     };
 
-    const handleCreate = useCallback(
-        (info: { sessionId: string; model: string }) => {
-            setShowNewDialog(false);
-            fetchSessions();
-            onNewSession(info);
-        },
-        [fetchSessions, onNewSession],
-    );
+    const handleNewSessionClick = useCallback(async () => {
+        setCreateError(null);
+        if (!currentWorkspaceId) {
+            if (onCreateWorkspace) {
+                onCreateWorkspace();
+            } else {
+                setCreateError('No workspace selected. Open Settings to create one.');
+            }
+            return;
+        }
+        setCreatingSession(true);
+        try {
+            const result = await onCreateSession(currentWorkspaceId);
+            await fetchSessions();
+            onNewSession({ sessionId: result.sessionId, model: '' });
+        } catch (err) {
+            setCreateError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setCreatingSession(false);
+        }
+    }, [currentWorkspaceId, onCreateSession, fetchSessions, onNewSession, onCreateWorkspace]);
 
+    const Wrapper: React.ElementType = embedded ? 'div' : 'aside';
+    const wrapperClass = embedded
+        ? 'flex-1 flex flex-col min-h-0 bg-[var(--bg-secondary)]'
+        : 'w-64 border-r border-[var(--border)] bg-[var(--bg-secondary)] flex flex-col shrink-0 hidden lg:flex';
     return (
         <>
-            <aside className="w-64 border-r border-[var(--border)] bg-[var(--bg-secondary)] flex flex-col shrink-0 hidden lg:flex">
-                <WorkspacePanel
-                    currentSessionId={activeSessionId}
-                    onSelectSession={onSelectSession}
-                />
-                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
+            <Wrapper className={wrapperClass}>
+                {/* Top: full-width "+ New Agent" CTA (Cursor style). */}
+                <div className="px-3 pt-3 pb-2">
                     <button
-                        onClick={() => setShowNewDialog(true)}
-                        className="px-3 py-2 text-sm font-medium text-white bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] rounded-lg transition-colors flex items-center justify-center gap-2"
+                        onClick={handleNewSessionClick}
+                        disabled={creatingSession}
+                        className="w-full h-9 inline-flex items-center justify-center gap-2 rounded-md bg-[var(--bg-primary)] border border-[var(--border)] text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] hover:border-[var(--accent)] transition-colors disabled:opacity-60"
+                        title="Start a new agent chat"
+                        aria-label="New agent"
                     >
-                        <Plus size={14} />
-                        New Session
+                        {creatingSession
+                            ? <Loader size={14} className="animate-spin" />
+                            : <Sparkles size={14} className="text-[var(--accent)]" />}
+                        <span className="font-medium">New Agent</span>
                     </button>
-                    <div className="flex items-center gap-1.5">
-                        {onSortChange && (
-                            <SessionSortControl value={sortOrder} onChange={onSortChange} />
-                        )}
-                        <button
-                            onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
-                            className={`text-xs px-2 py-1 rounded transition-colors ${
-                                selectMode
-                                    ? 'bg-[var(--accent)] text-white'
-                                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                            }`}
-                        >
-                            {selectMode ? 'Cancel' : 'Select'}
-                        </button>
-                    </div>
                 </div>
 
-                <div className="px-3 py-2">
+                {/* Search */}
+                <div className="px-3 pb-2">
                     <div className="relative">
-                        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                        <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
                         <input
                             ref={searchRef}
                             type="text"
                             value={sessionFilter}
                             onChange={e => setSessionFilter(e.target.value)}
                             onKeyDown={e => { if (e.key === 'Escape') setSessionFilter(''); }}
-                            placeholder="Filter sessions…"
-                            className="w-full pl-6 pr-2 py-1 text-xs rounded bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                            placeholder="Search Agents…"
+                            className="w-full pl-7 pr-7 h-7 text-xs rounded-md bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)] transition-colors"
                         />
                         {sessionFilter && (
                             <button
                                 onClick={() => setSessionFilter('')}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                aria-label="Clear filter"
                             >
-                                <X size={10} />
+                                <X size={11} />
                             </button>
                         )}
                     </div>
+                </div>
+
+                {/* Tools row — sort + bulk select, right-aligned and muted */}
+                <div className="flex items-center justify-between px-3 pb-2">
+                    <div className="flex items-center">
+                        {onSortChange && (
+                            <SessionSortControl value={sortOrder} onChange={onSortChange} />
+                        )}
+                    </div>
+                    <button
+                        onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+                        className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                            selectMode
+                                ? 'bg-[var(--accent)] text-white'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                        }`}
+                    >
+                        {selectMode ? 'Cancel' : 'Select'}
+                    </button>
                 </div>
 
                 {allTags.length > 0 && (
@@ -592,10 +676,23 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                         <div className="p-4 text-center text-sm text-[var(--color-danger)]">
                             {error}
                         </div>
-                    ) : sessions.length === 0 && historySnapshots.length === 0 ? (
-                        <div className="p-4 text-center text-sm text-[var(--text-muted)]">
-                            <MessageSquare size={20} className="mx-auto mb-2 opacity-50" />
-                            No sessions yet
+                    ) : workspaceFilteredSessions.length === 0 && historySnapshots.length === 0 ? (
+                        <div className="px-4 py-8 text-center">
+                            <div className="mx-auto mb-3 w-10 h-10 rounded-full bg-[var(--bg-hover)] flex items-center justify-center">
+                                <MessageSquare size={18} className="text-[var(--text-muted)]" />
+                            </div>
+                            <p className="text-sm text-[var(--text-secondary)] mb-1">No sessions yet</p>
+                            <p className="text-[11px] text-[var(--text-muted)] mb-3">
+                                Start a new chat in this workspace
+                            </p>
+                            <button
+                                onClick={handleNewSessionClick}
+                                disabled={creatingSession}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-60"
+                            >
+                                {creatingSession ? <Loader size={12} className="animate-spin" /> : <Plus size={12} />}
+                                New session
+                            </button>
                         </div>
                     ) : (
                         <>
@@ -623,41 +720,62 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                                     }
                                 }}
                             >
-                                <ul className="p-2 space-y-1">
-                                    {(() => {
-                                        const pinSet = new Set(pins);
-                                        const pinnedCount = filteredSessions.filter(s => pinSet.has(s.sessionId)).length;
-
-                                        return filteredSessions.map((session, index) => {
-                                            const isPinned = pinSet.has(session.sessionId);
-                                            const showDivider = isPinned && index === pinnedCount - 1 && pinnedCount < filteredSessions.length;
-
-                                            return (
-                                                <div key={session.sessionId}>
-                                                    <SessionItem
-                                                        session={session}
-                                                        isActive={session.sessionId === activeSessionId}
-                                                        isLoading={session.sessionId === loadingSessionId}
-                                                        onSelect={onSelectSession}
-                                                        onDelete={handleDelete}
-                                                        onPinChange={handlePinChange}
-                                                        onTagsChange={handleTagsChange}
-                                                        onRenameSuccess={onRenameSuccess}
-                                                        searchQuery={sessionFilter}
-                                                        selectMode={selectMode}
-                                                        isSelected={selectedIds.has(session.sessionId)}
-                                                        onToggleSelect={toggleSelect}
-                                                        isFocused={index === focusedIndex}
-                                                        onFocus={() => setFocusedIndex(index)}
-                                                    />
-                                                    {showDivider && (
-                                                        <div className="mx-3 my-1 border-t border-[var(--border)]" />
-                                                    )}
+                                {(() => {
+                                    // Bucket sessions by createdAt — pinned items keep their own group at the top.
+                                    const pinSet = new Set(pins);
+                                    const now = Date.now();
+                                    const groups: { key: DateBucket; label: string; items: SessionInfo[] }[] = [
+                                        { key: 'pinned', label: 'Pinned', items: [] },
+                                        { key: 'today', label: BUCKET_LABELS.today, items: [] },
+                                        { key: 'last7', label: BUCKET_LABELS.last7, items: [] },
+                                        { key: 'last30', label: BUCKET_LABELS.last30, items: [] },
+                                        { key: 'older', label: BUCKET_LABELS.older, items: [] },
+                                    ];
+                                    for (const s of filteredSessions) {
+                                        if (pinSet.has(s.sessionId)) {
+                                            groups[0].items.push(s);
+                                        } else {
+                                            const b = bucketFor(s.createdAt, now);
+                                            const grp = groups.find((g) => g.key === b)!;
+                                            grp.items.push(s);
+                                        }
+                                    }
+                                    // Track running index across groups so keyboard focus stays on the global list.
+                                    let flatIdx = 0;
+                                    return groups
+                                        .filter((g) => g.items.length > 0)
+                                        .map((g) => (
+                                            <div key={g.key} className="mb-2">
+                                                <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                                                    {g.label}
                                                 </div>
-                                            );
-                                        });
-                                    })()}
-                                </ul>
+                                                <ul className="px-2 space-y-1">
+                                                    {g.items.map((session) => {
+                                                        const indexHere = flatIdx++;
+                                                        return (
+                                                            <SessionItem
+                                                                key={session.sessionId}
+                                                                session={session}
+                                                                isActive={session.sessionId === activeSessionId}
+                                                                isLoading={session.sessionId === loadingSessionId}
+                                                                onSelect={onSelectSession}
+                                                                onDelete={handleDelete}
+                                                                onPinChange={handlePinChange}
+                                                                onTagsChange={handleTagsChange}
+                                                                onRenameSuccess={onRenameSuccess}
+                                                                searchQuery={sessionFilter}
+                                                                selectMode={selectMode}
+                                                                isSelected={selectedIds.has(session.sessionId)}
+                                                                onToggleSelect={toggleSelect}
+                                                                isFocused={indexHere === focusedIndex}
+                                                                onFocus={() => setFocusedIndex(indexHere)}
+                                                            />
+                                                        );
+                                                    })}
+                                                </ul>
+                                            </div>
+                                        ));
+                                })()}
                             </div>
                             {filteredSessions.length === 0 && sessionFilter && (
                                 <div className="px-3 py-4 text-xs text-[var(--text-muted)] text-center">
@@ -716,15 +834,12 @@ export const SessionSidebar = React.memo(function SessionSidebar({
                         </>
                     )}
                 </div>
-            </aside>
+            </Wrapper>
 
-            {showNewDialog && (
-                <NewSessionDialog
-                    onClose={() => setShowNewDialog(false)}
-                    onCreate={handleCreate}
-                    onCreateSession={onCreateSession}
-                    defaultWorkingDir={defaultWorkingDir}
-                />
+            {createError && (
+                <div className="fixed bottom-4 left-4 z-50 px-3 py-2 text-xs text-[var(--color-danger)] bg-[var(--color-danger-bg)] rounded-lg shadow">
+                    {createError}
+                </div>
             )}
         </>
     );

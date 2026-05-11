@@ -6,6 +6,7 @@ const DANGER_TOOLS = new Set([
 ]);
 
 const CAUTION_TOOLS = new Set([
+    'write', 'edit', 'multi_edit',
     'write_file', 'create_file', 'overwrite_file', 'edit_file',
     'patch_file', 'str_replace_editor', 'insert_content',
 ]);

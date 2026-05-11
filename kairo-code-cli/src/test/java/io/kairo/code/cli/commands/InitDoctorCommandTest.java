@@ -191,7 +191,7 @@ class InitDoctorCommandTest {
     private ReplContext contextWithWorkDir(Path workDir) {
         CodeAgentConfig config = new CodeAgentConfig(
                 "test-key", "https://api.test.com", "gpt-4o", 50,
-                workDir.toString(), null, 0, 0);
+                workDir.toString(), null, 0, 0, null);
         Agent agent = stubAgent();
         DefaultToolRegistry toolRegistry = new DefaultToolRegistry();
         DefaultToolExecutor toolExecutor = new DefaultToolExecutor(toolRegistry, new DefaultPermissionGuard());

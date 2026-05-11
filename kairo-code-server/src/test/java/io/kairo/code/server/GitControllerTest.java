@@ -1,5 +1,6 @@
 package io.kairo.code.server;
 
+import io.kairo.code.server.config.WorkspacePersistenceService;
 import io.kairo.code.server.controller.GitController;
 import io.kairo.code.service.AgentService;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,7 +37,8 @@ class GitControllerTest {
 
         agentService = mock(AgentService.class);
         when(agentService.getDefaultWorkingDir()).thenReturn(tempDir.toString());
-        controller = new GitController(agentService);
+        WorkspacePersistenceService workspaceService = mock(WorkspacePersistenceService.class);
+        controller = new GitController(agentService, workspaceService);
     }
 
     @Test
@@ -45,7 +47,7 @@ class GitControllerTest {
         run("git", "-C", tempDir.toString(), "add", ".");
         run("git", "-C", tempDir.toString(), "commit", "-m", "init");
 
-        List<Map<String, String>> status = controller.getStatus();
+        List<Map<String, String>> status = controller.getStatus(null);
         assertThat(status).isEmpty();
     }
 
@@ -53,7 +55,7 @@ class GitControllerTest {
     void getStatus_detectsUntrackedFile() throws Exception {
         Files.writeString(tempDir.resolve("new.txt"), "content");
 
-        List<Map<String, String>> status = controller.getStatus();
+        List<Map<String, String>> status = controller.getStatus(null);
         assertThat(status)
                 .anyMatch(m -> "??".equals(m.get("status")) && m.get("path").contains("new.txt"));
     }
@@ -67,7 +69,7 @@ class GitControllerTest {
 
         Files.writeString(file, "modified content");
 
-        List<Map<String, String>> status = controller.getStatus();
+        List<Map<String, String>> status = controller.getStatus(null);
         assertThat(status)
                 .anyMatch(m -> "M".equals(m.get("status")) && "init.txt".equals(m.get("path")));
     }
@@ -78,7 +80,7 @@ class GitControllerTest {
         run("git", "-C", tempDir.toString(), "add", ".");
         run("git", "-C", tempDir.toString(), "commit", "-m", "init");
 
-        Map<String, String> diff = controller.getDiff("");
+        Map<String, String> diff = controller.getDiff("", false, null);
         assertThat(diff.get("diff")).isBlank();
         assertThat(diff.get("truncated")).isEqualTo("false");
     }
@@ -92,7 +94,7 @@ class GitControllerTest {
 
         Files.writeString(file, "beta\n");
 
-        Map<String, String> diff = controller.getDiff("init.txt");
+        Map<String, String> diff = controller.getDiff("init.txt", false, null);
         assertThat(diff.get("diff")).contains("-alpha").contains("+beta");
         assertThat(diff.get("truncated")).isEqualTo("false");
     }

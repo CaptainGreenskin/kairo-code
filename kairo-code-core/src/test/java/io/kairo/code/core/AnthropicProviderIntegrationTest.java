@@ -100,7 +100,7 @@ class AnthropicProviderIntegrationTest {
     @Test
     void agentCallWithToolResultProducesCorrectMessageStructure() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.anthropic.com", "claude-sonnet-4-20250514", 10, null, null, 0, 0);
+                "test-api-key", "https://api.anthropic.com", "claude-sonnet-4-20250514", 10, null, null, 0, 0, null);
 
         CapturingProvider provider = new CapturingProvider();
 
@@ -142,7 +142,7 @@ class AnthropicProviderIntegrationTest {
     void modelConfigHasMaxTokensSetForAnthropic() {
         // Anthropic API requires max_tokens to be set (no default)
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.anthropic.com", "claude-sonnet-4-20250514", 10, null, null, 0, 0);
+                "test-api-key", "https://api.anthropic.com", "claude-sonnet-4-20250514", 10, null, null, 0, 0, null);
 
         CapturingProvider provider = new CapturingProvider();
 
@@ -163,7 +163,7 @@ class AnthropicProviderIntegrationTest {
     @Test
     void systemPromptIsPassedToConfig() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.anthropic.com", "claude-sonnet-4-20250514", 10, null, null, 0, 0);
+                "test-api-key", "https://api.anthropic.com", "claude-sonnet-4-20250514", 10, null, null, 0, 0, null);
 
         CapturingProvider provider = new CapturingProvider();
 

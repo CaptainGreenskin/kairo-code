@@ -7,20 +7,31 @@ import '@xterm/xterm/css/xterm.css';
 interface ShellPanelProps {
     onClose: () => void;
     externalCommand?: string;
+    workspaceId?: string;
+    /** When true, skip fixed-modal wrapper and the internal drag handle — host (BottomPanel) controls layout. */
+    embedded?: boolean;
 }
 
-export function ShellPanel({ onClose, externalCommand }: ShellPanelProps) {
+export function ShellPanel({ onClose, externalCommand, workspaceId, embedded = false }: ShellPanelProps) {
     const termRef = useRef<HTMLDivElement>(null);
     const termInstance = useRef<Terminal | null>(null);
     const fitAddon = useRef<FitAddon | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
+    const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const userClosedRef = useRef(false);
     const [isMaximized, setIsMaximized] = useState(false);
     const [panelHeight, setPanelHeight] = useState(280);
 
-    // Connect WebSocket to /ws/shell
+    // Connect WebSocket to /ws/shell — refuses if a non-closed socket already exists
     const connectWs = useCallback(() => {
+        // Dedupe: if a WS is already alive, reuse it (handles StrictMode double-mount).
+        const existing = wsRef.current;
+        if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/shell`);
+        const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/shell${qs}`);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -43,16 +54,22 @@ export function ShellPanel({ onClose, externalCommand }: ShellPanelProps) {
         };
 
         ws.onclose = () => {
-            // Auto-reconnect after 2s
-            setTimeout(() => {
-                if (termRef.current) connectWs();
+            if (wsRef.current === ws) wsRef.current = null;
+            if (userClosedRef.current) return;
+            // Auto-reconnect after 2s — but only if user hasn't closed and component still mounted
+            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = setTimeout(() => {
+                reconnectTimerRef.current = null;
+                if (!userClosedRef.current && termRef.current) connectWs();
             }, 2000);
         };
-    }, []);
+    }, [workspaceId]);
 
     // Initialize xterm + connect WebSocket on mount
     useEffect(() => {
         if (!termRef.current) return;
+        userClosedRef.current = false;
+
         const term = new Terminal({
             theme: {
                 background: '#0d0d0d',
@@ -83,8 +100,20 @@ export function ShellPanel({ onClose, externalCommand }: ShellPanelProps) {
         connectWs();
 
         return () => {
-            wsRef.current?.close();
+            userClosedRef.current = true;
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
+            }
+            const ws = wsRef.current;
+            if (ws) {
+                ws.onclose = null;  // suppress reconnect-on-unmount race
+                ws.close();
+                wsRef.current = null;
+            }
             term.dispose();
+            termInstance.current = null;
+            fitAddon.current = null;
         };
     }, [connectWs]);
 
@@ -107,7 +136,16 @@ export function ShellPanel({ onClose, externalCommand }: ShellPanelProps) {
 
     // Restart: close current WS and reconnect
     const handleRestart = useCallback(() => {
-        wsRef.current?.close();
+        const ws = wsRef.current;
+        if (ws) {
+            ws.onclose = null;  // suppress auto-reconnect for THIS connection
+            ws.close();
+            wsRef.current = null;
+        }
+        if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+        }
         termInstance.current?.clear();
         connectWs();
     }, [connectWs]);
@@ -130,6 +168,33 @@ export function ShellPanel({ onClose, externalCommand }: ShellPanelProps) {
     }, [panelHeight]);
 
     const height = isMaximized ? 'calc(100vh - 60px)' : panelHeight;
+
+    if (embedded) {
+        return (
+            <div className="flex flex-col h-full bg-[#0d0d0d]">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)] shrink-0">
+                    <span className="text-xs font-mono text-[var(--text-muted)]">bash</span>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={handleRestart}
+                            className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                            title="New shell"
+                        >
+                            <RotateCcw size={12} />
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-red-400 transition-colors"
+                            title="Close"
+                        >
+                            <X size={12} />
+                        </button>
+                    </div>
+                </div>
+                <div ref={termRef} className="flex-1 overflow-hidden" />
+            </div>
+        );
+    }
 
     return (
         <div

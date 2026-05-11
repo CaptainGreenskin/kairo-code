@@ -50,8 +50,7 @@ class ConfigControllerUpdateTest {
         mockMvc.perform(get("/api/config"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.apiKeySet").value(true))
-                .andExpect(jsonPath("$.model").exists())
-                .andExpect(jsonPath("$.workingDir").exists());
+                .andExpect(jsonPath("$.model").exists());
     }
 
     @Test
@@ -86,17 +85,6 @@ class ConfigControllerUpdateTest {
                 .andExpect(jsonPath("$.apiKeySet").value(true));
 
         assertThat(serverProperties.apiKey()).isEqualTo("sk-new-key");
-    }
-
-    @Test
-    void updateConfig_updatesWorkingDir() throws Exception {
-        mockMvc.perform(post("/api/config")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"workingDir\":\"/tmp/test-workspace\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.workingDir").value("/tmp/test-workspace"));
-
-        assertThat(serverProperties.workingDir()).isEqualTo("/tmp/test-workspace");
     }
 
     @Test

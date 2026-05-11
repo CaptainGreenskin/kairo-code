@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Loader2, FileText } from 'lucide-react';
+import { X, Loader2, FileText, AtSign } from 'lucide-react';
 import { searchFiles } from '@api/config';
 import { getFileContent } from '@api/config';
 import type { SearchMatch, SearchResponse } from '@/types/agent';
@@ -8,9 +8,14 @@ interface SearchPanelProps {
     isOpen: boolean;
     onClose: () => void;
     onInsertResult: (text: string) => void;
+    /** When provided, clicking a result opens the file in the editor at the matched line. */
+    onOpenFile?: (path: string, line?: number) => void;
+    workspaceId?: string;
+    /** When true, render inline (no fixed/modal backdrop). Host controls layout. */
+    embedded?: boolean;
 }
 
-export function SearchPanel({ isOpen, onClose, onInsertResult }: SearchPanelProps) {
+export function SearchPanel({ isOpen, onClose, onInsertResult, onOpenFile, workspaceId, embedded = false }: SearchPanelProps) {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResponse | null>(null);
     const [isSearching, setIsSearching] = useState(false);
@@ -42,7 +47,7 @@ export function SearchPanel({ isOpen, onClose, onInsertResult }: SearchPanelProp
         setError(null);
 
         debounceRef.current = setTimeout(() => {
-            searchFiles(query, undefined, 50)
+            searchFiles(query, undefined, 50, workspaceId)
                 .then((res) => {
                     setResults(res);
                     setIsSearching(false);
@@ -56,7 +61,7 @@ export function SearchPanel({ isOpen, onClose, onInsertResult }: SearchPanelProp
         return () => {
             if (debounceRef.current) clearTimeout(debounceRef.current);
         };
-    }, [query, isOpen]);
+    }, [query, isOpen, workspaceId]);
 
     const handleBackdropClick = useCallback(
         (e: React.MouseEvent) => {
@@ -69,23 +74,46 @@ export function SearchPanel({ isOpen, onClose, onInsertResult }: SearchPanelProp
 
     const handleMatchClick = useCallback(
         (match: SearchMatch) => {
-            onInsertResult(`file:${match.file}:L${match.line}\n${match.preview}`);
+            if (onOpenFile) {
+                onOpenFile(match.file, match.line);
+            } else {
+                onInsertResult(`file:${match.file}:L${match.line}\n${match.preview}`);
+            }
             onClose();
         },
-        [onInsertResult, onClose],
+        [onInsertResult, onOpenFile, onClose],
     );
 
     const handleFileClick = useCallback(
         async (file: string) => {
+            if (onOpenFile) {
+                onOpenFile(file);
+                onClose();
+                return;
+            }
             try {
-                const content = await getFileContent(file);
+                const content = await getFileContent(file, workspaceId);
                 onInsertResult(`\`\`\`${content.language}\n// ${file}\n${content.content}\n\`\`\`\n`);
                 onClose();
             } catch {
                 // Ignore
             }
         },
-        [onInsertResult, onClose],
+        [onInsertResult, onOpenFile, onClose, workspaceId],
+    );
+
+    const handleInsertFile = useCallback(
+        async (file: string, e: React.MouseEvent) => {
+            e.stopPropagation();
+            try {
+                const content = await getFileContent(file, workspaceId);
+                onInsertResult(`\`\`\`${content.language}\n// ${file}\n${content.content}\n\`\`\`\n`);
+                onClose();
+            } catch {
+                // Ignore
+            }
+        },
+        [onInsertResult, onClose, workspaceId],
     );
 
     if (!isOpen) return null;
@@ -102,25 +130,21 @@ export function SearchPanel({ isOpen, onClose, onInsertResult }: SearchPanelProp
     const fileCount = filesMap.size;
     const matchCount = results?.matches.length ?? 0;
 
-    return (
-        <div
-            className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/40"
-            onClick={handleBackdropClick}
-        >
-            <div className="w-[560px] max-h-[70vh] flex flex-col bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden">
-                {/* Header */}
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)]">
-                    <span className="text-[var(--text-muted)]">
-                        &#128269;
-                    </span>
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        className="flex-1 bg-transparent outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)]"
-                        placeholder="Search workspace..."
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                    />
+    const body = (
+        <>
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)]">
+                <span className="text-[var(--text-muted)]">
+                    &#128269;
+                </span>
+                <input
+                    ref={inputRef}
+                    type="text"
+                    className="flex-1 bg-transparent outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)]"
+                    placeholder="Search workspace..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                />
+                {!embedded && (
                     <button
                         onClick={onClose}
                         className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
@@ -128,7 +152,8 @@ export function SearchPanel({ isOpen, onClose, onInsertResult }: SearchPanelProp
                     >
                         <X size={18} />
                     </button>
-                </div>
+                )}
+            </div>
 
                 {/* Results */}
                 <div className="flex-1 overflow-y-auto">
@@ -159,14 +184,25 @@ export function SearchPanel({ isOpen, onClose, onInsertResult }: SearchPanelProp
 
                             {Array.from(filesMap.entries()).map(([file, matches]) => (
                                 <div key={file} className="mb-3">
-                                    <button
-                                        className="w-full text-left text-sm font-medium text-[var(--color-info)] hover:underline cursor-pointer flex items-center gap-1.5 py-1"
-                                        onClick={() => handleFileClick(file)}
-                                        title="Insert entire file"
-                                    >
-                                        <FileText size={14} />
-                                        {file}
-                                    </button>
+                                    <div className="group flex items-center gap-1 py-1">
+                                        <button
+                                            className="flex-1 text-left text-sm font-medium text-[var(--color-info)] hover:underline cursor-pointer flex items-center gap-1.5 min-w-0"
+                                            onClick={() => handleFileClick(file)}
+                                            title={onOpenFile ? 'Open in editor' : 'Insert entire file'}
+                                        >
+                                            <FileText size={14} className="shrink-0" />
+                                            <span className="truncate">{file}</span>
+                                        </button>
+                                        {onOpenFile && (
+                                            <button
+                                                className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-opacity"
+                                                onClick={(e) => handleInsertFile(file, e)}
+                                                title="Insert entire file into chat"
+                                            >
+                                                <AtSign size={11} />
+                                            </button>
+                                        )}
+                                    </div>
                                     <div className="ml-5">
                                         {matches.map((m, i) => (
                                             <button
@@ -185,14 +221,28 @@ export function SearchPanel({ isOpen, onClose, onInsertResult }: SearchPanelProp
                                 </div>
                             ))}
 
-                            {results.truncated && (
-                                <div className="text-xs text-[var(--text-muted)] py-2 border-t border-[var(--border)]">
-                                    Truncated &#8212; showing first {results.matches.length}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
+                        {results.truncated && (
+                            <div className="text-xs text-[var(--text-muted)] py-2 border-t border-[var(--border)]">
+                                Truncated &#8212; showing first {results.matches.length}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </>
+    );
+
+    if (embedded) {
+        return <div className="flex flex-col h-full bg-[var(--bg-primary)] overflow-hidden">{body}</div>;
+    }
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/40"
+            onClick={handleBackdropClick}
+        >
+            <div className="w-[560px] max-h-[70vh] flex flex-col bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden">
+                {body}
             </div>
         </div>
     );

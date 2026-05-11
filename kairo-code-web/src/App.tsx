@@ -1,10 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Plus, Search, FolderTree, Settings, Moon, HelpCircle, FileText, Clipboard, SortAsc, ArrowLeft, ArrowRight, BookOpen, GitBranch, Terminal, Settings2, Brain, Zap, Wrench, Activity, Star, Users } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
-import { streamingStore } from '@store/streamingStore';
+import { useWorkspaceStore } from '@store/workspaceStore';
+import { useLayoutStore } from '@store/layoutStore';
+import { useOpenFilesStore } from '@store/openFilesStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
 import { useBreakpoint } from '@hooks/useBreakpoint';
 import { Header } from '@components/Header';
+import { DevDiagnosticsPanel } from '@components/DevDiagnosticsPanel';
 import { SearchBar } from '@components/SearchBar';
 import { ChatMessage } from '@components/ChatMessage';
 import { ThinkingIndicator } from '@components/ThinkingIndicator';
@@ -12,10 +15,19 @@ import { LastToolDisplay } from '@components/LastToolDisplay';
 import type { Phase } from '@components/ThinkingIndicator';
 import { ChatInput } from '@components/ChatInput';
 import type { AttachedImage } from '@components/ChatInput';
+import { ChatTabBar } from '@components/ChatTabBar';
 import { SessionSidebar } from '@components/SessionSidebar';
 import { SettingsModal } from '@components/SettingsModal';
-import { FileTreePanel } from '@components/FileTreePanel';
-import { FileEditorPanel } from '@components/FileEditorPanel';
+import { WorkspaceSwitcher } from '@components/WorkspaceSwitcher';
+import { WorkspaceSettingsModal } from '@components/WorkspaceSettingsModal';
+import { ActivityBar } from '@components/ActivityBar';
+import { PrimarySidebar } from '@components/PrimarySidebar';
+import { BottomPanel } from '@components/BottomPanel';
+import { StatusBar } from '@components/StatusBar';
+import { WorkspacesView } from '@components/WorkspacesView';
+import { FilesView } from '@components/FilesView';
+import { EditorArea } from '@components/EditorArea';
+import { ResizeHandle } from '@components/ResizeHandle';
 import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
@@ -29,7 +41,7 @@ import { MemoryEditorPanel } from '@components/MemoryEditorPanel';
 import { PromptTemplatesPanel } from '@components/PromptTemplatesPanel';
 import { GitStatusPanel } from '@components/GitStatusPanel';
 import { McpServersPanel } from '@components/McpServersPanel';
-import { PlanPanel } from '@components/PlanPanel';
+import { TodoListPanel } from '@components/TodoListPanel';
 import { EvolutionPanel } from '@components/EvolutionPanel';
 import { HookConfigPanel } from '@components/HookConfigPanel';
 import { ToolStatsDashboard } from '@components/ToolStatsDashboard';
@@ -39,7 +51,7 @@ import { ExportMenu } from '@components/ExportMenu';
 import { ExecutionTimeline } from '@components/ExecutionTimeline';
 import { BookmarkPanel } from '@components/BookmarkPanel';
 import { getBookmarks, toggleBookmark } from '@utils/bookmarkMessages';
-import type { AgentEvent, ToolCall, Message, ServerConfig } from '@/types/agent';
+import type { Message, ServerConfig } from '@/types/agent';
 import { getConfig } from '@api/config';
 import { exportAndDownload, copySessionToClipboard } from '@utils/exportSession';
 import { estimateMessagesTokens } from '@utils/tokenCount';
@@ -49,7 +61,6 @@ import type { MessageSearchResult } from '@utils/messageSearch';
 import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
 import {
-    saveSnapshot,
     loadSnapshot,
     listSnapshots,
     deleteSnapshot,
@@ -65,15 +76,12 @@ import { loadDraft } from '@utils/inputDraft';
 import { isCollapsible } from '@utils/messageCollapse';
 import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
 import { useAgentNotification } from '@hooks/useAgentNotification';
-import { usePlanSteps } from '@hooks/usePlanSteps';
 import { useFileTracker } from '@hooks/useFileTracker';
+import { useAgentEventHandler } from '@hooks/useAgentEventHandler';
+import { useGlobalShortcuts } from '@hooks/useGlobalShortcuts';
 import { FileTrackerBadge } from '@components/FileTrackerBadge';
 
 declare const __APP_VERSION__: string;
-
-const ShellPanel = lazy(() =>
-    import('@components/ShellPanel').then(m => ({ default: m.ShellPanel })),
-);
 
 function generateId(): string {
     return crypto.randomUUID();
@@ -82,18 +90,19 @@ function generateId(): string {
 function App() {
     const prefs = loadPrefs();
 
+    const todos = useSessionStore((s) => s.todos);
+    const running = useSessionStore((s) => s.running);
     const {
         sessionId,
         messages,
         isThinking,
+        thinkingText,
         tokenUsage,
         estimatedCost,
         currentModel,
         setSessionId,
         addMessage,
         setMessages,
-        addToolCall,
-        updateToolCall,
         setThinking,
         setTokenUsage,
         setEstimatedCost,
@@ -102,7 +111,10 @@ function App() {
         restoreSession,
     } = useSessionStore();
 
-    const assistantMsgRef = useRef<string | null>(null);
+    // Per-session map of streaming assistant message ids (sessionId → msgId or null).
+    // A single ref would cross-pollinate when two sessions stream concurrently or the
+    // user switches tabs mid-stream.
+    const assistantMsgRef = useRef<Record<string, string | null>>({});
     const hasErrorRef = useRef(false);
     const wasConnectedRef = useRef(false);
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
@@ -140,9 +152,31 @@ function App() {
         }
     }, [agentPhase, currentToolName]);
     const [showSettings, setShowSettings] = useState(false);
+    const [showWorkspaceSettings, setShowWorkspaceSettings] = useState<{ open: boolean; workspaceId: string | null }>({ open: false, workspaceId: null });
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
-    const [fileTreeOpen, setFileTreeOpen] = useState(() => prefs.fileTreeOpen ?? false);
-    const [editorFile, setEditorFile] = useState<string | null>(null);
+
+    const workspaces = useWorkspaceStore((s) => s.workspaces);
+    const currentWorkspaceId = useWorkspaceStore((s) => s.currentWorkspaceId);
+    const refreshWorkspaces = useWorkspaceStore((s) => s.refresh);
+    const currentWorkspace = useMemo(
+        () => workspaces.find((w) => w.id === currentWorkspaceId) ?? null,
+        [workspaces, currentWorkspaceId],
+    );
+    const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
+    const setSidebarWidthStore = useLayoutStore((s) => s.setSidebarWidth);
+    const primarySidebarOpen = useLayoutStore((s) => s.primarySidebarOpen);
+    const bottomPanelOpen = useLayoutStore((s) => s.bottomPanelOpen);
+    const toggleBottomPanel = useLayoutStore((s) => s.toggleBottomPanel);
+    const bottomHeight = useLayoutStore((s) => s.bottomHeight);
+    const setBottomHeight = useLayoutStore((s) => s.setBottomHeight);
+    const selectActivity = useLayoutStore((s) => s.selectActivity);
+    const chatSidebarOpen = useLayoutStore((s) => s.chatSidebarOpen);
+    const chatWidth = useLayoutStore((s) => s.chatWidth);
+    const setChatWidthStore = useLayoutStore((s) => s.setChatWidth);
+    const chatSessionsOpen = useLayoutStore((s) => s.chatSessionsOpen);
+    const chatSessionsWidth = useLayoutStore((s) => s.chatSessionsWidth);
+    const setChatSessionsWidthStore = useLayoutStore((s) => s.setChatSessionsWidth);
+    const openFileInEditor = useOpenFilesStore((s) => s.openFile);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -193,9 +227,10 @@ function App() {
     // Toast state
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-    // Plan mode tracking
-    const { steps: planSteps, setPlanSteps, markStepDone, clearPlan } = usePlanSteps(messages);
-    const [showPlanPanel, setShowPlanPanel] = useState(true);
+    // Todo panel collapse pref (sticky panel above message list)
+    const [todoPanelCollapsed, setTodoPanelCollapsed] = useState<boolean>(
+        () => loadPrefs().todoPanelCollapsed ?? false,
+    );
     const [showEvolution, setShowEvolution] = useState(false);
 
     // File tracker (Read/Write/Edit/Search tool paths during this session)
@@ -207,10 +242,7 @@ function App() {
     const isNarrow = isMobile || breakpoint === 'md';
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
-    // Narrow screen: force close FileTreePanel
-    useEffect(() => {
-        if (isNarrow && fileTreeOpen) setFileTreeOpen(false);
-    }, [isNarrow]);
+    // Narrow screen: nothing to force-close anymore (file tree lives in PrimarySidebar)
 
     const addToast = useCallback((type: ToastMessage['type'], message: string, duration?: number) => {
         const id = Math.random().toString(36).slice(2);
@@ -221,256 +253,42 @@ function App() {
         setToasts(prev => prev.filter(t => t.id !== id));
     }, []);
 
-    const handleEvent = useCallback(
-        (event: AgentEvent) => {
-            switch (event.type) {
-                case 'TEXT_CHUNK': {
-                    const text = (event.payload as { text: string }).text;
-                    setAgentPhase('writing');
-                    setCurrentToolName(undefined);
-                    if (!assistantMsgRef.current) {
-                        const msgId = generateId();
-                        assistantMsgRef.current = msgId;
-                        setStreamingMsgId(msgId);
-                        // Create initial message in sessionStore
-                        addMessage({
-                            id: msgId,
-                            role: 'assistant',
-                            content: '',
-                            toolCalls: [],
-                            timestamp: Date.now(),
-                        });
-                    }
-                    // Stream to external store (bypasses Immer)
-                    streamingStore.append(event.sessionId, text);
-                    break;
-                }
+    // Forward-ref to approveTool — broken via ref to avoid the
+    // useAgentEventHandler ↔ useAgentWebSocket circular dep.
+    const approveToolRef = useRef<
+        (
+            sid: string,
+            id: string,
+            ok: boolean,
+            reason?: string,
+            editedArgs?: Record<string, unknown>,
+        ) => void
+    >(() => {});
 
-                case 'TOOL_CALL': {
-                    const payload = event.payload as {
-                        toolCallId: string;
-                        toolName: string;
-                        input: Record<string, unknown>;
-                        requiresApproval: boolean;
-                    };
-                    setAgentPhase('tool');
-                    setCurrentToolName(payload.toolName);
-                    if (!assistantMsgRef.current) {
-                        const msgId = generateId();
-                        assistantMsgRef.current = msgId;
-                        addMessage({
-                            id: msgId,
-                            role: 'assistant',
-                            content: '',
-                            toolCalls: [],
-                            timestamp: Date.now(),
-                        });
-                    }
-                    const toolCall: ToolCall = {
-                        id: payload.toolCallId,
-                        toolName: payload.toolName,
-                        input: payload.input,
-                        status: payload.requiresApproval ? 'pending' : 'approved',
-                        requiresApproval: payload.requiresApproval,
-                    };
-                    addToolCall(assistantMsgRef.current, toolCall);
-                    trackToolCall(toolCall);
-                    break;
-                }
-
-                case 'TOOL_RESULT': {
-                    const payload = event.payload as {
-                        toolCallId: string;
-                        result: string;
-                        isError: boolean;
-                        durationMs: number;
-                    };
-                    setAgentPhase('thinking');
-                    setCurrentToolName(undefined);
-                    // Find the message containing this tool call
-                    const store = useSessionStore.getState();
-                    const targetMsg = store.messages.find((m) =>
-                        m.toolCalls.some((tc) => tc.id === payload.toolCallId),
-                    );
-                    if (targetMsg) {
-                        updateToolCall(targetMsg.id, payload.toolCallId, {
-                            result: payload.result,
-                            status: 'done',
-                            durationMs: payload.durationMs,
-                            isError: payload.isError,
-                        });
-                    }
-                    break;
-                }
-
-                case 'AGENT_DONE': {
-                    const payload = event.payload as {
-                        inputTokens: number;
-                        outputTokens: number;
-                    };
-                    // Flush streaming content to sessionStore
-                    if (assistantMsgRef.current) {
-                        const content = streamingStore.getContent(event.sessionId);
-                        if (content) {
-                            setMessages(
-                                useSessionStore.getState().messages.map((m) =>
-                                    m.id === assistantMsgRef.current
-                                        ? { ...m, content }
-                                        : m,
-                                ),
-                            );
-                        }
-                        streamingStore.clear(event.sessionId);
-                    }
-                    assistantMsgRef.current = null;
-                    setStreamingMsgId(null);
-                    setThinking(false);
-                    setAgentPhase('thinking');
-                    setCurrentToolName(undefined);
-                    setTokenUsage({
-                        input: payload.inputTokens,
-                        output: payload.outputTokens,
-                    });
-                    // Rough cost estimate (placeholder rates)
-                    const cost =
-                        (payload.inputTokens * 0.001 + payload.outputTokens * 0.003) /
-                        1000;
-                    setEstimatedCost(cost);
-                    // Persist a server-side snapshot so refreshing the page
-                    // restores the conversation. Fire-and-forget — failures
-                    // are logged inside saveSnapshot.
-                    {
-                        const sid = useSessionStore.getState().sessionId ?? event.sessionId;
-                        const msgs = useSessionStore.getState().messages;
-                        if (sid && msgs.length > 0) {
-                            const name = getSessionName(sid)
-                                ?? `Session ${sid.slice(0, 8)}`;
-                            saveSnapshot(sid, name, msgs).then((ok) => {
-                                if (ok) {
-                                    setLastSessionId(sid);
-                                    refreshPersistedSessions();
-                                }
-                            });
-                        }
-                    }
-                    break;
-                }
-
-                case 'AGENT_ERROR': {
-                    const payload = event.payload as { message: string; errorType?: string };
-                    assistantMsgRef.current = null;
-                    setStreamingMsgId(null);
-                    setThinking(false);
-                    setAgentPhase('thinking');
-                    setCurrentToolName(undefined);
-                    setLoadingSessionId(null);
-                    if (payload.errorType === 'SESSION_NOT_FOUND') {
-                        setSessionId(null);
-                        clearMessages();
-                        sessionStorage.removeItem('kairo-code-session-id');
-                        addToast('warning', 'Session expired, please create a new session');
-                        break;
-                    }
-                    hasErrorRef.current = true;
-
-                    // Classify the error for user-facing display
-                    const errorType = payload.errorType ?? '';
-                    switch (errorType) {
-                        case 'AUTH_FAILURE':
-                            setShowSettings(true);
-                            addToast('error', 'API key invalid — check Settings');
-                            break;
-                        case 'RATE_LIMITED':
-                            addToast('warning', 'Rate limited — retry in a moment');
-                            break;
-                        case 'QUOTA_EXCEEDED':
-                            addToast('error', 'API quota exceeded');
-                            break;
-                        case 'PROVIDER_ERROR':
-                            addToast('error', `Provider error: ${payload.message}`);
-                            break;
-                        default:
-                            addToast('error', payload.message);
-                            break;
-                    }
-
-                    addMessage({
-                        id: generateId(),
-                        role: 'error',
-                        content: payload.message,
-                        toolCalls: [],
-                        timestamp: Date.now(),
-                    });
-                    break;
-                }
-
-                case 'AGENT_THINKING': {
-                    const payload = event.payload as { isThinking: boolean };
-                    setThinking(payload.isThinking);
-                    if (payload.isThinking) {
-                        assistantMsgRef.current = null;
-                        setStreamingMsgId(null);
-                        setAgentPhase('thinking');
-                        setCurrentToolName(undefined);
-                    }
-                    break;
-                }
-
-                case 'SESSION_RESTORED': {
-                    const payload = event.payload as { messages: Message[]; running: boolean };
-                    restoreSession(event.sessionId, payload.messages, payload.running);
-                    // Clear streaming store for this session
-                    streamingStore.clear(event.sessionId);
-                    setLoadingSessionId(null);
-                    break;
-                }
-
-                case 'PLAN_STEPS': {
-                    const payload = event.payload as { steps: string[] };
-                    setPlanSteps(payload.steps);
-                    setShowPlanPanel(true);
-                    break;
-                }
-
-                case 'PLAN_STEP_DONE': {
-                    const payload = event.payload as { stepIndex: number };
-                    markStepDone(payload.stepIndex);
-                    break;
-                }
-
-                case 'CONTEXT_COMPACTED': {
-                    // Pulse the Context Health indicator for 3s. Reset any in-flight timer so a
-                    // burst of compactions still keeps the flash visible for at least 3s after
-                    // the latest event.
-                    setIsCompacting(true);
-                    if (compactionTimerRef.current) clearTimeout(compactionTimerRef.current);
-                    compactionTimerRef.current = setTimeout(() => {
-                        setIsCompacting(false);
-                        compactionTimerRef.current = null;
-                    }, 3000);
-                    break;
-                }
-            }
-        },
-        [
-            addMessage,
-            setMessages,
-            addToolCall,
-            updateToolCall,
-            setThinking,
-            setTokenUsage,
-            setEstimatedCost,
-            restoreSession,
-            setLoadingSessionId,
-            addToast,
-            setPlanSteps,
-            markStepDone,
-            refreshPersistedSessions,
-            trackToolCall,
-            setSessionId,
-            clearMessages,
-        ],
-    );
+    const handleEvent = useAgentEventHandler({
+        assistantMsgRef,
+        hasErrorRef,
+        compactionTimerRef,
+        setStreamingMsgId,
+        setAgentPhase,
+        setCurrentToolName,
+        setIsCompacting,
+        setShowSettings,
+        setLoadingSessionId,
+        addToast,
+        refreshPersistedSessions,
+        trackToolCall,
+        approveTool: useCallback(
+            (
+                sid: string,
+                id: string,
+                ok: boolean,
+                reason?: string,
+                editedArgs?: Record<string, unknown>,
+            ) => approveToolRef.current(sid, id, ok, reason, editedArgs),
+            [],
+        ),
+    });
 
     const {
         isConnected,
@@ -484,6 +302,10 @@ function App() {
         createSession,
         switchSession,
     } = useAgentWebSocket(handleEvent);
+
+    useEffect(() => {
+        approveToolRef.current = approveTool;
+    }, [approveTool]);
 
     // Override store's isThinking with WS state
     useEffect(() => {
@@ -524,6 +346,17 @@ function App() {
         }
     }, [connectionStatus, addToast]);
 
+    // Load workspaces on mount; if none exist, force the create modal open
+    useEffect(() => {
+        refreshWorkspaces()
+            .then((list) => {
+                if (list.length === 0) {
+                    setShowWorkspaceSettings({ open: true, workspaceId: null });
+                }
+            })
+            .catch(() => {});
+    }, [refreshWorkspaces]);
+
     // Load config on mount
     useEffect(() => {
         getConfig()
@@ -543,11 +376,27 @@ function App() {
         }
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Session restore: if sessionStorage has a sessionId, reconnect and auto-bind
+    // Session restore: rehydrate the multi-tab chat layout from prefs first
+    // (Cursor-style), falling back to the legacy single-session sessionStorage.
     useEffect(() => {
+        const savedTabs = prefs.chatOpenTabs ?? [];
+        const savedActive = prefs.chatActiveSession;
+        if (savedTabs.length > 0) {
+            const store = useSessionStore.getState();
+            for (const sid of savedTabs) {
+                store.openSession(sid);
+                const cached = loadMessages(sid);
+                if (cached.length > 0) {
+                    store.setMessagesFor(sid, cached);
+                }
+            }
+            const target = savedActive && savedTabs.includes(savedActive) ? savedActive : savedTabs[savedTabs.length - 1];
+            if (target) store.setActiveSession(target);
+            connect();
+            return;
+        }
         const savedId = sessionStorage.getItem('kairo-code-session-id');
         if (savedId) {
-            // 立即从缓存恢复，让用户看到消息，不用等 WebSocket
             const cached = loadMessages(savedId);
             if (cached.length > 0) {
                 setSessionId(savedId);
@@ -557,6 +406,20 @@ function App() {
         }
         // onConnect auto-detects the session and sends bind-session
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Persist chat tab layout (openTabs + activeSessionId) so a refresh
+    // restores Cursor-style multi-tab chat state.
+    useEffect(() => {
+        const unsub = useSessionStore.subscribe((s, prev) => {
+            if (s.openTabs !== prev.openTabs) {
+                savePref('chatOpenTabs', s.openTabs);
+            }
+            if (s.activeSessionId !== prev.activeSessionId) {
+                savePref('chatActiveSession', s.activeSessionId ?? undefined);
+            }
+        });
+        return unsub;
+    }, []);
 
     // Load the list of on-disk session snapshots once on mount.
     useEffect(() => { refreshPersistedSessions(); }, [refreshPersistedSessions]);
@@ -599,56 +462,6 @@ function App() {
         }
     }, [sessionId, messages]);
 
-    // Global keyboard shortcut: Cmd+F opens in-message search, Cmd+Shift+F opens workspace search
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'f') {
-                const tag = (e.target as HTMLElement).tagName;
-                if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
-                    e.preventDefault();
-                    setShowMessageSearch(v => !v);
-                }
-            }
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
-                e.preventDefault();
-                setShowSessionSearch(true);
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, []);
-
-    // Global keyboard shortcut: Cmd+K opens command palette
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'k') {
-                e.preventDefault();
-                setShowCommandPalette(prev => !prev);
-            }
-            // Cmd+` — toggle shell terminal
-            if ((e.metaKey || e.ctrlKey) && e.key === '`') {
-                e.preventDefault();
-                setShowShell(s => !s);
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, []);
-
-    // Global keyboard shortcut: ? opens shortcuts modal
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            const tag = (e.target as HTMLElement).tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-            if (e.key === '?') {
-                e.preventDefault();
-                setShowShortcuts(prev => !prev);
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, []);
-
     const handleSend = useCallback(
         (text: string, image: AttachedImage | null) => {
             if (isMobile) setSidebarOpen(false);
@@ -667,8 +480,13 @@ function App() {
 
             // Create session if needed
             if (!sessionId) {
+                if (!currentWorkspaceId) {
+                    addToast('warning', 'Create a workspace before starting a session.');
+                    setShowWorkspaceSettings({ open: true, workspaceId: null });
+                    return;
+                }
                 connect();
-                createSession(serverConfig?.workingDir || '.')
+                createSession(currentWorkspaceId)
                     .then((newId) => {
                         setSessionId(newId);
                         // Auto-title from first user message via backend heuristic
@@ -697,7 +515,7 @@ function App() {
                 sendMessage(sessionId, text, image?.data, image?.mediaType);
             }
         },
-        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions, serverConfig],
+        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions, currentWorkspaceId, addToast],
     );
 
     const handleStop = useCallback(() => {
@@ -717,8 +535,25 @@ function App() {
     );
 
     const handleApproveTool = useCallback(
-        (toolCallId: string, approved: boolean) => {
-            if (sessionId) approveTool(sessionId, toolCallId, approved);
+        (
+            toolCallId: string,
+            approved: boolean,
+            reason?: string,
+            editedArgs?: Record<string, unknown>,
+        ) => {
+            if (!sessionId) return;
+            // Optimistically flip the card off 'pending' so a rapid second 'y' press picks the
+            // NEXT pending card instead of re-firing approve for the one we just resolved.
+            // Without this, the server logs "No pending approval for toolCallId: X" because the
+            // first approve already removed it from pendingApprovals.
+            const msgs = useSessionStore.getState().messages;
+            const owner = msgs.find((m) => m.toolCalls.some((tc) => tc.id === toolCallId));
+            if (owner) {
+                useSessionStore.getState().updateToolCall(owner.id, toolCallId, {
+                    status: approved ? 'approved' : 'rejected',
+                });
+            }
+            approveTool(sessionId, toolCallId, approved, reason, editedArgs);
         },
         [approveTool, sessionId],
     );
@@ -726,10 +561,24 @@ function App() {
     const handleRegenerate = useCallback((messageId: string) => {
         const msgs = useSessionStore.getState().messages;
         const idx = msgs.findIndex(m => m.id === messageId);
+        if (idx < 0) return;
+        const target = msgs[idx];
         const prevUser = [...msgs.slice(0, idx)].reverse().find(m => m.role === 'user');
         if (!prevUser || !sessionId) return;
+        if (target.role === 'error') {
+            // Drop the failed error + its triggering user bubble, then re-append a fresh user bubble
+            // so the conversation reads [..., user, assistant] (not [..., user, error] left behind,
+            // and not [...] with the new assistant orphaned without its prompt).
+            const cleaned = msgs.filter(m => m.id !== target.id && m.id !== prevUser.id);
+            const replay = {
+                ...prevUser,
+                id: generateId(),
+                timestamp: Date.now(),
+            };
+            setMessages([...cleaned, replay]);
+        }
         sendMessage(sessionId, prevUser.content);
-    }, [sessionId, sendMessage]);
+    }, [sessionId, sendMessage, setMessages]);
 
     const handleEditResend = useCallback((messageId: string, newText: string) => {
         const msgs = useSessionStore.getState().messages;
@@ -779,7 +628,7 @@ function App() {
         disconnect();
         setSessionId(null);
         clearMessages();
-        assistantMsgRef.current = null;
+        assistantMsgRef.current = {};
         setStreamingMsgId(null);
         setAgentPhase('thinking');
         setCurrentToolName(undefined);
@@ -792,19 +641,43 @@ function App() {
     }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost, sessionId, clearFiles]);
 
     const handleSelectSession = useCallback(
-        (id: string) => {
+        async (id: string) => {
             if (id === sessionId) return;
             setLoadingSessionId(id);
-            setSessionId(id);
+            // Already open as a tab → just switch active, leave its messages intact.
+            const alreadyOpen = useSessionStore.getState().openTabs.includes(id);
+            if (alreadyOpen) {
+                useSessionStore.getState().setActiveSession(id);
+                setLastSessionId(id);
+                if (isConnected) switchSession(id);
+                else connect();
+                setLoadingSessionId(null);
+                return;
+            }
+            // First time opening this session — open as a tab and hydrate from cache/snapshot.
+            useSessionStore.getState().openSession(id);
             setExpandedMessages(new Set());
             clearFiles();
             const cached = loadMessages(id);
             if (cached.length > 0) {
-                setMessages(cached);
+                useSessionStore.getState().setMessagesFor(id, cached);
             } else {
-                clearMessages();
+                // Cache miss (different browser, cleared storage, etc.). Hydrate from
+                // the server-side snapshot so we don't flash the WelcomeScreen while
+                // waiting for SESSION_RESTORED. switchSession below will overlay any
+                // newer in-memory state if the session is still live on the server.
+                try {
+                    const snap = await loadSnapshot(id);
+                    if (snap && snap.messages.length > 0
+                        && useSessionStore.getState().activeSessionId === id) {
+                        useSessionStore.getState().setMessagesFor(id, snap.messages);
+                        saveMessages(id, snap.messages);
+                    }
+                } catch {
+                    // Snapshot fetch failure is non-fatal; SESSION_RESTORED will fill in.
+                }
             }
-            assistantMsgRef.current = null;
+            assistantMsgRef.current[id] = null;
             setStreamingMsgId(null);
             setAgentPhase('thinking');
             setCurrentToolName(undefined);
@@ -815,7 +688,7 @@ function App() {
                 connect();
             }
         },
-        [sessionId, setSessionId, setMessages, clearMessages, isConnected, switchSession, connect, clearFiles],
+        [sessionId, isConnected, switchSession, connect, clearFiles],
     );
 
     // Restore a session from the on-disk snapshot (no live WebSocket bind).
@@ -836,7 +709,7 @@ function App() {
             setLastSessionId(snap.sessionId);
             setExpandedMessages(new Set());
             clearFiles();
-            assistantMsgRef.current = null;
+            assistantMsgRef.current = {};
             setStreamingMsgId(null);
             setAgentPhase('thinking');
             setCurrentToolName(undefined);
@@ -871,92 +744,23 @@ function App() {
         }
     }, [messages, sessionId, addToast]);
 
-    // Global keyboard shortcut: Cmd+N new session, Cmd+W close session, Cmd+1-9 switch session
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            const tag = (e.target as HTMLElement).tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-
-            // Cmd+N — new session (do not block Shift+Cmd+N for browser incognito)
-            if ((e.metaKey || e.ctrlKey) && e.key === 'n' && !e.shiftKey) {
-                e.preventDefault();
-                handleNewSession();
-                return;
-            }
-
-            // Cmd+W — close current session
-            if ((e.metaKey || e.ctrlKey) && e.key === 'w' && sessionId) {
-                e.preventDefault();
-                handleDeleteSession(sessionId);
-                return;
-            }
-
-            // Cmd+1-9 — switch to session N (1-indexed)
-            if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
-                const idx = parseInt(e.key) - 1;
-                if (idx < sidebarSessions.length) {
-                    e.preventDefault();
-                    handleSelectSession(sidebarSessions[idx].sessionId);
-                }
-            }
-
-            // Cmd+[ — switch to previous session
-            if ((e.metaKey || e.ctrlKey) && e.key === '[') {
-                e.preventDefault();
-                const idx = sortedSessions.findIndex(s => s.id === sessionId);
-                if (idx > 0) handleSelectSession(sortedSessions[idx - 1].id);
-            }
-
-            // Cmd+] — switch to next session
-            if ((e.metaKey || e.ctrlKey) && e.key === ']') {
-                e.preventDefault();
-                const idx = sortedSessions.findIndex(s => s.id === sessionId);
-                if (idx >= 0 && idx < sortedSessions.length - 1) handleSelectSession(sortedSessions[idx + 1].id);
-            }
-
-            // Cmd+Shift+C — copy conversation as Markdown
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c') {
-                e.preventDefault();
-                handleCopyConversation();
-                return;
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [sessionId, sidebarSessions, sortedSessions, handleNewSession, handleDeleteSession, handleSelectSession, handleCopyConversation]);
-
-    // Global keyboard shortcut: y = approve / n = reject first pending tool call
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            // Skip if typing in input/textarea/contenteditable
-            const tag = (e.target as HTMLElement)?.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
-            // Skip if any modifier key is pressed
-            if (e.metaKey || e.ctrlKey || e.altKey) return;
-            if (e.key !== 'y' && e.key !== 'n') return;
-
-            // Find first pending tool call across all messages
-            let pendingToolCallId: string | null = null;
-            for (const msg of messages) {
-                const pending = msg.toolCalls?.find(tc => tc.status === 'pending');
-                if (pending) {
-                    pendingToolCallId = pending.id;
-                    break;
-                }
-            }
-            if (!pendingToolCallId) return;
-            e.preventDefault();
-
-            const approved = e.key === 'y';
-            handleApproveTool(pendingToolCallId, approved);
-            addToast(
-                approved ? 'success' : 'info',
-                approved ? 'Tool approved' : 'Tool rejected',
-            );
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [messages, handleApproveTool, addToast]);
+    useGlobalShortcuts({
+        sessionId,
+        messages,
+        sidebarSessions,
+        sortedSessions,
+        setShowMessageSearch,
+        setShowSessionSearch,
+        setShowCommandPalette,
+        toggleShell: toggleBottomPanel,
+        setShowShortcuts,
+        handleNewSession,
+        handleDeleteSession,
+        handleSelectSession,
+        handleCopyConversation,
+        handleApproveTool,
+        addToast,
+    });
 
     const handleToggleTheme = useCallback(() => {
         // Theme toggling is handled by the Header component via DOM classList
@@ -972,8 +776,6 @@ function App() {
     const handleInsertTemplate = useCallback((content: string) => {
         setChatInputAppend(content);
     }, []);
-    const [showGitStatus, setShowGitStatus] = useState(false);
-    const [showShell, setShowShell] = useState(false);
     const [shellCommandQueue, setShellCommandQueue] = useState<string[]>([]);
     const [shellExternalCommand, setShellExternalCommand] = useState<string>('');
     const [showMcpServers, setShowMcpServers] = useState(false);
@@ -994,11 +796,6 @@ function App() {
         setBookmarks(sessionId ? new Set(getBookmarks(sessionId)) : new Set());
     }, [sessionId]);
 
-    // Clear plan steps when switching/leaving sessions so old plans don't bleed across.
-    useEffect(() => {
-        clearPlan();
-    }, [sessionId, clearPlan]);
-
     const handleToggleBookmark = useCallback((messageId: string) => {
         if (!sessionId) return;
         toggleBookmark(sessionId, messageId);
@@ -1010,13 +807,6 @@ function App() {
         savePref('model', cfg.defaultModel);
     }, [setCurrentModel]);
 
-    const handleOpenSearch = useCallback(() => {
-        setShowSearch(v => {
-            if (!v) setSearchQuery('');
-            return !v;
-        });
-    }, []);
-
     const handleOpenShortcuts = useCallback(() => setShowShortcuts(true), []);
 
     const handleMenuClick = useCallback(() => setSidebarOpen(v => !v), []);
@@ -1025,13 +815,6 @@ function App() {
         setCurrentModel(m);
         savePref('model', m);
     }, [setCurrentModel]);
-
-    const handleToggleFileTree = useCallback(() => {
-        setFileTreeOpen(prev => {
-            savePref('fileTreeOpen', !prev);
-            return !prev;
-        });
-    }, []);
 
     const handleCloseSearch = useCallback(() => {
         setShowSearch(false);
@@ -1153,42 +936,54 @@ function App() {
 
     const handleRunCommand = useCallback((cmd: string) => {
         setShellCommandQueue(prev => [...prev, cmd]);
-        setShowShell(true);
-    }, []);
+        if (!useLayoutStore.getState().bottomPanelOpen) toggleBottomPanel();
+    }, [toggleBottomPanel]);
 
     const handleOpenFile = useCallback((path: string) => {
-        // File opening: FileTreePanel handles file content loading
-        // For now, just log — this can be wired to FileEditorPanel later
-        console.log('[App] Open file:', path);
-    }, []);
+        openFileInEditor(path);
+    }, [openFileInEditor]);
 
-    // Process shell command queue: when ShellPanel is open and queue has items,
+    // Process shell command queue: when BottomPanel is open and queue has items,
     // send the first command to the shell
     useEffect(() => {
-        if (!showShell || shellCommandQueue.length === 0) return;
+        if (!bottomPanelOpen || shellCommandQueue.length === 0) return;
         const [cmd, ...rest] = shellCommandQueue;
         setShellExternalCommand(cmd);
         setShellCommandQueue(rest);
-    }, [showShell, shellCommandQueue]);
+    }, [bottomPanelOpen, shellCommandQueue]);
 
     // Stable callbacks for SessionSidebar (prevents memo-busting re-renders)
-    const handleCreateSession = useCallback(async (workingDir: string) => {
+    const handleCreateSession = useCallback(async (workspaceId: string) => {
         connect();
-        const newId = await createSession(workingDir);
+        const newId = await createSession(workspaceId);
         return { sessionId: newId };
     }, [connect, createSession]);
 
     const handleNewSessionFromSidebar = useCallback(({ sessionId: newId }: { sessionId: string }) => {
-        setSessionId(newId);
-        clearMessages();
+        // Open as a new tab so existing sessions stay alive in the background.
+        useSessionStore.getState().openSession(newId);
         clearFiles();
-        assistantMsgRef.current = null;
+        assistantMsgRef.current[newId] = null;
         if (isConnected) {
             switchSession(newId);
         } else {
             connect();
         }
-    }, [setSessionId, clearMessages, isConnected, switchSession, connect, clearFiles]);
+    }, [isConnected, switchSession, connect, clearFiles]);
+
+    /** ChatTabBar `+` button: spin up a session for the current workspace and open it. */
+    const handleNewChatTab = useCallback(async () => {
+        if (!currentWorkspaceId) return;
+        connect();
+        try {
+            const newId = await createSession(currentWorkspaceId);
+            useSessionStore.getState().openSession(newId);
+            assistantMsgRef.current[newId] = null;
+            if (isConnected) switchSession(newId);
+        } catch (e) {
+            addToast('error', e instanceof Error ? e.message : 'Failed to create session');
+        }
+    }, [currentWorkspaceId, connect, createSession, isConnected, switchSession, addToast]);
 
     // Command palette commands
     const commands: Command[] = useMemo(() => [
@@ -1215,9 +1010,9 @@ function App() {
         },
         {
             id: 'toggle-file-tree',
-            label: 'Toggle File Tree',
+            label: 'Toggle Files Sidebar',
             icon: <FolderTree size={16} />,
-            action: () => { handleToggleFileTree(); setShowCommandPalette(false); },
+            action: () => { selectActivity('files'); setShowCommandPalette(false); },
         },
         {
             id: 'open-settings',
@@ -1243,14 +1038,17 @@ function App() {
             label: 'Git Changes',
             description: 'View modified files and diff',
             icon: <GitBranch size={16} />,
-            action: () => { setShowGitStatus(true); setShowCommandPalette(false); },
+            action: () => { selectActivity('git'); setShowCommandPalette(false); },
         },
         {
             id: 'open-shell',
             label: 'Shell Terminal',
             description: 'Open interactive bash terminal',
             icon: <Terminal size={16} />,
-            action: () => { setShowShell(true); setShowCommandPalette(false); },
+            action: () => {
+                if (!useLayoutStore.getState().bottomPanelOpen) toggleBottomPanel();
+                setShowCommandPalette(false);
+            },
         },
         {
             id: 'open-mcp-servers',
@@ -1359,7 +1157,7 @@ function App() {
             shortcut: '⌘⇧C',
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
-    ], [handleNewSession, handleToggleFileTree, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showSessionSearch, showEvolution, showHookConfig, setShowToolStats, showBookmarks, showTeamPanel]);
+    ], [handleNewSession, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showSessionSearch, showEvolution, showHookConfig, setShowToolStats, showBookmarks, showTeamPanel, selectActivity, toggleBottomPanel]);
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -1369,18 +1167,24 @@ function App() {
                 estimatedCost={estimatedCost}
                 contextWindow={getContextWindow(currentModel ?? '')}
                 isCompacting={isCompacting}
-                onToggleTheme={handleToggleTheme}
-                onOpenSettings={handleOpenSettings}
-                onToggleFileTree={handleToggleFileTree}
-                fileTreeOpen={fileTreeOpen}
-                searchActive={showSearch}
-                onOpenSearch={handleOpenSearch}
-                onOpenShortcuts={handleOpenShortcuts}
-                onOpenMemory={handleOpenMemory}
-                onOpenGitStatus={() => setShowGitStatus(true)}
-                onOpenShell={() => setShowShell(true)}
                 fileTrackerSlot={
                     <FileTrackerBadge files={trackedFiles} onClear={clearFiles} />
+                }
+                leadingSlot={
+                    <div className="flex items-center gap-2">
+                        <WorkspaceSwitcher
+                            onCreate={() => setShowWorkspaceSettings({ open: true, workspaceId: null })}
+                            onOpenSettings={(id) => setShowWorkspaceSettings({ open: true, workspaceId: id })}
+                        />
+                        {sessionId && getSessionName(sessionId) && (
+                            <span
+                                className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-muted)] truncate max-w-[200px]"
+                                title={`Session: ${getSessionName(sessionId)}`}
+                            >
+                                {getSessionName(sessionId)}
+                            </span>
+                        )}
+                    </div>
                 }
                 exportAction={
                     <ExportMenu
@@ -1391,8 +1195,6 @@ function App() {
                     />
                 }
                 sessionStats={sessionStats}
-                models={serverConfig?.availableModels ?? []}
-                onModelChange={handleModelChange}
                 isThinking={isThinking}
                 isToolRunning={agentPhase === 'tool'}
                 isMobile={isMobile}
@@ -1434,202 +1236,350 @@ function App() {
                                 persistedSessions={persistedSessions}
                                 onLoadSnapshot={(id) => { handleLoadSnapshotHistory(id); setSidebarOpen(false); }}
                                 onRenameSuccess={(_id, _name) => { refreshPersistedSessions(); }}
-                                defaultWorkingDir={serverConfig?.workingDir}
+                                defaultWorkingDir={currentWorkspace?.workingDir}
+                                currentWorkspaceId={currentWorkspaceId}
+                                onCreateWorkspace={() => setShowWorkspaceSettings({ open: true, workspaceId: null })}
                             />
                         </div>
                     </>
                 ) : (
-                    <SessionSidebar
-                        activeSessionId={sessionId}
-                        loadingSessionId={loadingSessionId}
-                        onSelectSession={handleSelectSession}
-                        onDeleteSession={handleDeleteSession}
-                        onCreateSession={handleCreateSession}
-                        onNewSession={handleNewSessionFromSidebar}
-                        onSessionsChange={setSidebarSessions}
-                        sortOrder={sessionSortOrder}
-                        onSortChange={setSessionSortOrder}
-                        persistedSessions={persistedSessions}
-                        onLoadSnapshot={handleLoadSnapshotHistory}
-                        onRenameSuccess={(_id, _name) => { refreshPersistedSessions(); }}
-                        defaultWorkingDir={serverConfig?.workingDir}
-                    />
-                )}
-
-                <FileTreePanel
-                    isOpen={fileTreeOpen}
-                    onToggle={handleToggleFileTree}
-                    onInsertFile={handleInsertFile}
-                    onMentionFile={handleMentionFile}
-                    onOpenInEditor={(path) => setEditorFile(path)}
-                    width={isNarrow ? 200 : 240}
-                    trackedFiles={trackedFiles.map(f => f.path)}
-                    onOpenFile={handleOpenFile}
-                />
-
-                <main className="relative flex-1 flex flex-col min-w-0" style={{ minWidth: 0 }}>
-                    {/* Chat area */}
-                    {messages.length === 0 && connectionStatus === 'connecting' ? (
-                        <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-                            <div className="text-sm">Connecting…</div>
-                        </div>
-                    ) : messages.length === 0 && isRunning ? (
-                        <div className="flex-1 flex items-center justify-center">
-                            <ThinkingIndicator isVisible={true} phase="thinking" />
-                        </div>
-                    ) : messages.length === 0 ? (
-                        <WelcomeScreen
-                            onSelectPrompt={(prompt) => handleSend(prompt, null)}
-                            appVersion={__APP_VERSION__}
-                            recentSessions={persistedSessions.slice(0, 5).map((s) => ({
-                                id: s.sessionId,
-                                name: s.name,
-                                updatedAt: s.savedAt,
-                            }))}
-                            onSelectSession={handleSelectSession}
-                        />
-                    ) : (
+                    <>
+                    <ActivityBar />
+                    {primarySidebarOpen && (
                         <>
-                        {showMessageSearch && (
-                            <MessageSearchBar
-                                onQueryChange={handleMessageSearchQueryChange}
-                                onClose={handleCloseMessageSearch}
-                                matchCount={sortedMessageSearchResults.length}
-                                currentMatch={sortedMessageSearchResults.length > 0 ? messageSearchMatchIndex + 1 : 0}
-                                onPrev={handleMessageSearchPrev}
-                                onNext={handleMessageSearchNext}
-                            />
-                        )}
-                        <ErrorBoundary>
-                        <Virtuoso
-                            ref={virtuosoRef}
-                            className="flex-1 px-4 py-4"
-                            data={filteredMessages}
-                            followOutput={(showSearch && searchQuery) || (showMessageSearch && messageSearchQuery) ? false : "smooth"}
-                            atBottomStateChange={(bottom) => setAtBottom(bottom)}
-                            itemContent={(index, msg) => {
-                                const msgObj = msg as Message;
-                                const prevMsg = index > 0 ? (filteredMessages[index - 1] as Message) : null;
-                                const showDateSep = prevMsg && prevMsg.timestamp && msgObj.timestamp &&
-                                    new Date(msgObj.timestamp).toDateString() !== new Date(prevMsg.timestamp).toDateString();
-                                const dateLabel = msgObj.timestamp ? new Date(msgObj.timestamp).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' }) : '';
-                                const currentMatchMsgIdx = sortedMessageSearchResults[messageSearchMatchIndex]?.messageIndex;
-                                const isSearchMatch = messageSearchQuery.length > 0 && sortedMessageSearchResults.some(r => r.messageIndex === index);
-                                const isCurrentMatch = index === currentMatchMsgIdx;
-                                const shouldCollapse = msgObj.role === 'assistant' && isCollapsible(msgObj.content ?? '');
-                                const isExpanded = expandedMessages.has(msgObj.id);
-                                const isStreaming = msgObj.id === streamingMsgId;
-                                return (
-                                    <div className="max-w-3xl mx-auto">
-                                        {showDateSep && (
-                                            <div className="flex items-center gap-3 px-4 py-2">
-                                                <div className="flex-1 h-px bg-[var(--border)]" />
-                                                <span className="text-xs text-[var(--text-muted)]">{dateLabel}</span>
-                                                <div className="flex-1 h-px bg-[var(--border)]" />
-                                            </div>
-                                        )}
-                                        <ChatMessage
-                                            message={msgObj}
-                                            onApproveTool={handleApproveTool}
-                                            isStreaming={isStreaming}
-                                            sessionId={sessionId ?? undefined}
-                                            onRegenerate={handleRegenerate}
-                                            onEditResend={handleEditResend}
-                                            onInsertToChat={handleInsertToChat}
-                                            onApplyToFile={handleApplyToFile}
-                                            onRetry={msgObj.role === 'error' ? () => handleRegenerate(msgObj.id) : undefined}
-                                            searchHighlight={isSearchMatch}
-                                            isCurrentMatch={isCurrentMatch}
-                                            isCollapsed={shouldCollapse && !isExpanded}
-                                            onToggleCollapse={shouldCollapse && !isStreaming ? () => handleToggleMessageExpand(msgObj.id) : undefined}
-                                            isBookmarked={bookmarks.has(msgObj.id)}
-                                            onToggleBookmark={handleToggleBookmark}
-                                            onRunCommand={handleRunCommand}
-                                            onOpenFile={handleOpenFile}
+                            <div
+                                style={{ width: isNarrow ? Math.min(sidebarWidth, 260) : sidebarWidth }}
+                                className="shrink-0 h-full"
+                            >
+                                <PrimarySidebar
+                                    searchView={
+                                        <SearchPanel
+                                            embedded
+                                            isOpen
+                                            onClose={() => {}}
+                                            onInsertResult={(text) => setChatInputAppend(text)}
+                                            onOpenFile={(path, line) => openFileInEditor(path, line)}
+                                            workspaceId={currentWorkspaceId ?? undefined}
                                         />
-                                    </div>
-                                );
-                            }}
-                            components={{
-                                Footer: () =>
-                                    isThinking && !streamingMsgId ? (
-                                        <div className="max-w-3xl mx-auto">
-                                            <ThinkingIndicator
-                                                isVisible={true}
-                                                phase={agentPhase}
-                                                toolName={currentToolName}
-                                                toolElapsed={toolElapsed}
-                                            />
-                                            {lastTool && (
-                                                <LastToolDisplay name={lastTool.name} elapsed={lastTool.elapsed} />
-                                            )}
-                                        </div>
-                                    ) : null,
-                            }}
-                        />
-                        </ErrorBoundary>
-
-                        {/* Scroll to bottom button */}
-                        {!atBottom && (
-                            <div className="absolute bottom-20 right-6 z-10">
-                                <button
-                                    onClick={handleScrollToBottom}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
-                                        bg-[var(--bg-secondary)] border border-[var(--border)] rounded-full
-                                        shadow-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)]
-                                        hover:bg-[var(--bg-hover)] transition-all"
-                                    aria-label="Scroll to bottom"
-                                >
-                                    <ArrowDown size={12} />
-                                    <span>Jump to latest</span>
-                                    {unreadCount > 0 && (
-                                        <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-[var(--color-primary)] text-white">
-                                            {unreadCount > 9 ? '9+' : unreadCount}
-                                        </span>
-                                    )}
-                                </button>
+                                    }
+                                    gitView={<GitStatusPanel embedded onClose={() => {}} />}
+                                    workspacesView={
+                                        <WorkspacesView
+                                            onCreate={() => setShowWorkspaceSettings({ open: true, workspaceId: null })}
+                                            onOpenSettings={(id) => setShowWorkspaceSettings({ open: true, workspaceId: id })}
+                                        />
+                                    }
+                                    filesView={
+                                        <FilesView
+                                            workspaceId={currentWorkspaceId ?? undefined}
+                                            rootKey={currentWorkspace?.workingDir}
+                                            onInsertFile={handleInsertFile}
+                                            onMentionFile={handleMentionFile}
+                                        />
+                                    }
+                                />
                             </div>
-                        )}
+                            <ResizeHandle
+                                side="left"
+                                width={sidebarWidth}
+                                minWidth={200}
+                                maxWidth={520}
+                                onResize={setSidebarWidthStore}
+                                onResizeEnd={(w) => setSidebarWidthStore(w)}
+                            />
                         </>
                     )}
+                    </>
+                )}
 
-                    {/* Connection status bar — only after a real prior connection,
-                        so snapshot-restored sessions (no live WS) don't flash it. */}
-                    {sessionId && !isConnected && wasConnectedRef.current && (
-                        <div className="px-4 py-1 text-xs text-center bg-[var(--color-warning-bg)] text-[var(--color-warning)]">
-                            Reconnecting...
-                        </div>
-                    )}
+                {/* Center: VS Code-style multi-tab editor area, falls back to welcome / chat-empty content. */}
+                <EditorArea
+                    workspaceId={currentWorkspaceId ?? undefined}
+                    welcome={
+                        messages.length === 0 && connectionStatus === 'connecting' ? (
+                            <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
+                                <div className="text-sm">Connecting…</div>
+                            </div>
+                        ) : messages.length === 0 && isRunning ? (
+                            <div className="flex-1 flex items-center justify-center">
+                                <ThinkingIndicator isVisible={true} phase="thinking" thinkingText={thinkingText} />
+                            </div>
+                        ) : messages.length === 0 ? (
+                            <WelcomeScreen
+                                onSelectPrompt={(prompt) => handleSend(prompt, null)}
+                                appVersion={__APP_VERSION__}
+                                recentSessions={persistedSessions.slice(0, 5).map((s) => ({
+                                    id: s.sessionId,
+                                    name: s.name,
+                                    updatedAt: s.savedAt,
+                                }))}
+                                onSelectSession={handleSelectSession}
+                            />
+                        ) : (
+                            <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] text-sm">
+                                Open a file from the Explorer, or use the chat on the right.
+                            </div>
+                        )
+                    }
+                />
 
-                    {/* Input */}
-                    <PendingApprovalBanner
-                        count={pendingToolCount}
-                        onScrollToPending={handleScrollToPending}
-                    />
-                    <ChatInput
-                        key={sessionId ?? 'no-session'}
-                        sessionId={sessionId ?? undefined}
-                        initialDraft={currentDraft}
-                        onSend={handleSend}
-                        onInterruptAndSend={handleInterruptAndSend}
-                        onStop={handleStop}
-                        disabled={false}
-                        isThinking={isThinking}
-                        appendText={chatInputAppend}
-                        onAppendConsumed={() => setChatInputAppend('')}
-                        pendingToolCount={pendingToolCount}
-                        onScrollToPending={handleScrollToPending}
-                    />
-                </main>
+                {/* Right chat sidebar — Cursor-style two-column: Sessions strip | Chat tabs+messages+input */}
+                {!isMobile && chatSidebarOpen && (
+                    <>
+                        <ResizeHandle
+                            side="right"
+                            width={chatWidth}
+                            minWidth={420}
+                            maxWidth={1100}
+                            onResize={setChatWidthStore}
+                            onResizeEnd={(w) => setChatWidthStore(w)}
+                        />
+                        <aside
+                            className="relative flex flex-row h-full bg-[var(--bg-primary)] border-l border-[var(--border)] min-w-0"
+                            style={{
+                                flex: `0 1 ${isNarrow ? Math.min(chatWidth, 480) : chatWidth}px`,
+                                minWidth: 360,
+                            }}
+                            aria-label="Chat sidebar"
+                        >
+                            {/* Embedded Sessions strip (Cursor-style: sessions live with chat) */}
+                            {chatSessionsOpen && (
+                                <>
+                                    <div
+                                        className="shrink-0 h-full border-r border-[var(--border)] overflow-hidden"
+                                        style={{ width: isNarrow ? Math.min(chatSessionsWidth, 200) : chatSessionsWidth }}
+                                    >
+                                        <SessionSidebar
+                                            embedded
+                                            activeSessionId={sessionId}
+                                            loadingSessionId={loadingSessionId}
+                                            onSelectSession={handleSelectSession}
+                                            onDeleteSession={handleDeleteSession}
+                                            onCreateSession={handleCreateSession}
+                                            onNewSession={handleNewSessionFromSidebar}
+                                            onSessionsChange={setSidebarSessions}
+                                            sortOrder={sessionSortOrder}
+                                            onSortChange={setSessionSortOrder}
+                                            persistedSessions={persistedSessions}
+                                            onLoadSnapshot={handleLoadSnapshotHistory}
+                                            onRenameSuccess={(_id, _name) => { refreshPersistedSessions(); }}
+                                            defaultWorkingDir={currentWorkspace?.workingDir}
+                                            currentWorkspaceId={currentWorkspaceId}
+                                            onCreateWorkspace={() => setShowWorkspaceSettings({ open: true, workspaceId: null })}
+                                        />
+                                    </div>
+                                    <ResizeHandle
+                                        side="left"
+                                        width={chatSessionsWidth}
+                                        minWidth={180}
+                                        maxWidth={380}
+                                        onResize={setChatSessionsWidthStore}
+                                        onResizeEnd={(w) => setChatSessionsWidthStore(w)}
+                                    />
+                                </>
+                            )}
+                            <div className="relative flex flex-col h-full flex-1 min-w-0">
+                            {/* Multi-session tab bar (Cursor-style) — always rendered so the
+                                Sessions-panel toggle stays reachable even with no open tabs. */}
+                            <ChatTabBar
+                                onNew={handleNewChatTab}
+                                onActivate={(sid) => {
+                                    if (isConnected) switchSession(sid);
+                                    else connect();
+                                }}
+                            />
+                            <TodoListPanel
+                                todos={todos}
+                                collapsed={todoPanelCollapsed}
+                                onToggleCollapse={() => setTodoPanelCollapsed((v) => !v)}
+                            />
+                            {messages.length === 0 && connectionStatus === 'connecting' ? (
+                                <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
+                                    <div className="text-sm">Connecting…</div>
+                                </div>
+                            ) : messages.length === 0 && isRunning ? (
+                                <div className="flex-1 flex items-center justify-center">
+                                    <ThinkingIndicator isVisible={true} phase="thinking" thinkingText={thinkingText} />
+                                </div>
+                            ) : messages.length === 0 ? (
+                                <div className="flex-1 flex items-center justify-center px-4 text-center text-[var(--text-muted)] text-sm">
+                                    Send a message to start a session.
+                                </div>
+                            ) : (
+                                <>
+                                    {showMessageSearch && (
+                                        <MessageSearchBar
+                                            onQueryChange={handleMessageSearchQueryChange}
+                                            onClose={handleCloseMessageSearch}
+                                            matchCount={sortedMessageSearchResults.length}
+                                            currentMatch={sortedMessageSearchResults.length > 0 ? messageSearchMatchIndex + 1 : 0}
+                                            onPrev={handleMessageSearchPrev}
+                                            onNext={handleMessageSearchNext}
+                                        />
+                                    )}
+                                    <ErrorBoundary>
+                                        <Virtuoso
+                                            ref={virtuosoRef}
+                                            className="flex-1 pt-6 pb-3 overflow-x-hidden [scrollbar-gutter:stable]"
+                                            data={filteredMessages}
+                                            followOutput={(isAtBottom) => {
+                                                if ((showSearch && searchQuery) || (showMessageSearch && messageSearchQuery)) return false;
+                                                return isAtBottom ? 'auto' : false;
+                                            }}
+                                            atBottomStateChange={(bottom) => setAtBottom(bottom)}
+                                            atBottomThreshold={48}
+                                            itemContent={(index, msg) => {
+                                                const msgObj = msg as Message;
+                                                const prevMsg = index > 0 ? (filteredMessages[index - 1] as Message) : null;
+                                                const showDateSep = prevMsg && prevMsg.timestamp && msgObj.timestamp &&
+                                                    new Date(msgObj.timestamp).toDateString() !== new Date(prevMsg.timestamp).toDateString();
+                                                const dateLabel = msgObj.timestamp ? new Date(msgObj.timestamp).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+                                                const currentMatchMsgIdx = sortedMessageSearchResults[messageSearchMatchIndex]?.messageIndex;
+                                                const isSearchMatch = messageSearchQuery.length > 0 && sortedMessageSearchResults.some(r => r.messageIndex === index);
+                                                const isCurrentMatch = index === currentMatchMsgIdx;
+                                                const shouldCollapse = msgObj.role === 'assistant' && isCollapsible(msgObj.content ?? '');
+                                                const isExpanded = expandedMessages.has(msgObj.id);
+                                                const isStreaming = msgObj.id === streamingMsgId;
+                                                return (
+                                                    <div className="px-4">
+                                                        {showDateSep && (
+                                                            <div className="flex items-center gap-3 px-2 py-2">
+                                                                <div className="flex-1 h-px bg-[var(--border)]" />
+                                                                <span className="text-xs text-[var(--text-muted)]">{dateLabel}</span>
+                                                                <div className="flex-1 h-px bg-[var(--border)]" />
+                                                            </div>
+                                                        )}
+                                                        <ChatMessage
+                                                            message={msgObj}
+                                                            onApproveTool={handleApproveTool}
+                                                            isStreaming={isStreaming}
+                                                            sessionId={sessionId ?? undefined}
+                                                            onRegenerate={handleRegenerate}
+                                                            onEditResend={handleEditResend}
+                                                            onInsertToChat={handleInsertToChat}
+                                                            onApplyToFile={handleApplyToFile}
+                                                            onRetry={msgObj.role === 'error' ? () => handleRegenerate(msgObj.id) : undefined}
+                                                            searchHighlight={isSearchMatch}
+                                                            isCurrentMatch={isCurrentMatch}
+                                                            isCollapsed={shouldCollapse && !isExpanded}
+                                                            onToggleCollapse={shouldCollapse && !isStreaming ? () => handleToggleMessageExpand(msgObj.id) : undefined}
+                                                            isBookmarked={bookmarks.has(msgObj.id)}
+                                                            onToggleBookmark={handleToggleBookmark}
+                                                            onRunCommand={handleRunCommand}
+                                                            onOpenFile={handleOpenFile}
+                                                        />
+                                                    </div>
+                                                );
+                                            }}
+                                            components={{
+                                                Footer: () =>
+                                                    isRunning ? (
+                                                        <div>
+                                                            <ThinkingIndicator
+                                                                isVisible={true}
+                                                                phase={agentPhase}
+                                                                toolName={currentToolName}
+                                                                toolElapsed={toolElapsed}
+                                                                thinkingText={thinkingText}
+                                                            />
+                                                            {lastTool && (
+                                                                <LastToolDisplay name={lastTool.name} elapsed={lastTool.elapsed} />
+                                                            )}
+                                                        </div>
+                                                    ) : null,
+                                            }}
+                                        />
+                                    </ErrorBoundary>
 
-                {editorFile && (
-                    <FileEditorPanel
-                        path={editorFile}
-                        onClose={() => setEditorFile(null)}
-                        onSaved={() => {/* tree refresh not needed for edits */}}
-                    />
+                                    {!atBottom && (
+                                        <div className="absolute bottom-20 right-4 z-10">
+                                            <button
+                                                onClick={handleScrollToBottom}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                                                    bg-[var(--bg-secondary)] border border-[var(--border)] rounded-full
+                                                    shadow-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)]
+                                                    hover:bg-[var(--bg-hover)] transition-all"
+                                                aria-label="Scroll to bottom"
+                                            >
+                                                <ArrowDown size={12} />
+                                                <span>Jump to latest</span>
+                                                {unreadCount > 0 && (
+                                                    <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-[var(--color-primary)] text-white">
+                                                        {unreadCount > 9 ? '9+' : unreadCount}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
+                            {sessionId && !isConnected && wasConnectedRef.current && (
+                                <div className="px-4 py-1 text-xs text-center bg-[var(--color-warning-bg)] text-[var(--color-warning)]">
+                                    Reconnecting...
+                                </div>
+                            )}
+
+                            <PendingApprovalBanner
+                                count={pendingToolCount}
+                                onScrollToPending={handleScrollToPending}
+                            />
+                            <ChatInput
+                                key={sessionId ?? 'no-session'}
+                                sessionId={sessionId ?? undefined}
+                                initialDraft={currentDraft}
+                                onSend={handleSend}
+                                onInterruptAndSend={handleInterruptAndSend}
+                                onStop={handleStop}
+                                disabled={false}
+                                isThinking={isThinking}
+                                running={running}
+                                appendText={chatInputAppend}
+                                onAppendConsumed={() => setChatInputAppend('')}
+                                pendingToolCount={pendingToolCount}
+                                onScrollToPending={handleScrollToPending}
+                                models={serverConfig?.availableModels ?? []}
+                                currentModel={currentModel}
+                                onModelChange={handleModelChange}
+                                tokenUsage={tokenUsage}
+                                contextWindow={getContextWindow(currentModel ?? '')}
+                                isCompacting={isCompacting}
+                                onNewChat={handleNewChatTab}
+                            />
+                            </div>
+                        </aside>
+                    </>
                 )}
             </div>
+
+            {!isMobile && bottomPanelOpen && (
+                <>
+                    <ResizeHandle
+                        side="bottom"
+                        orientation="horizontal"
+                        width={bottomHeight}
+                        minWidth={120}
+                        maxWidth={800}
+                        onResize={setBottomHeight}
+                        onResizeEnd={(h) => setBottomHeight(h)}
+                    />
+                    <div style={{ height: bottomHeight }} className="shrink-0">
+                        <BottomPanel
+                            workspaceId={currentWorkspaceId ?? undefined}
+                            externalCommand={shellExternalCommand}
+                        />
+                    </div>
+                </>
+            )}
+
+            <StatusBar
+                connectionStatus={sessionId ? connectionStatus : undefined}
+                currentModel={currentModel ?? undefined}
+                onOpenSettings={handleOpenSettings}
+                onOpenMemory={handleOpenMemory}
+                onOpenShortcuts={handleOpenShortcuts}
+                onToggleTheme={handleToggleTheme}
+            />
 
             {showSettings && serverConfig && (
                 <SettingsModal
@@ -1641,10 +1591,20 @@ function App() {
                 />
             )}
 
+            {showWorkspaceSettings.open && (
+                <WorkspaceSettingsModal
+                    isOpen={showWorkspaceSettings.open}
+                    onClose={() => setShowWorkspaceSettings({ open: false, workspaceId: null })}
+                    workspaceId={showWorkspaceSettings.workspaceId}
+                />
+            )}
+
             <SearchPanel
                 isOpen={showSearch}
                 onClose={() => setShowSearch(false)}
                 onInsertResult={(text) => setChatInputAppend(text)}
+                onOpenFile={(path, line) => openFileInEditor(path, line)}
+                workspaceId={currentWorkspaceId ?? undefined}
             />
 
             <CommandPalette
@@ -1657,9 +1617,9 @@ function App() {
 
             <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-            {showMemoryEditor && serverConfig && (
+            {showMemoryEditor && currentWorkspace && (
                 <MemoryEditorPanel
-                    workingDir={serverConfig.workingDir}
+                    workingDir={currentWorkspace.workingDir}
                     onClose={() => setShowMemoryEditor(false)}
                 />
             )}
@@ -1669,17 +1629,6 @@ function App() {
                     onClose={() => setShowPromptTemplates(false)}
                     onInsert={handleInsertTemplate}
                 />
-            )}
-            {showGitStatus && (
-                <GitStatusPanel onClose={() => setShowGitStatus(false)} />
-            )}
-            {showShell && (
-                <Suspense fallback={null}>
-                    <ShellPanel
-                        onClose={() => setShowShell(false)}
-                        externalCommand={shellExternalCommand}
-                    />
-                </Suspense>
             )}
             {showMcpServers && (
                 <McpServersPanel onClose={handleCloseMcpServers} />
@@ -1691,14 +1640,6 @@ function App() {
                 <ToolStatsDashboard
                     sessionId={sessionId}
                     onClose={handleCloseToolStats}
-                />
-            )}
-            {showPlanPanel && planSteps.length > 0 && (
-                <PlanPanel
-                    steps={planSteps}
-                    isRunning={isRunning}
-                    onClose={() => setShowPlanPanel(false)}
-                    onClear={() => { clearPlan(); setShowPlanPanel(false); }}
                 />
             )}
             {showEvolution && <EvolutionPanel onClose={() => setShowEvolution(false)} />}
@@ -1730,6 +1671,7 @@ function App() {
             {showTeamPanel && (
                 <TeamPanel isOpen={showTeamPanel} onClose={() => setShowTeamPanel(false)} />
             )}
+            <DevDiagnosticsPanel />
         </div>
     );
 }

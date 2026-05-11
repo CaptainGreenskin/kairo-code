@@ -21,11 +21,13 @@ import io.kairo.code.service.concurrency.AgentConcurrencyException;
 import io.kairo.code.service.concurrency.AgentSlot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
+import reactor.util.concurrent.Queues;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -46,19 +48,34 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * that any transport layer (STOMP / SSE / CLI) can subscribe to.
  */
 @Component
-public class AgentService {
+public class AgentService implements DisposableBean {
 
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
 
     private final Map<String, Sinks.Many<AgentEvent>> eventSinks = new ConcurrentHashMap<>();
     private final Map<String, SessionEntry> sessions = new ConcurrentHashMap<>();
     private final Map<String, AtomicBoolean> runningState = new ConcurrentHashMap<>();
+    private final Map<String, ToolProgressTracker> progressTrackers = new ConcurrentHashMap<>();
+    /** Per-session telemetry counters, updated by {@link AgentEventBridgeHook} on each emit
+     *  and read by {@code SessionDiagnosticsController}. Lazily created on first read/write. */
+    private final Map<String, SessionDiagnosticsTracker> diagnosticsTrackers = new ConcurrentHashMap<>();
+    /** Heartbeat tick subscription, started lazily on first session and cancelled on shutdown. */
+    private volatile reactor.core.Disposable progressTickSubscription;
+    /** Tools older than this emit a heartbeat on every tick; set on the conservative side so
+     *  short tools never produce visual noise. */
+    private static final long PROGRESS_THRESHOLD_MS = 30_000L;
+    /** Heartbeat interval — picked to be cheap on the wire but responsive enough that the user
+     *  sees the elapsed counter advance in seconds, not minutes. */
+    private static final java.time.Duration PROGRESS_TICK = java.time.Duration.ofSeconds(5);
 
     @Autowired
     private AgentConcurrencyController concurrencyController;
 
     @Autowired(required = false)
     private Tracer tracer;
+
+    @Autowired
+    private WorktreeManager worktreeManager;
 
     private volatile CodeAgentConfig defaultConfig;
 
@@ -70,7 +87,7 @@ public class AgentService {
                                      String baseUrl, String workingDir, Integer thinkingBudget) {
         String resolvedBaseUrl = resolveBaseUrl(provider, baseUrl);
         this.defaultConfig = new CodeAgentConfig(
-                apiKey, resolvedBaseUrl, model, 50, workingDir, null, 0, 0, thinkingBudget
+                apiKey, resolvedBaseUrl, model, Integer.MAX_VALUE, workingDir, null, 0, 0, thinkingBudget
         );
         log.info("Updated default agent config (model={}, provider={})", model, provider);
     }
@@ -91,18 +108,71 @@ public class AgentService {
 
     /**
      * Create a new session. Returns the session ID.
+     *
+     * <p>Legacy form (no workspace binding). Equivalent to {@code createSession(config, null, false)}.
      */
     public String createSession(CodeAgentConfig config) {
+        return createSession(config, null, false);
+    }
+
+    /**
+     * Create a new session bound to a workspace. If {@code useWorktree} is true and the workspace
+     * is a git repo, the session runs in a fresh worktree on branch {@code kairo/<sid8>}; otherwise
+     * the session runs directly in {@code config.workingDir()}.
+     *
+     * @param config       agent config (its {@code workingDir} is the workspace dir)
+     * @param workspaceId  owning workspace id (may be null for legacy tests)
+     * @param useWorktree  whether to provision a per-session git worktree
+     * @return the new session ID
+     */
+    public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree) {
         String sessionId = UUID.randomUUID().toString();
 
-        log.info("Creating session {} (model={}, workingDir={})",
-                sessionId, config.modelName(), config.workingDir());
+        // Resolve effective cwd via worktree manager. Falls back to workspace dir when not a git
+        // repo or when useWorktree is false. Mutate config only if a different cwd was returned —
+        // the original CodeAgentConfig is a record, so we rebuild it.
+        String effectiveCwd = (worktreeManager != null && useWorktree && config.workingDir() != null)
+                ? worktreeManager.acquire(sessionId, config.workingDir(), true)
+                : config.workingDir();
+        if (effectiveCwd != null && !effectiveCwd.equals(config.workingDir())) {
+            config = new CodeAgentConfig(
+                    config.apiKey(),
+                    config.baseUrl(),
+                    config.modelName(),
+                    config.maxIterations(),
+                    effectiveCwd,
+                    config.mcpConfig(),
+                    config.toolBudgetForce(),
+                    config.repetitiveToolThreshold(),
+                    config.thinkingBudget()
+            );
+        }
 
-        Sinks.Many<AgentEvent> sink = Sinks.many().multicast().onBackpressureBuffer();
+        log.info("Creating session {} (workspace={}, model={}, workingDir={}, worktree={})",
+                sessionId, workspaceId, config.modelName(), config.workingDir(), useWorktree);
+
+        // autoCancel=false: the sink must survive WS subscriber disconnect. The default
+        // (no-arg) variant is `(SMALL_BUFFER_SIZE, true)` which permanently terminates the
+        // sink as soon as the lone subscriber drops — and any further emit (via BridgeHook,
+        // WSAH, compaction listener) returns FAIL_CANCELLED. We hit this in production: a
+        // model-side 401 onError'd the merged Flux, the WS handler unsubscribed, and the
+        // rebuilt session (after the user fixed credentials) had a dead sink — every
+        // TOOL_CALL/TOOL_RESULT silently dropped, which surfaced as phantom "Error" tool
+        // cards on the UI because the frontend safety net flipped unmatched 'approved' cards
+        // to error at AGENT_DONE. autoCancel=false keeps the sink valid across reconnects.
+        Sinks.Many<AgentEvent> sink = Sinks.many()
+                .multicast()
+                .onBackpressureBuffer(Queues.SMALL_BUFFER_SIZE, false);
         eventSinks.put(sessionId, sink);
 
-        AgentEventBridgeHook bridgeHook = new AgentEventBridgeHook(sink, sessionId);
-        WebSocketApprovalHandler approvalHandler = new WebSocketApprovalHandler();
+        WebSocketApprovalHandler approvalHandler = new WebSocketApprovalHandler(sink, sessionId);
+        ToolProgressTracker progressTracker = new ToolProgressTracker();
+        approvalHandler.setProgressTracker(progressTracker);
+        progressTrackers.put(sessionId, progressTracker);
+        startProgressTickerIfNeeded();
+        AgentEventBridgeHook bridgeHook = new AgentEventBridgeHook(
+                sink, sessionId, approvalHandler.announcedToolCallIds(),
+                config.workingDir(), progressTracker, diagnosticsTrackerFor(sessionId));
 
         // Register a ContextCompactionHook with a listener that surfaces CONTEXT_COMPACTED
         // events on the session sink. Supplying it via SessionOptions causes CodeAgentFactory
@@ -111,7 +181,12 @@ public class AgentService {
         ContextCompactionHook compactionHook = buildCompactionHook(sink, sessionId);
 
         try {
+            // Web sessions are interactive (like a REPL) — skip the one-shot/batch hooks that
+            // force tool calls on text-only responses (TextOnlyStallHook, NoWriteDetectedHook,
+            // PlanWithoutActionHook, etc.). Without this, simple greetings like "你好" trigger a
+            // forced iter 1 that calls SYSTEM_CHANGE tools and hangs at the approval gate.
             SessionOptions opts = SessionOptions.empty()
+                    .asReplSession()
                     .withApprovalHandler(approvalHandler)
                     .withHooks(List.of(bridgeHook, compactionHook));
             if (tracer != null) {
@@ -119,7 +194,7 @@ public class AgentService {
             }
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts);
 
-            SessionEntry entry = new SessionEntry(sessionId, config, session, approvalHandler);
+            SessionEntry entry = new SessionEntry(sessionId, config, session, approvalHandler, workspaceId);
             sessions.put(sessionId, entry);
             runningState.put(sessionId, new AtomicBoolean(false));
 
@@ -129,6 +204,9 @@ public class AgentService {
             log.error("Failed to create session {}", sessionId, e);
             sink.tryEmitComplete();
             eventSinks.remove(sessionId);
+            if (worktreeManager != null) {
+                worktreeManager.release(sessionId);
+            }
             throw e;
         }
     }
@@ -186,63 +264,106 @@ public class AgentService {
                     "Event sink not found for session: " + sessionId, "INTERNAL_ERROR"));
         }
 
+        // If the user updated credentials via /api/config after this session was created, the
+        // session's agent still holds a model provider built with the stale apiKey and will keep
+        // returning 401. Rebuild the agent in place so Retry on the auth-failed message works.
+        // Conversation context is sacrificed (the model provider has no swap-credentials hook),
+        // but the session id, workspace, and UI message history are preserved.
+        entry = rebuildIfStale(entry);
+
         Agent agent = entry.session().agent();
 
-        return Flux.<AgentEvent>create(emitter -> {
-                    // Emit thinking event
-                    emitter.next(AgentEvent.thinking(sessionId));
+        // All lifecycle events (THINKING / DONE / ERROR) go through `sink` (autoCancel=false)
+        // rather than the per-call Flux.create emitter. The emitter dies when the WS subscriber
+        // disconnects mid-execution, so any AGENT_DONE emitted onto it after a brief network
+        // blip lands nowhere — leaving the UI stuck on "running" forever even though the agent
+        // already terminated. Routing through sink lets reconnecting subscribers continue to
+        // receive in-flight events, and the doFinally still flips runningState so bindSession
+        // reports the correct state on reconnect after completion.
+        sink.tryEmitNext(AgentEvent.thinking(sessionId));
 
-                    AtomicBoolean completed = new AtomicBoolean(false);
+        AgentSlot slot;
+        try {
+            slot = concurrencyController.acquire(sessionId);
+        } catch (AgentConcurrencyException e) {
+            sink.tryEmitNext(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
+            return sink.asFlux();
+        }
 
-                    AgentSlot slot;
-                    try {
-                        slot = concurrencyController.acquire(sessionId);
-                    } catch (AgentConcurrencyException e) {
-                        completed.set(true);
-                        emitter.next(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
-                        emitter.complete();
-                        return;
+        java.util.function.Consumer<String> thinkingConsumer = delta -> {
+            if (delta != null && !delta.isEmpty()) {
+                sink.tryEmitNext(AgentEvent.thinkingChunk(sessionId, delta));
+            }
+        };
+
+        // Single terminal emit point: subscribe captures error/response into refs, doFinally
+        // decides exactly one event to emit based on the signal type. Previously both
+        // subscribe(onNext) and doFinally could race to emit AGENT_DONE — fixed by routing all
+        // terminal emits through doFinally's switch on SignalType.
+        java.util.concurrent.atomic.AtomicReference<Throwable> errorRef = new java.util.concurrent.atomic.AtomicReference<>();
+        long startedAtMs = System.currentTimeMillis();
+
+        agent.call(userMsg)
+                .contextWrite(reactor.util.context.Context.of(
+                        io.kairo.core.agent.ReasoningPhase.THINKING_DELTA_KEY,
+                        thinkingConsumer))
+                .subscribeOn(Schedulers.boundedElastic())
+                .doFinally(signal -> {
+                    slot.close();
+                    runningState.put(sessionId, new AtomicBoolean(false));
+                    long elapsedMs = System.currentTimeMillis() - startedAtMs;
+                    Throwable err = errorRef.get();
+                    String terminalKind;
+                    if (err != null) {
+                        String errorMsg = err.getMessage();
+                        String errorType = classifyError(err);
+                        if (err instanceof AgentInterruptedException) {
+                            errorType = "INTERRUPTED";
+                            errorMsg = "Agent execution was interrupted";
+                        }
+                        sink.tryEmitNext(AgentEvent.error(sessionId, errorMsg, errorType));
+                        terminalKind = "error";
+                    } else if (signal == reactor.core.publisher.SignalType.CANCEL) {
+                        sink.tryEmitNext(AgentEvent.error(sessionId, "Agent execution was cancelled", "CANCELLED"));
+                        terminalKind = "cancelled";
+                    } else {
+                        sink.tryEmitNext(AgentEvent.done(sessionId, 0, 0.0));
+                        terminalKind = "done";
                     }
-
-                    agent.call(userMsg)
-                            .subscribeOn(Schedulers.boundedElastic())
-                            .doFinally(signal -> {
-                                slot.close();
-                                runningState.put(sessionId, new AtomicBoolean(false));
-                                if (!completed.get()) {
-                                    if (signal != reactor.core.publisher.SignalType.ON_ERROR) {
-                                        emitter.next(AgentEvent.done(sessionId, 0, 0.0));
-                                    }
-                                }
-                                emitter.complete();
-                            })
-                            .subscribe(
-                                    responseMsg -> {
-                                        completed.set(true);
-                                        // Token usage not directly available on Msg;
-                                        // future enhancement: capture from hook events.
-                                        emitter.next(AgentEvent.done(sessionId, 0, 0.0));
-                                    },
-                                    error -> {
-                                        completed.set(true);
-                                        String errorMsg = error.getMessage();
-                                        String errorType = classifyError(error);
-                                        if (error instanceof AgentInterruptedException) {
-                                            errorType = "INTERRUPTED";
-                                            errorMsg = "Agent execution was interrupted";
-                                        }
-                                        emitter.next(AgentEvent.error(sessionId, errorMsg, errorType));
-                                        emitter.error(error);
-                                    }
-                            );
+                    log.info("agent.terminal session={} signal={} kind={} elapsedMs={}",
+                            sessionId, signal, terminalKind, elapsedMs);
                 })
-                .mergeWith(sink.asFlux());
+                .subscribe(
+                        responseMsg -> {
+                            // No-op: terminal emit happens in doFinally. Capture result here only
+                            // if we need it for sessionStore in the future.
+                        },
+                        errorRef::set
+                );
+
+        return sink.asFlux();
     }
 
     /**
      * Approve or reject a pending tool call.
      */
     public boolean approveTool(String sessionId, String toolCallId, boolean approved, String reason) {
+        return approveTool(sessionId, toolCallId, approved, reason, null);
+    }
+
+    /**
+     * Approve or reject a pending tool call, optionally with edited tool args (used by the
+     * exit_plan_mode card so users can tweak plan items inline before approving).
+     *
+     * @param editedArgs shallow-merged into the pending tool's input map before the tool resumes;
+     *     pass {@code null} when no edits are needed.
+     */
+    public boolean approveTool(
+            String sessionId,
+            String toolCallId,
+            boolean approved,
+            String reason,
+            Map<String, Object> editedArgs) {
         SessionEntry entry = sessions.get(sessionId);
         if (entry == null) {
             return false;
@@ -252,7 +373,7 @@ public class AgentService {
                 ? ApprovalResult.allow()
                 : ApprovalResult.denied(reason != null ? reason : "User denied");
 
-        return entry.approvalHandler().resolveApproval(toolCallId, result);
+        return entry.approvalHandler().resolveApproval(toolCallId, result, editedArgs);
     }
 
     /**
@@ -265,6 +386,10 @@ public class AgentService {
         }
 
         try {
+            // Unwind any pending approval blocks first (e.g. exit_plan_mode awaiting human
+            // review). cancelAll() resolves each pending Sinks.One with denied so the in-flight
+            // tool's Mono.block() returns instead of surfacing InterruptedException.
+            entry.approvalHandler().cancelAll();
             entry.session().agent().interrupt();
             runningState.put(sessionId, new AtomicBoolean(false));
             log.info("Session {} stopped", sessionId);
@@ -285,6 +410,11 @@ public class AgentService {
         log.info("Destroying session {}", sessionId);
         entry.approvalHandler().cancelAll();
         runningState.remove(sessionId);
+        ToolProgressTracker tracker = progressTrackers.remove(sessionId);
+        if (tracker != null) {
+            tracker.clear();
+        }
+        diagnosticsTrackers.remove(sessionId);
 
         Sinks.Many<AgentEvent> sink = eventSinks.remove(sessionId);
         if (sink != null) {
@@ -295,6 +425,9 @@ public class AgentService {
             entry.session().agent().interrupt();
         } catch (Exception e) {
             log.debug("Error interrupting agent for session {}", sessionId, e);
+        }
+        if (worktreeManager != null) {
+            worktreeManager.release(sessionId);
         }
         return true;
     }
@@ -323,8 +456,10 @@ public class AgentService {
             messagesJson = "[]";
         }
 
+        String todosJson = TodoStorage.readJson(entry.config().workingDir());
+
         log.info("Session {} bound: {} messages, running={}", sessionId, messages.size(), running);
-        return AgentEvent.sessionRestored(sessionId, messagesJson, running);
+        return AgentEvent.sessionRestored(sessionId, messagesJson, running, todosJson);
     }
 
     private List<Map<String, Object>> readCheckpointMessages(SessionEntry entry) {
@@ -468,7 +603,8 @@ public class AgentService {
                         e.config().workingDir(),
                         e.config().modelName(),
                         e.createdAt(),
-                        isRunning(e.sessionId())))
+                        isRunning(e.sessionId()),
+                        e.workspaceId()))
                 .toList();
     }
 
@@ -501,6 +637,81 @@ public class AgentService {
     }
 
     /**
+     * If the session's baked credentials no longer match the current default config (because the
+     * user updated /api/config after the session was created), rebuild the agent in place using the
+     * latest credentials. Returns the same entry untouched when the credentials still match or when
+     * no defaults are known yet. The returned entry is also written back into the {@code sessions}
+     * map so subsequent lookups see the fresh agent.
+     *
+     * <p>workingDir is intentionally NOT compared here: it is workspace-scoped, not config-scoped.
+     * defaultConfig.workingDir() holds the global ServerProperties value, which has nothing to do
+     * with which workspace the session was created against. An earlier version included workingDir
+     * in the staleness check and clobbered cnarch-sre-ai sessions back to the global default.
+     */
+    private SessionEntry rebuildIfStale(SessionEntry entry) {
+        CodeAgentConfig defaults = this.defaultConfig;
+        if (defaults == null) {
+            return entry;
+        }
+        CodeAgentConfig current = entry.config();
+        boolean stale = !java.util.Objects.equals(current.apiKey(), defaults.apiKey())
+                || !java.util.Objects.equals(current.baseUrl(), defaults.baseUrl())
+                || !java.util.Objects.equals(current.modelName(), defaults.modelName());
+        if (!stale) {
+            return entry;
+        }
+
+        log.info(
+                "Rebuilding session {} after credential update (model {} → {}, baseUrl {} → {})",
+                entry.sessionId(),
+                current.modelName(),
+                defaults.modelName(),
+                current.baseUrl(),
+                defaults.baseUrl());
+
+        CodeAgentConfig rebuilt = new CodeAgentConfig(
+                defaults.apiKey(),
+                defaults.baseUrl(),
+                defaults.modelName(),
+                current.maxIterations(),
+                current.workingDir(),
+                current.mcpConfig(),
+                current.toolBudgetForce(),
+                current.repetitiveToolThreshold(),
+                defaults.thinkingBudget());
+
+        Sinks.Many<AgentEvent> sink = eventSinks.get(entry.sessionId());
+        WebSocketApprovalHandler approvalHandler = entry.approvalHandler();
+        AgentEventBridgeHook bridgeHook = new AgentEventBridgeHook(
+                sink, entry.sessionId(), approvalHandler.announcedToolCallIds(), rebuilt.workingDir(),
+                progressTrackers.get(entry.sessionId()), diagnosticsTrackerFor(entry.sessionId()));
+        ContextCompactionHook compactionHook = buildCompactionHook(sink, entry.sessionId());
+
+        SessionOptions opts = SessionOptions.empty()
+                .asReplSession()
+                .withApprovalHandler(approvalHandler)
+                .withHooks(List.of(bridgeHook, compactionHook));
+        if (tracer != null) {
+            opts = opts.withTracer(tracer);
+        }
+
+        try {
+            CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts);
+            SessionEntry newEntry = new SessionEntry(
+                    entry.sessionId(),
+                    rebuilt,
+                    newSession,
+                    approvalHandler,
+                    entry.workspaceId());
+            sessions.put(entry.sessionId(), newEntry);
+            return newEntry;
+        } catch (Exception e) {
+            log.error("Failed to rebuild session {} with new credentials", entry.sessionId(), e);
+            return entry;
+        }
+    }
+
+    /**
      * Build a {@link ContextCompactionHook} configured with environment-driven defaults plus a
      * listener that emits {@code CONTEXT_COMPACTED} events to the given sink whenever the hook
      * decides to inject a compaction prompt.
@@ -522,6 +733,151 @@ public class AgentService {
     }
 
     /**
+     * Lazily start the heartbeat scheduler. The first session creates it; the ticker stays alive
+     * for the JVM lifetime (very cheap when no trackers have stale entries — the inner loop is
+     * a single concurrent-map iteration over each session).
+     */
+    private synchronized void startProgressTickerIfNeeded() {
+        if (progressTickSubscription != null && !progressTickSubscription.isDisposed()) {
+            return;
+        }
+        progressTickSubscription =
+                Flux.interval(PROGRESS_TICK, Schedulers.parallel())
+                        .doOnNext(tick -> emitProgressHeartbeats())
+                        .onErrorContinue(
+                                (err, o) ->
+                                        log.warn("TOOL_PROGRESS tick failed: {}", err.toString()))
+                        .subscribe();
+    }
+
+    /** One pass over every session's tracker, emitting TOOL_PROGRESS for any stale tools. */
+    private void emitProgressHeartbeats() {
+        progressTrackers.forEach(
+                (sessionId, tracker) -> {
+                    if (tracker.isEmpty()) return;
+                    Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+                    if (sink == null) return;
+                    tracker.snapshotIfStale(
+                            PROGRESS_THRESHOLD_MS,
+                            inflight -> {
+                                AgentEvent event =
+                                        AgentEvent.toolProgress(
+                                                sessionId,
+                                                inflight.toolCallId(),
+                                                inflight.toolName(),
+                                                inflight.phase().name(),
+                                                inflight.elapsedMs());
+                                Sinks.EmitResult emit = sink.tryEmitNext(event);
+                                if (emit.isFailure()) {
+                                    log.debug(
+                                            "Skipped TOOL_PROGRESS for {} ({}): {}",
+                                            sessionId,
+                                            inflight.toolCallId(),
+                                            emit);
+                                }
+                            });
+                });
+    }
+
+    @Override
+    public void destroy() {
+        if (progressTickSubscription != null) {
+            progressTickSubscription.dispose();
+            progressTickSubscription = null;
+        }
+    }
+
+    /**
+     * Live snapshot of a session's runtime state for ops/debug surfaces.
+     *
+     * <p>This is intentionally derived state — the source of truth lives in the per-session sink,
+     * approval handler, and progress tracker. The endpoint reads it on demand so dashboards and
+     * the developer drawer don't need to subscribe to events.
+     *
+     * @param sessionId the session ID
+     * @param exists    false when the session has been destroyed (other fields are empty)
+     * @param running   true while a {@code sendMessage} flow is active
+     * @param pendingApprovals one entry per tool blocked on user approval
+     * @param runningTools     every tool currently in flight (started, no result yet)
+     */
+    public record SessionState(
+            String sessionId,
+            boolean exists,
+            boolean running,
+            List<PendingApproval> pendingApprovals,
+            List<RunningTool> runningTools) {}
+
+    public record PendingApproval(String toolCallId, String toolName, Map<String, Object> args) {}
+
+    public record RunningTool(String toolCallId, String toolName, String phase, long elapsedMs) {}
+
+    /**
+     * Build a {@link SessionState} snapshot, suitable for serialisation by the state controller.
+     * Returns a state with {@code exists=false} when {@code sessionId} is not in the live map.
+     */
+    public SessionState getSessionState(String sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) {
+            return new SessionState(sessionId, false, false, List.of(), List.of());
+        }
+        boolean running = isRunning(sessionId);
+        var approvalSnapshot = entry.approvalHandler().pendingApprovalsSnapshot();
+        List<PendingApproval> pending = new java.util.ArrayList<>(approvalSnapshot.size());
+        approvalSnapshot.forEach(
+                (id, req) ->
+                        pending.add(
+                                new PendingApproval(
+                                        id,
+                                        req.toolName(),
+                                        req.args() != null ? req.args() : Map.of())));
+
+        ToolProgressTracker tracker = progressTrackers.get(sessionId);
+        List<RunningTool> running_ = new java.util.ArrayList<>();
+        if (tracker != null) {
+            // threshold=0 → emit every entry, regardless of age, so the snapshot reflects
+            // everything currently in flight (not just the heartbeat-eligible subset).
+            tracker.snapshotIfStale(
+                    0L,
+                    inflight ->
+                            running_.add(
+                                    new RunningTool(
+                                            inflight.toolCallId(),
+                                            inflight.toolName(),
+                                            inflight.phase().name(),
+                                            inflight.elapsedMs())));
+        }
+        return new SessionState(sessionId, true, running, pending, running_);
+    }
+
+    /**
+     * Build a {@link SessionDiagnostics} snapshot for the given session, or null when unknown.
+     * Reads from the live tracker maintained by {@link AgentEventBridgeHook}.
+     */
+    public SessionDiagnostics getSessionDiagnostics(String sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) {
+            return null;
+        }
+        SessionDiagnosticsTracker tracker = diagnosticsTrackers.get(sessionId);
+        long lastEventAt = tracker != null ? tracker.lastEventAt() : 0L;
+        long now = System.currentTimeMillis();
+        long msSince = lastEventAt > 0 ? Math.max(0, now - lastEventAt) : Long.MAX_VALUE;
+        Map<String, Long> counts = tracker != null ? tracker.snapshotCounts() : Map.of();
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        int wsClients = sink != null ? sink.currentSubscriberCount() : 0;
+        return new SessionDiagnostics(
+                sessionId, isRunning(sessionId), lastEventAt, msSince, counts, wsClients);
+    }
+
+    /**
+     * Get-or-create the diagnostics tracker for a session. Used by {@link AgentEventBridgeHook}
+     * via the wiring layer so each emitted event can update its counters.
+     */
+    public SessionDiagnosticsTracker diagnosticsTrackerFor(String sessionId) {
+        return diagnosticsTrackers.computeIfAbsent(sessionId, k -> new SessionDiagnosticsTracker());
+    }
+
+    /**
      * Holds a session and its associated state.
      */
     public record SessionEntry(
@@ -529,11 +885,18 @@ public class AgentService {
             CodeAgentConfig config,
             CodeAgentSession session,
             WebSocketApprovalHandler approvalHandler,
-            long createdAt
+            long createdAt,
+            String workspaceId
     ) {
         public SessionEntry(String sessionId, CodeAgentConfig config,
                             CodeAgentSession session, WebSocketApprovalHandler approvalHandler) {
-            this(sessionId, config, session, approvalHandler, System.currentTimeMillis());
+            this(sessionId, config, session, approvalHandler, System.currentTimeMillis(), null);
+        }
+
+        public SessionEntry(String sessionId, CodeAgentConfig config,
+                            CodeAgentSession session, WebSocketApprovalHandler approvalHandler,
+                            String workspaceId) {
+            this(sessionId, config, session, approvalHandler, System.currentTimeMillis(), workspaceId);
         }
 
         public Agent agent() {

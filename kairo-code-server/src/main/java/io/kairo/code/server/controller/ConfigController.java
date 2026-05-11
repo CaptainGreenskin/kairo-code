@@ -2,6 +2,8 @@ package io.kairo.code.server.controller;
 
 import io.kairo.code.server.config.ConfigPersistenceService;
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
+import io.kairo.code.server.config.WorkspaceConfig;
+import io.kairo.code.server.config.WorkspacePersistenceService;
 import io.kairo.code.server.dto.FileContentResponse;
 import io.kairo.code.server.dto.FileEntry;
 import io.kairo.code.server.dto.SearchMatch;
@@ -42,15 +44,32 @@ public class ConfigController {
     private final ServerProperties serverProperties;
     private final AgentService agentService;
     private final ConfigPersistenceService persistenceService;
-    private final Path workingDir;
+    private final WorkspacePersistenceService workspaces;
 
     public ConfigController(ServerProperties serverProperties,
                             AgentService agentService,
-                            ConfigPersistenceService persistenceService) {
+                            ConfigPersistenceService persistenceService,
+                            WorkspacePersistenceService workspaces) {
         this.serverProperties = serverProperties;
         this.agentService = agentService;
         this.persistenceService = persistenceService;
-        this.workingDir = Paths.get(serverProperties.workingDir());
+        this.workspaces = workspaces;
+    }
+
+    /**
+     * Resolve the working directory for a request. When {@code workspaceId} is supplied
+     * (post-M112), look up the workspace and use its {@code workingDir}; otherwise fall
+     * back to the legacy {@link ServerProperties#workingDir()} (default workspace's dir).
+     */
+    private Path workingDir(String workspaceId) {
+        if (workspaceId != null && !workspaceId.isBlank()) {
+            return workspaces.findById(workspaceId)
+                    .map(WorkspaceConfig::workingDir)
+                    .map(Paths::get)
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.NOT_FOUND, "Workspace not found: " + workspaceId));
+        }
+        return Paths.get(serverProperties.workingDir());
     }
 
     /**
@@ -72,7 +91,6 @@ public class ConfigController {
         if (request.model() != null) current.put("model", request.model());
         if (request.provider() != null) current.put("provider", request.provider());
         if (request.baseUrl() != null) current.put("baseUrl", request.baseUrl());
-        if (request.workingDir() != null) current.put("workingDir", request.workingDir());
         if (request.thinkingBudget() != null) current.put("thinkingBudget", String.valueOf(request.thinkingBudget()));
 
         persistenceService.save(current);
@@ -80,7 +98,6 @@ public class ConfigController {
         if (request.provider() != null) serverProperties.setProvider(request.provider());
         if (request.model() != null) serverProperties.setModel(request.model());
         if (request.baseUrl() != null) serverProperties.setBaseUrl(request.baseUrl());
-        if (request.workingDir() != null) serverProperties.setWorkingDir(request.workingDir());
         if (request.apiKey() != null) serverProperties.setApiKey(request.apiKey());
         if (request.thinkingBudget() != null) serverProperties.setThinkingBudget(request.thinkingBudget());
 
@@ -144,7 +161,8 @@ public class ConfigController {
     public SearchResponse searchFiles(
             @RequestParam String q,
             @RequestParam(defaultValue = "") String path,
-            @RequestParam(defaultValue = "50") int limit
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) String workspaceId
     ) {
         if (q == null || q.length() < 2) {
             return new SearchResponse(q != null ? q : "", List.of(), false);
@@ -152,13 +170,14 @@ public class ConfigController {
 
         int cappedLimit = Math.min(Math.max(limit, 1), HARD_LIMIT);
 
-        Path base = workingDir;
+        Path wd = workingDir(workspaceId);
+        Path base = wd;
         if (!path.isBlank()) {
             if (path.contains("..")) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
             }
-            base = workingDir.resolve(path).normalize();
-            if (!base.startsWith(workingDir)) {
+            base = wd.resolve(path).normalize();
+            if (!base.startsWith(wd)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
             }
         }
@@ -175,7 +194,7 @@ public class ConfigController {
                     })
                     .filter(p -> {
                         // Skip noise directories
-                        Path relative = workingDir.relativize(p);
+                        Path relative = wd.relativize(p);
                         String first = relative.getNameCount() > 0 ? relative.getName(0).toString() : "";
                         return !SKIP_DIRS.contains(first);
                     })
@@ -186,7 +205,7 @@ public class ConfigController {
                             hasMore.set(true);
                             return;
                         }
-                        String relative = workingDir.relativize(p).toString();
+                        String relative = wd.relativize(p).toString();
                         searchInFile(p, relative, q.toLowerCase(), results, cappedLimit, hasMore);
                     });
         } catch (IOException e) {
@@ -234,7 +253,9 @@ public class ConfigController {
         }
     }
 
-    private static final long MAX_FILE_SIZE = 100_000;
+    /** Max byte size for in-editor reads. 2 MiB covers nearly all source files; Monaco
+     *  starts to drag past this so we'd rather refuse than render a frozen tab. */
+    private static final long MAX_FILE_SIZE = 5L * 1024 * 1024;
 
     /**
      * List subdirectories of an arbitrary absolute path for the directory picker.
@@ -271,10 +292,12 @@ public class ConfigController {
      * List directory contents (files + subdirectories).
      */
     @GetMapping("/files")
-    public List<FileEntry> listFiles(@RequestParam(defaultValue = "") String path) {
-        Path dir = workingDir.resolve(path.isBlank() ? "" : path).normalize();
+    public List<FileEntry> listFiles(@RequestParam(defaultValue = "") String path,
+                                     @RequestParam(required = false) String workspaceId) {
+        Path wd = workingDir(workspaceId);
+        Path dir = wd.resolve(path.isBlank() ? "" : path).normalize();
 
-        if (!dir.startsWith(workingDir)) {
+        if (!dir.startsWith(wd)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
         }
 
@@ -286,7 +309,7 @@ public class ConfigController {
             return stream
                     .sorted(Comparator.comparing(Path::getFileName))
                     .map(p -> {
-                        String relative = workingDir.relativize(p).toString();
+                        String relative = wd.relativize(p).toString();
                         try {
                             boolean isDir = Files.isDirectory(p);
                             long size = isDir ? 0 : Files.size(p);
@@ -302,11 +325,12 @@ public class ConfigController {
     }
 
     /**
-     * Read file content (limit 100KB, returns 413 if exceeded).
+     * Read file content (limit 5MB, returns 413 if exceeded).
      */
     @GetMapping("/files/content")
-    public FileContentResponse getFileContent(@RequestParam String path) {
-        Path resolved = resolvePath(path);
+    public FileContentResponse getFileContent(@RequestParam String path,
+                                              @RequestParam(required = false) String workspaceId) {
+        Path resolved = resolvePath(path, workspaceId);
 
         if (!Files.exists(resolved) || Files.isDirectory(resolved)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found: " + path);
@@ -321,7 +345,7 @@ public class ConfigController {
 
         if (size > MAX_FILE_SIZE) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
-                    "File too large: " + (size / 1024) + "KB exceeds 100KB limit");
+                    "File too large: " + (size / 1024) + "KB exceeds " + (MAX_FILE_SIZE / 1024 / 1024) + "MB limit");
         }
 
         String content;
@@ -342,8 +366,9 @@ public class ConfigController {
     @PutMapping("/files/content")
     public Map<String, String> putFileContent(
             @RequestParam String path,
+            @RequestParam(required = false) String workspaceId,
             @RequestBody String content) {
-        Path resolved = resolvePath(path);
+        Path resolved = resolvePath(path, workspaceId);
 
         try {
             Files.createDirectories(resolved.getParent());
@@ -358,8 +383,9 @@ public class ConfigController {
      * Delete a file or directory (recursive) within workingDir.
      */
     @DeleteMapping("/files")
-    public ResponseEntity<Void> deleteFile(@RequestParam String path) {
-        Path resolved = resolvePath(path);
+    public ResponseEntity<Void> deleteFile(@RequestParam String path,
+                                           @RequestParam(required = false) String workspaceId) {
+        Path resolved = resolvePath(path, workspaceId);
         if (!Files.exists(resolved)) {
             return ResponseEntity.notFound().build();
         }
@@ -383,9 +409,10 @@ public class ConfigController {
      * Rename / move a file or directory within workingDir.
      */
     @PostMapping("/files/rename")
-    public Map<String, String> renameFile(@RequestParam String from, @RequestParam String to) {
-        Path src = resolvePath(from);
-        Path dst = resolvePath(to);
+    public Map<String, String> renameFile(@RequestParam String from, @RequestParam String to,
+                                          @RequestParam(required = false) String workspaceId) {
+        Path src = resolvePath(from, workspaceId);
+        Path dst = resolvePath(to, workspaceId);
         if (!Files.exists(src)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Source not found: " + from);
         }
@@ -402,8 +429,9 @@ public class ConfigController {
      * Create a new directory within workingDir.
      */
     @PostMapping("/files/mkdir")
-    public Map<String, String> mkdir(@RequestParam String path) {
-        Path resolved = resolvePath(path);
+    public Map<String, String> mkdir(@RequestParam String path,
+                                     @RequestParam(required = false) String workspaceId) {
+        Path resolved = resolvePath(path, workspaceId);
         try {
             Files.createDirectories(resolved);
             return Map.of("path", path, "status", "ok");
@@ -412,12 +440,13 @@ public class ConfigController {
         }
     }
 
-    private Path resolvePath(String path) {
+    private Path resolvePath(String path, String workspaceId) {
         if (path.contains("..")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
         }
-        Path target = workingDir.resolve(path).normalize();
-        if (!target.startsWith(workingDir)) {
+        Path wd = workingDir(workspaceId);
+        Path target = wd.resolve(path).normalize();
+        if (!target.startsWith(wd)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path traversal not allowed");
         }
         return target;
@@ -427,7 +456,6 @@ public class ConfigController {
         return new ServerConfigResponse(
                 serverProperties.provider(),
                 serverProperties.model(),
-                serverProperties.workingDir(),
                 serverProperties.baseUrl(),
                 serverProperties.apiKey() != null && !serverProperties.apiKey().isBlank(),
                 serverProperties.thinkingBudget()

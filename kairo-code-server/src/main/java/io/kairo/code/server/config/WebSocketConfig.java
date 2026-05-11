@@ -1,42 +1,34 @@
 package io.kairo.code.server.config;
 
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
+import io.kairo.code.server.websocket.AgentWebSocketHandler;
 import io.kairo.code.server.websocket.ShellWebSocketHandler;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
-import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
-import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
-import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
-import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 
 @Configuration
-@EnableWebSocketMessageBroker
 @EnableWebSocket
-public class WebSocketConfig implements WebSocketMessageBrokerConfigurer, WebSocketConfigurer {
+public class WebSocketConfig implements WebSocketConfigurer {
 
-    @Autowired
-    private ServerProperties serverProperties;
+    private final ServerProperties serverProperties;
+    private final AgentWebSocketHandler agentHandler;
+    private final WorkspacePersistenceService workspaces;
 
-    @Override
-    public void configureMessageBroker(MessageBrokerRegistry config) {
-        config.enableSimpleBroker("/topic", "/queue");
-        config.setApplicationDestinationPrefixes("/app");
-        config.setUserDestinationPrefix("/user");
-    }
-
-    @Override
-    public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*")
-                .withSockJS();
+    public WebSocketConfig(ServerProperties serverProperties,
+                           AgentWebSocketHandler agentHandler,
+                           WorkspacePersistenceService workspaces) {
+        this.serverProperties = serverProperties;
+        this.agentHandler = agentHandler;
+        this.workspaces = workspaces;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(new ShellWebSocketHandler(serverProperties), "/ws/shell")
+        registry.addHandler(agentHandler, "/ws/agent")
+                .setAllowedOriginPatterns("*");
+        registry.addHandler(new ShellWebSocketHandler(serverProperties, workspaces), "/ws/shell")
                 .setAllowedOriginPatterns("*");
     }
 }

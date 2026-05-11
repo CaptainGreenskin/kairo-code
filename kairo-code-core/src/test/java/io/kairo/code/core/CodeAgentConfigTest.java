@@ -24,7 +24,7 @@ class CodeAgentConfigTest {
     @Test
     void newFieldsDefaultToZero() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         assertThat(config.toolBudgetForce()).isZero();
         assertThat(config.repetitiveToolThreshold()).isZero();
@@ -33,7 +33,7 @@ class CodeAgentConfigTest {
     @Test
     void negativeToolBudgetForce_clampedToZero() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "key", "https://api.openai.com", "gpt-4o", 50, null, null, -10, 0);
+                "key", "https://api.openai.com", "gpt-4o", 50, null, null, -10, 0, null);
 
         assertThat(config.toolBudgetForce()).isZero();
     }
@@ -41,7 +41,7 @@ class CodeAgentConfigTest {
     @Test
     void negativeRepetitiveToolThreshold_clampedToZero() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, -5);
+                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, -5, null);
 
         assertThat(config.repetitiveToolThreshold()).isZero();
     }
@@ -49,9 +49,33 @@ class CodeAgentConfigTest {
     @Test
     void positiveValues_preserved() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "key", "https://api.openai.com", "gpt-4o", 50, "/tmp", null, 80, 6);
+                "key", "https://api.openai.com", "gpt-4o", 50, "/tmp", null, 80, 6, null);
 
         assertThat(config.toolBudgetForce()).isEqualTo(80);
         assertThat(config.repetitiveToolThreshold()).isEqualTo(6);
+    }
+
+    @Test
+    void thinkingBudget_storesValue() {
+        CodeAgentConfig config = new CodeAgentConfig(
+                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, 8000);
+
+        assertThat(config.thinkingBudget()).isEqualTo(8000);
+    }
+
+    @Test
+    void thinkingBudget_defaultsToNull() {
+        CodeAgentConfig config = new CodeAgentConfig(
+                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
+
+        assertThat(config.thinkingBudget()).isNull();
+    }
+
+    @Test
+    void negativeThinkingBudget_clampedToZero() {
+        CodeAgentConfig config = new CodeAgentConfig(
+                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, -100);
+
+        assertThat(config.thinkingBudget()).isZero();
     }
 }

@@ -8,6 +8,13 @@ kairo:
     api-key: ${KAIRO_CODE_API_KEY:placeholder}
     base-url: ${KAIRO_BASE_URL:https://api.openai.com}
     model-name: ${KAIRO_MODEL:gpt-4o}
+  agent:
+    continuation:
+      enabled: true
+      max-nudges: 3
+      max-length-retries: 3
+      tool-activity-lookback: 3
+      min-tool-calls: 2
   code:
     working-dir: ${KAIRO_WORKING_DIR:${user.home}/kairo-workspace}
     api-key: ${KAIRO_CODE_API_KEY:}
@@ -24,3 +31,17 @@ management:
   endpoint:
     health:
       show-details: always
+  # Spring AI's ChatClient observation layer publishes gen_ai.* attrs that Langfuse maps
+  # to input/output/usage automatically — only useful when an OTel SDK is active.
+  observations:
+    enable:
+      spring:
+        ai: true
+
+# Langfuse OTLP exporter — see LangfuseConfig.
+# secret-key falls back to env so dev machines can opt out by simply not setting it.
+langfuse:
+  enabled: ${LANGFUSE_ENABLED:false}
+  host: ${LANGFUSE_HOST:https://langfuse.alibaba-inc.com}
+  public-key: ${LANGFUSE_PUBLIC_KEY:pk-lf-4b4e50f4-4d8c-4268-92e7-29531cb68c9d}
+  secret-key: ${LANGFUSE_SECRET_KEY:sk-lf-92935eec-1f54-4eaf-8798-cb15bd6275a8}

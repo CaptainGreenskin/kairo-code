@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MessageSquare, Wrench, Cpu } from 'lucide-react';
+import { MessageSquare, Wrench, Cpu, BarChart3 } from 'lucide-react';
 import { formatTokenCount } from '@utils/tokenCount';
 
 interface SessionStatsData {
@@ -20,12 +20,13 @@ export function StatsPopover({ stats }: { stats: SessionStatsData }) {
         <div className="relative">
             <button
                 onClick={() => setOpen(v => !v)}
-                className={`text-[10px] px-1.5 py-0.5 rounded font-mono border border-[var(--border)]
-                    hover:bg-[var(--bg-secondary)] transition-colors ${pctColor}`}
-                title="Session stats"
+                className={`p-1.5 rounded transition-colors hover:bg-[var(--bg-secondary)] ${
+                    pct > 80 ? pctColor : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+                title={`Session stats — ~${formatTokenCount(stats.estimatedTokens)}${pct > 80 ? ' (context near limit)' : ''}`}
+                aria-label="Session stats"
             >
-                ~{formatTokenCount(stats.estimatedTokens)}
-                {pct > 80 && ' ⚠'}
+                <BarChart3 size={16} />
             </button>
 
             {open && (

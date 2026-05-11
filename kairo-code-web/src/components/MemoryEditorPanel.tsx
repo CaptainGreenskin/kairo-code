@@ -209,7 +209,7 @@ export function MemoryEditorPanel({ workingDir: _workingDir, onClose }: MemoryEd
                             Loading…
                         </div>
                     ) : isPreview ? (
-                        <div className="h-full overflow-y-auto px-6 py-4 prose prose-sm prose-invert max-w-none
+                        <div className="h-full overflow-y-auto px-6 py-4 prose prose-sm dark:prose-invert max-w-none
                             text-[var(--text-primary)] [&_h1]:text-[var(--text-primary)] [&_h2]:text-[var(--text-primary)]
                             [&_h3]:text-[var(--text-primary)] [&_code]:text-[var(--accent)] [&_a]:text-[var(--accent)]">
                             {content

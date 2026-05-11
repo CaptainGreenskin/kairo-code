@@ -34,9 +34,12 @@ public class ServerConfig {
     private Integer thinkingBudget;
 
     private final ConfigPersistenceService configPersistenceService;
+    private final WorkspacePersistenceService workspacePersistenceService;
 
-    public ServerConfig(ConfigPersistenceService configPersistenceService) {
+    public ServerConfig(ConfigPersistenceService configPersistenceService,
+                        WorkspacePersistenceService workspacePersistenceService) {
         this.configPersistenceService = configPersistenceService;
+        this.workspacePersistenceService = workspacePersistenceService;
     }
 
     @Bean
@@ -46,7 +49,7 @@ public class ServerConfig {
                 props.apiKey(),
                 props.baseUrl(),
                 props.model(),
-                50,
+                Integer.MAX_VALUE,
                 props.workingDir(),
                 null,
                 0,
@@ -73,6 +76,11 @@ public class ServerConfig {
             log.info("Using API key from {}",
                     StringUtils.hasText(apiKey) ? "environment" : "config file");
         }
+
+        // Bootstrap default workspace using legacy workingDir as the fallback. After this returns,
+        // workspaces.json is guaranteed non-empty for fresh installs, so the rest of the system
+        // can rely on having at least one workspace to attach sessions to.
+        workspacePersistenceService.bootstrapIfEmpty(resolvedWorkingDir);
 
         return new ServerProperties(
                 resolvedProvider,

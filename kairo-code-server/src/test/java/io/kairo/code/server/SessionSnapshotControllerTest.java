@@ -1,7 +1,6 @@
 package io.kairo.code.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.controller.SessionSnapshotController;
 import io.kairo.code.server.controller.SessionSnapshotController.SnapshotMeta;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,11 +27,8 @@ class SessionSnapshotControllerTest {
 
     @BeforeEach
     void setUp() {
-        ServerProperties props = new ServerProperties(
-                "openai", "gpt-4o", tempDir.toString(),
-                "https://api.openai.com", "sk-test");
-        controller = new SessionSnapshotController(props, new ObjectMapper());
         sessionsDir = tempDir.resolve(".kairo-code").resolve("sessions");
+        controller = new SessionSnapshotController(sessionsDir, new ObjectMapper());
     }
 
     @Test

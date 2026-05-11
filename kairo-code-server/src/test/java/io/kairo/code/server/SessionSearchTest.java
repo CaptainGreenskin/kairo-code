@@ -1,7 +1,6 @@
 package io.kairo.code.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.controller.SessionSnapshotController;
 import io.kairo.code.server.controller.SessionSnapshotController.SearchHit;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,13 +22,10 @@ class SessionSearchTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        ServerProperties props = new ServerProperties(
-                "openai", "gpt-4o", tempDir.toString(),
-                "https://api.openai.com", "sk-test");
-        controller = new SessionSnapshotController(props, new ObjectMapper());
+        Path sessionsDir = tempDir.resolve(".kairo-code").resolve("sessions");
+        controller = new SessionSnapshotController(sessionsDir, new ObjectMapper());
 
         // Create a snapshot with known content
-        Path sessionsDir = tempDir.resolve(".kairo-code/sessions");
         Files.createDirectories(sessionsDir);
         String snap = """
             {"sessionId":"sess1","name":"Test Session","savedAt":1000,"messages":[

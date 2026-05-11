@@ -2,6 +2,7 @@ package io.kairo.code.server.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
+import io.kairo.code.server.config.WorkspacePersistenceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.socket.CloseStatus;
@@ -11,17 +12,24 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import java.io.File;
 import java.io.InputStream;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.net.URI;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Raw WebSocket terminal bridge — one bash process per WebSocket session.
  *
+ * <p>Uses {@code /usr/bin/script} (BSD/macOS) or {@code script -qfc} (Linux) to allocate
+ * a real PTY so bash sees a controlling terminal — without that, there is no echo,
+ * no PS1, no line editing.
+ *
+ * <p>The connection URL may include {@code ?workspaceId=xxx} so the shell starts in
+ * the workspace's working directory.
+ *
  * <p>Client → Server messages (JSON):
  *   {"type":"input","data":"ls -la\n"}
- *   {"type":"resize","cols":120,"rows":30}   (optional, ignored for now)
+ *   {"type":"resize","cols":120,"rows":30}   (ignored — script doesn't propagate resize)
  *
  * <p>Server → Client messages (JSON):
  *   {"type":"data","data":"output text\r\n"}
@@ -30,35 +38,40 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ShellWebSocketHandler extends AbstractWebSocketHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ShellWebSocketHandler.class);
+    private static final boolean IS_MAC = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final ServerProperties props;
+    private final WorkspacePersistenceService workspaces;
 
-    // sessionId → running bash process
     private final ConcurrentHashMap<String, Process> processes = new ConcurrentHashMap<>();
 
-    public ShellWebSocketHandler(ServerProperties props) {
+    public ShellWebSocketHandler(ServerProperties props, WorkspacePersistenceService workspaces) {
         this.props = props;
+        this.workspaces = workspaces;
     }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        String workingDir = props.workingDir();
-        if (workingDir == null || workingDir.isBlank()) {
-            workingDir = System.getProperty("user.dir");
-        }
+        String workingDir = resolveWorkingDir(session);
 
-        ProcessBuilder pb = new ProcessBuilder("bash", "--norc", "--noprofile")
-                .directory(new File(workingDir))
-                .redirectErrorStream(true);  // merge stderr into stdout for terminal display
+        // Allocate a PTY via /usr/bin/script. Using bash -i so it acts as an interactive shell.
+        // BSD (macOS):  script -q /dev/null bash -i
+        // Linux:        script -qfc "bash -i" /dev/null
+        ProcessBuilder pb;
+        if (IS_MAC) {
+            pb = new ProcessBuilder("/usr/bin/script", "-q", "/dev/null", "/bin/bash", "-i");
+        } else {
+            pb = new ProcessBuilder("/usr/bin/script", "-qfc", "/bin/bash -i", "/dev/null");
+        }
+        pb.directory(new File(workingDir)).redirectErrorStream(true);
         pb.environment().put("TERM", "xterm-256color");
-        pb.environment().put("PS1", "$ ");
+        pb.environment().put("PS1", "\\w $ ");
 
         Process proc = pb.start();
         processes.put(session.getId(), proc);
         log.info("Shell started for session {} in {}", session.getId(), workingDir);
 
-        // Background thread: read bash output and send to WebSocket client
         Thread reader = new Thread(() -> {
             try (InputStream in = proc.getInputStream()) {
                 byte[] buf = new byte[4096];
@@ -92,6 +105,28 @@ public class ShellWebSocketHandler extends AbstractWebSocketHandler {
         reader.start();
     }
 
+    private String resolveWorkingDir(WebSocketSession session) {
+        URI uri = session.getUri();
+        if (uri != null && uri.getQuery() != null) {
+            for (String part : uri.getQuery().split("&")) {
+                int eq = part.indexOf('=');
+                if (eq > 0 && "workspaceId".equals(part.substring(0, eq))) {
+                    String wsid = part.substring(eq + 1);
+                    if (!wsid.isBlank()) {
+                        var wsOpt = workspaces.findById(wsid);
+                        if (wsOpt.isPresent()) {
+                            return wsOpt.get().workingDir();
+                        }
+                        log.warn("Shell: workspaceId {} not found, falling back to default", wsid);
+                    }
+                }
+            }
+        }
+        String dir = props.workingDir();
+        if (dir == null || dir.isBlank()) dir = System.getProperty("user.dir");
+        return dir;
+    }
+
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         Map<?, ?> msg = mapper.readValue(message.getPayload(), Map.class);
@@ -104,7 +139,6 @@ public class ShellWebSocketHandler extends AbstractWebSocketHandler {
                 proc.getOutputStream().flush();
             }
         }
-        // "resize" messages are ignored for now (no PTY)
     }
 
     @Override

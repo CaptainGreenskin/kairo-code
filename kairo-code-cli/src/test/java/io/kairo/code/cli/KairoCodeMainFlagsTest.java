@@ -59,7 +59,7 @@ class KairoCodeMainFlagsTest {
         // --tool-budget 0 means CodeAgentConfig.toolBudgetForce = 0
         // which tells ToolBudgetHook to use its env/default value
         CodeAgentConfig config = new CodeAgentConfig(
-                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         assertThat(config.toolBudgetForce()).isZero();
     }
@@ -68,7 +68,7 @@ class KairoCodeMainFlagsTest {
     void toolBudgetFifty_force50_warn30() {
         // --tool-budget 50 → force=50, warn=30 (60% of 50, floored)
         CodeAgentConfig config = new CodeAgentConfig(
-                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 50, 0);
+                "key", "https://api.openai.com", "gpt-4o", 50, null, null, 50, 0, null);
 
         assertThat(config.toolBudgetForce()).isEqualTo(50);
         // Verify the 60% calculation (done in CodeAgentFactory):

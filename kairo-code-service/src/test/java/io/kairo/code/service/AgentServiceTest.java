@@ -85,6 +85,6 @@ class AgentServiceTest {
 
     private static CodeAgentConfig testConfig() {
         return new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
     }
 }

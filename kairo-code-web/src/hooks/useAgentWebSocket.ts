@@ -1,54 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
-import SockJS from 'sockjs-client';
 import type { AgentEvent, ConnectionStatus } from '@/types/agent';
 import { useSessionStore } from '@store/sessionStore';
 
-const WS_ENDPOINT = '/ws';
-const SUBSCRIBE_PREFIX = '/topic/session';
-const SEND_DESTINATIONS = {
-    message: '/app/agent/message',
-    approve: '/app/agent/approve',
-    stop: '/app/agent/stop',
-    create: '/app/agent/create',
-    bindSession: '/app/agent/bind-session',
-} as const;
+/**
+ * Agent WebSocket hook — talks to /ws/agent over native WebSocket + JSON.
+ *
+ * Wire protocol (mirrors AgentWebSocketHandler.java):
+ *
+ *   client → server  {"action":"bind"|"create"|"message"|"approve"|"stop", ...}
+ *   server → client  AgentEvent JSON OR {"type":"SESSION_CREATED",...} OR {"type":"ERR",...}
+ */
 
+const WS_PATH = '/ws/agent';
 const SESSION_STORAGE_KEY = 'kairo-code-session-id';
+const RECONNECT_MAX_DELAY = 30_000;
+const STALLED_RUNNING_TIMEOUT_MS = 10_000;
 
-/** Timer handle for the stalled running-state probe. */
-let stalledRunningTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * Cancel the stalled running-state probe timer.
- */
-function clearStalledRunningTimer() {
-    if (stalledRunningTimer) {
-        clearTimeout(stalledRunningTimer);
-        stalledRunningTimer = null;
-    }
-}
-
-/**
- * Start a 10s probe timer after receiving SESSION_RESTORED with running=true.
- * If no agent activity arrives within 10s, call the REST cancel endpoint to
- * reset the server-side runningState.
- */
-function startStalledRunningProbe(sessionId: string) {
-    clearStalledRunningTimer();
-    stalledRunningTimer = setTimeout(() => {
-        stalledRunningTimer = null;
-        console.warn('[WebSocket] SESSION_RESTORED running=true with no activity for 10s — cancelling stuck state');
-        fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' }).catch(() => {});
-    }, 10_000);
+function buildWsUrl(): string {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}${WS_PATH}`;
 }
 
 /**
  * Transform backend AgentEvent record (flat fields) to frontend AgentEvent (payload-based).
- *
- * Backend record: {type, sessionId, content, toolName, toolInput, requiresApproval,
- *                  toolCallId, toolResult, tokenUsage, cost, errorMessage, errorType, timestamp}
- * Frontend type:  {type, sessionId, payload, timestamp}
  */
 function transformEvent(raw: Record<string, unknown>): AgentEvent {
     const type = raw.type as string;
@@ -81,10 +55,7 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
         case 'AGENT_DONE':
             return {
                 type: 'AGENT_DONE', sessionId, timestamp: ts,
-                payload: {
-                    inputTokens: (raw.tokenUsage as number) ?? 0,
-                    outputTokens: 0,
-                },
+                payload: { inputTokens: (raw.tokenUsage as number) ?? 0, outputTokens: 0 },
             };
         case 'AGENT_ERROR':
             return {
@@ -97,14 +68,12 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
         case 'AGENT_THINKING':
             return {
                 type: 'AGENT_THINKING', sessionId, timestamp: ts,
-                payload: { isThinking: true },
+                payload: { isThinking: true, text: (raw.content as string) ?? '' },
             };
         case 'SESSION_RESTORED': {
-            // content field holds JSON: {messages: [...], running: boolean}
-            const content = raw.content as string;
             let parsed: { messages: unknown[]; running: boolean };
             try {
-                parsed = JSON.parse(content);
+                parsed = JSON.parse(raw.content as string);
             } catch {
                 parsed = { messages: [], running: false };
             }
@@ -113,34 +82,20 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 payload: parsed as import('@/types/agent').SessionRestoredPayload,
             };
         }
-        case 'PLAN_STEPS': {
-            // content field holds JSON array of step strings
-            const stepsContent = raw.content as string;
-            let steps: string[];
+        case 'TODOS_UPDATED': {
+            let todos: import('@/types/agent').Todo[];
             try {
-                steps = JSON.parse(stepsContent);
+                const parsed = JSON.parse((raw.content as string) ?? '[]');
+                todos = Array.isArray(parsed) ? parsed : [];
             } catch {
-                steps = [];
+                todos = [];
             }
-            return {
-                type: 'PLAN_STEPS', sessionId, timestamp: ts,
-                payload: { steps },
-            };
-        }
-        case 'PLAN_STEP_DONE': {
-            // content field holds the step index as string
-            const stepIndex = parseInt(raw.content as string, 10);
-            return {
-                type: 'PLAN_STEP_DONE', sessionId, timestamp: ts,
-                payload: { stepIndex: isNaN(stepIndex) ? -1 : stepIndex },
-            };
+            return { type: 'TODOS_UPDATED', sessionId, timestamp: ts, payload: { todos } };
         }
         case 'CONTEXT_COMPACTED': {
-            // content field holds JSON: {beforeTokens, maxTokens, ratio}
-            const compactContent = raw.content as string;
             let parsed: { beforeTokens: number; maxTokens: number; ratio: number };
             try {
-                const obj = JSON.parse(compactContent ?? '{}');
+                const obj = JSON.parse((raw.content as string) ?? '{}');
                 parsed = {
                     beforeTokens: typeof obj.beforeTokens === 'number' ? obj.beforeTokens : 0,
                     maxTokens: typeof obj.maxTokens === 'number' ? obj.maxTokens : 0,
@@ -149,13 +104,13 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
             } catch {
                 parsed = { beforeTokens: 0, maxTokens: 0, ratio: 0 };
             }
-            return {
-                type: 'CONTEXT_COMPACTED', sessionId, timestamp: ts,
-                payload: parsed,
-            };
+            return { type: 'CONTEXT_COMPACTED', sessionId, timestamp: ts, payload: parsed };
         }
         default:
-            return { type: 'AGENT_ERROR', sessionId, timestamp: ts, payload: { message: `Unknown event type: ${type}` } };
+            return {
+                type: 'AGENT_ERROR', sessionId, timestamp: ts,
+                payload: { message: `Unknown event type: ${type}` },
+            };
     }
 }
 
@@ -163,13 +118,18 @@ interface UseAgentWebSocketReturn {
     isConnected: boolean;
     isThinking: boolean;
     connectionStatus: ConnectionStatus;
-    stompClient: Client | null;
     connect: () => void;
     disconnect: () => void;
     sendMessage: (sessionId: string, text: string, imageData?: string, imageMediaType?: string) => void;
-    approveTool: (sessionId: string, toolCallId: string, approved: boolean) => void;
+    approveTool: (
+        sessionId: string,
+        toolCallId: string,
+        approved: boolean,
+        reason?: string,
+        editedArgs?: Record<string, unknown>,
+    ) => void;
     stopAgent: (sessionId: string) => void;
-    createSession: (workingDir: string) => Promise<string>;
+    createSession: (workspaceId: string) => Promise<string>;
     bindSession: (sessionId: string) => void;
     switchSession: (sessionId: string) => void;
 }
@@ -180,339 +140,290 @@ export function useAgentWebSocket(
     const [isConnected, setIsConnected] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
-    const clientRef = useRef<Client | null>(null);
-    const subscriptionRef = useRef<StompSubscription | null>(null);
+
+    const wsRef = useRef<WebSocket | null>(null);
     const reconnectAttemptsRef = useRef(0);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const stalledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onEventRef = useRef(onEvent);
     const sessionIdRef = useRef<string | null>(null);
+    const createPendingRef = useRef<{
+        resolve: (sid: string) => void;
+        reject: (err: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+    } | null>(null);
 
-    useEffect(() => {
-        onEventRef.current = onEvent;
-    }, [onEvent]);
+    useEffect(() => { onEventRef.current = onEvent; }, [onEvent]);
 
-    const cleanup = useCallback(() => {
+    const clearStalledTimer = useCallback(() => {
+        if (stalledTimerRef.current) {
+            clearTimeout(stalledTimerRef.current);
+            stalledTimerRef.current = null;
+        }
+    }, []);
+
+    const startStalledProbe = useCallback((sid: string) => {
+        clearStalledTimer();
+        stalledTimerRef.current = setTimeout(() => {
+            stalledTimerRef.current = null;
+            console.warn('[ws] SESSION_RESTORED running=true with no activity for 10s — cancelling');
+            fetch(`/api/sessions/${sid}/cancel`, { method: 'POST' }).catch(() => {});
+        }, STALLED_RUNNING_TIMEOUT_MS);
+    }, [clearStalledTimer]);
+
+    const send = useCallback((payload: Record<string, unknown>) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.warn('[ws] not open, cannot send', payload.action);
+            return false;
+        }
+        ws.send(JSON.stringify(payload));
+        return true;
+    }, []);
+
+    const handleIncoming = useCallback((data: string) => {
+        let raw: Record<string, unknown>;
+        try {
+            raw = JSON.parse(data);
+        } catch {
+            console.warn('[ws] bad JSON:', data);
+            return;
+        }
+
+        const type = raw.type as string;
+
+        // Server → client envelopes that aren't AgentEvents
+        if (type === 'SESSION_CREATED') {
+            const sid = raw.sessionId as string;
+            sessionIdRef.current = sid;
+            sessionStorage.setItem(SESSION_STORAGE_KEY, sid);
+            const pending = createPendingRef.current;
+            if (pending) {
+                clearTimeout(pending.timer);
+                createPendingRef.current = null;
+                pending.resolve(sid);
+            }
+            return;
+        }
+        if (type === 'ERR') {
+            console.warn('[ws] server error:', raw.message);
+            const pending = createPendingRef.current;
+            if (pending && raw.action === 'create') {
+                clearTimeout(pending.timer);
+                createPendingRef.current = null;
+                pending.reject(new Error(String(raw.message ?? 'create failed')));
+            }
+            return;
+        }
+
+        // Otherwise an AgentEvent
+        const event = transformEvent(raw);
+        if (event.type === 'AGENT_THINKING') {
+            const p = event.payload as { isThinking: boolean };
+            setIsThinking(p.isThinking);
+            clearStalledTimer();
+        }
+        if (event.type === 'TEXT_CHUNK' || event.type === 'TOOL_CALL') {
+            clearStalledTimer();
+        }
+        if (event.type === 'SESSION_RESTORED') {
+            const p = event.payload as { running: boolean };
+            if (p.running) startStalledProbe(event.sessionId);
+        }
+        if (event.type === 'AGENT_ERROR') {
+            const p = event.payload as { errorType?: string };
+            if (p.errorType === 'SESSION_NOT_FOUND') {
+                sessionIdRef.current = null;
+                sessionStorage.removeItem(SESSION_STORAGE_KEY);
+            }
+        }
+        onEventRef.current(event);
+    }, [clearStalledTimer, startStalledProbe]);
+
+    const cleanupSocket = useCallback(() => {
+        const ws = wsRef.current;
+        if (!ws) return;
+        wsRef.current = null;
+        // Detach handlers so close events don't trigger reconnect
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            try { ws.close(); } catch {}
+        }
+    }, []);
+
+    const connect = useCallback(() => {
+        if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) {
+            return; // already connecting / connected
+        }
         if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
         }
-        clearStalledRunningTimer();
-        if (subscriptionRef.current) {
-            subscriptionRef.current.unsubscribe();
-            subscriptionRef.current = null;
-        }
-        if (clientRef.current) {
-            clientRef.current.deactivate();
-            clientRef.current = null;
-        }
-        // Note: reconnectAttemptsRef is NOT reset here. The exponential backoff
-        // counter is owned by onConnect (success → 0) and disconnect (explicit → 0).
-        // Resetting on every cleanup would defeat the backoff because cleanup() is
-        // called at the start of every createConnection() retry — the delay would
-        // stay pegged at 1s forever.
-    }, []);
 
-    const createConnection = useCallback(() => {
-            cleanup();
-            setConnectionStatus('connecting');
+        setConnectionStatus('connecting');
+        const ws = new WebSocket(buildWsUrl());
+        wsRef.current = ws;
 
-            const client = new Client({
-                webSocketFactory: () => new SockJS(WS_ENDPOINT),
-                reconnectDelay: 0,
-                // Spring SockJS only sends SockJS-level heartbeats, not STOMP-level ones.
-                // Setting heartbeatIncoming > 0 would cause the client to disconnect every 10s.
-                heartbeatIncoming: 0,
-                heartbeatOutgoing: 10000,
-                onConnect: () => {
-                    setIsConnected(true);
-                    setConnectionStatus('connected');
-                    reconnectAttemptsRef.current = 0;
+        ws.onopen = () => {
+            setIsConnected(true);
+            setConnectionStatus('connected');
+            reconnectAttemptsRef.current = 0;
 
-                    // Resolve session ID from cascading sources:
-                    // 1. Already-bound ref (e.g., after createSession)
-                    // 2. Zustand store (e.g., after handleSelectSession set the new ID)
-                    // 3. sessionStorage (e.g., after page reload)
-                    let sid = sessionIdRef.current;
-                    if (!sid) {
-                        sid = useSessionStore.getState().sessionId;
-                    }
-                    if (!sid) {
-                        sid = sessionStorage.getItem(SESSION_STORAGE_KEY);
-                    }
+            // Resolve session ID from cascading sources
+            let sid = sessionIdRef.current
+                || useSessionStore.getState().sessionId
+                || sessionStorage.getItem(SESSION_STORAGE_KEY);
+            if (sid) {
+                sessionIdRef.current = sid;
+                sessionStorage.setItem(SESSION_STORAGE_KEY, sid);
+                send({ action: 'bind', sessionId: sid });
+            }
+        };
 
-                    if (!sid) return;
+        ws.onmessage = (e) => {
+            handleIncoming(typeof e.data === 'string' ? e.data : '');
+        };
 
-                    // Persist resolved session ID
-                    sessionIdRef.current = sid;
-                    sessionStorage.setItem(SESSION_STORAGE_KEY, sid);
+        ws.onerror = (e) => {
+            console.warn('[ws] error', e);
+            setConnectionStatus('error');
+        };
 
-                    subscriptionRef.current = client.subscribe(
-                        `${SUBSCRIBE_PREFIX}/${sid}`,
-                        (message: IMessage) => {
-                            try {
-                                const raw = JSON.parse(message.body);
-                                // CreateSessionResponse also arrives on this topic
-                                if ('workingDir' in raw && 'model' in raw && !('type' in raw)) {
-                                    const resp = raw as { sessionId: string };
-                                    sessionIdRef.current = resp.sessionId;
-                                    onEventRef.current({
-                                        type: 'AGENT_THINKING',
-                                        sessionId: resp.sessionId,
-                                        payload: { isThinking: false },
-                                        timestamp: Date.now(),
-                                    } as AgentEvent);
-                                    return;
-                                }
-                                const event = transformEvent(raw);
-                                if (event.type === 'AGENT_THINKING') {
-                                    const payload = event.payload as {
-                                        isThinking: boolean;
-                                    };
-                                    setIsThinking(payload.isThinking);
-                                    clearStalledRunningTimer();
-                                }
-                                if (event.type === 'TEXT_CHUNK' || event.type === 'TOOL_CALL') {
-                                    clearStalledRunningTimer();
-                                }
-                                if (event.type === 'SESSION_RESTORED') {
-                                    const p = event.payload as { running: boolean };
-                                    if (p.running) {
-                                        startStalledRunningProbe(event.sessionId);
-                                    }
-                                }
-                                if (event.type === 'AGENT_ERROR') {
-                                    const p = event.payload as { errorType?: string };
-                                    if (p.errorType === 'SESSION_NOT_FOUND') {
-                                        sessionIdRef.current = null;
-                                        sessionStorage.removeItem(SESSION_STORAGE_KEY);
-                                    }
-                                }
-                                onEventRef.current(event);
-                            } catch {
-                                console.warn(
-                                    '[WebSocket] Failed to parse message:',
-                                    message.body,
-                                );
-                            }
-                        },
-                    );
-
-                    // Publish bind-session to request history restore.
-                    // Safe to call even for fresh sessions (backend returns empty messages).
-                    client.publish({
-                        destination: SEND_DESTINATIONS.bindSession,
-                        body: JSON.stringify({ sessionId: sid }),
-                    });
-                },
-                onStompError: (frame) => {
-                    console.error('[WebSocket] STOMP error:', frame);
-                    setIsConnected(false);
-                    setConnectionStatus('error');
-                },
-                onWebSocketClose: () => {
-                    setIsConnected(false);
-                    setConnectionStatus('disconnected');
-                    // Auto-reconnect with exponential backoff (1s → 2s → 4s → … → 30s cap), infinite attempts
-                    if (sessionIdRef.current) {
-                        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
-                        reconnectAttemptsRef.current += 1;
-                        reconnectTimerRef.current = setTimeout(() => {
-                            reconnectTimerRef.current = null;
-                            createConnection();
-                        }, delay);
-                    }
-                },
-                onWebSocketError: (event) => {
-                    // Transient errors are expected during reconnects — keep at warn level.
-                    console.warn('[WebSocket] WS error:', event);
-                    setConnectionStatus('error');
-                },
-            });
-
-            clientRef.current = client;
-            client.activate();
-        },
-        [cleanup],
-    );
+        ws.onclose = () => {
+            setIsConnected(false);
+            setConnectionStatus('disconnected');
+            wsRef.current = null;
+            // Always reconnect with exponential backoff. Earlier this only fired when
+            // sessionIdRef.current was set, which left the UI stuck at "Disconnected"
+            // after a server restart wiped the session — the frontend would clear sid
+            // (via SESSION_NOT_FOUND) and then refuse to retry forever. Reconnecting
+            // unconditionally lets the user create a fresh session over the new socket.
+            // disconnect() still wins via cleanupSocket() detaching this handler.
+            if (!reconnectTimerRef.current) {
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), RECONNECT_MAX_DELAY);
+                reconnectAttemptsRef.current += 1;
+                reconnectTimerRef.current = setTimeout(() => {
+                    reconnectTimerRef.current = null;
+                    connect();
+                }, delay);
+            }
+        };
+    }, [handleIncoming, send]);
 
     const disconnect = useCallback(() => {
         sessionIdRef.current = null;
         sessionStorage.removeItem(SESSION_STORAGE_KEY);
-        cleanup();
+        if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+        }
+        clearStalledTimer();
+        cleanupSocket();
         reconnectAttemptsRef.current = 0;
         setIsConnected(false);
         setIsThinking(false);
         setConnectionStatus('disconnected');
-    }, [cleanup]);
-
-    const publish = useCallback(
-        (destination: string, body: Record<string, unknown>) => {
-            if (!clientRef.current?.connected) {
-                console.warn('[WebSocket] Not connected, cannot publish');
-                return;
-            }
-            clientRef.current.publish({
-                destination,
-                body: JSON.stringify(body),
-            });
-        },
-        [],
-    );
+    }, [cleanupSocket, clearStalledTimer]);
 
     const sendMessage = useCallback(
         (sessionId: string, text: string, imageData?: string, imageMediaType?: string) => {
-            const body: Record<string, unknown> = { sessionId, message: text };
+            const body: Record<string, unknown> = { action: 'message', sessionId, message: text };
             if (imageData) {
                 body.imageData = imageData;
                 body.imageMediaType = imageMediaType;
             }
-            publish(SEND_DESTINATIONS.message, body);
+            send(body);
         },
-        [publish],
+        [send],
     );
 
     const approveTool = useCallback(
-        (sessionId: string, toolCallId: string, approved: boolean) => {
-            publish(SEND_DESTINATIONS.approve, { sessionId, toolCallId, approved });
+        (
+            sessionId: string,
+            toolCallId: string,
+            approved: boolean,
+            reason?: string,
+            editedArgs?: Record<string, unknown>,
+        ) => {
+            const body: Record<string, unknown> = { action: 'approve', sessionId, toolCallId, approved };
+            if (reason && reason.trim()) body.reason = reason.trim();
+            if (editedArgs && Object.keys(editedArgs).length > 0) body.editedArgs = editedArgs;
+            send(body);
         },
-        [publish],
+        [send],
     );
 
     const stopAgent = useCallback(
         (sessionId: string) => {
-            publish(SEND_DESTINATIONS.stop, { sessionId });
+            send({ action: 'stop', sessionId });
         },
-        [publish],
+        [send],
     );
 
     const createSession = useCallback(
-        (workingDir: string): Promise<string> => {
-            return new Promise((resolve, reject) => {
-                // Wait up to 5 s for the WebSocket to connect (connect() may still be handshaking)
-                const waitAndCreate = (attemptsLeft: number) => {
-                    if (clientRef.current?.connected) {
-                        doCreate();
+        (workspaceId: string): Promise<string> => {
+            return new Promise<string>((resolve, reject) => {
+                const tryCreate = (attemptsLeft: number) => {
+                    const ws = wsRef.current;
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        if (createPendingRef.current) {
+                            createPendingRef.current.reject(new Error('superseded'));
+                            clearTimeout(createPendingRef.current.timer);
+                        }
+                        const timer = setTimeout(() => {
+                            if (createPendingRef.current) {
+                                createPendingRef.current = null;
+                                reject(new Error('[ws] createSession timeout'));
+                            }
+                        }, 10_000);
+                        createPendingRef.current = { resolve, reject, timer };
+                        send({ action: 'create', workspaceId });
                     } else if (attemptsLeft > 0) {
-                        setTimeout(() => waitAndCreate(attemptsLeft - 1), 200);
+                        setTimeout(() => tryCreate(attemptsLeft - 1), 200);
                     } else {
-                        reject(new Error('[WebSocket] Not connected'));
+                        reject(new Error('[ws] not connected'));
                     }
                 };
-
-                const doCreate = () => {
-                    const timeout = setTimeout(() => {
-                        sub?.unsubscribe();
-                        reject(new Error('[WebSocket] createSession timeout'));
-                    }, 10000);
-                    const sub = clientRef.current!.subscribe('/topic/session/created', (message: IMessage) => {
-                        try {
-                            const resp = JSON.parse(message.body) as { sessionId: string };
-                            sub.unsubscribe();
-                            clearTimeout(timeout);
-                            sessionIdRef.current = resp.sessionId;
-                            sessionStorage.setItem(SESSION_STORAGE_KEY, resp.sessionId);
-                            resolve(resp.sessionId);
-                        } catch (e) {
-                            sub.unsubscribe();
-                            clearTimeout(timeout);
-                            reject(e);
-                        }
-                    });
-                    clientRef.current!.publish({
-                        destination: SEND_DESTINATIONS.create,
-                        body: JSON.stringify({ workingDir }),
-                    });
-                };
-
-                waitAndCreate(25); // up to 5 s (25 × 200 ms)
+                tryCreate(25); // up to 5 s
             });
         },
-        [],
+        [send],
     );
 
     const bindSession = useCallback(
         (sessionId: string) => {
             sessionIdRef.current = sessionId;
             sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-            publish(SEND_DESTINATIONS.bindSession, { sessionId });
+            send({ action: 'bind', sessionId });
         },
-        [publish],
+        [send],
     );
 
     const switchSession = useCallback(
         (sid: string) => {
-            if (!clientRef.current?.connected) {
-                console.warn('[WebSocket] Not connected, cannot switch session');
-                return;
-            }
-            if (subscriptionRef.current) {
-                subscriptionRef.current.unsubscribe();
-                subscriptionRef.current = null;
-            }
             sessionIdRef.current = sid;
             sessionStorage.setItem(SESSION_STORAGE_KEY, sid);
-            subscriptionRef.current = clientRef.current.subscribe(
-                `${SUBSCRIBE_PREFIX}/${sid}`,
-                (message: IMessage) => {
-                    try {
-                        const raw = JSON.parse(message.body);
-                        if ('workingDir' in raw && 'model' in raw && !('type' in raw)) {
-                            const resp = raw as { sessionId: string };
-                            sessionIdRef.current = resp.sessionId;
-                            onEventRef.current({
-                                type: 'AGENT_THINKING',
-                                sessionId: resp.sessionId,
-                                payload: { isThinking: false },
-                                timestamp: Date.now(),
-                            } as AgentEvent);
-                            return;
-                        }
-                        const event = transformEvent(raw);
-                        if (event.type === 'AGENT_THINKING') {
-                            const payload = event.payload as { isThinking: boolean };
-                            setIsThinking(payload.isThinking);
-                            clearStalledRunningTimer();
-                        }
-                        if (event.type === 'TEXT_CHUNK' || event.type === 'TOOL_CALL') {
-                            clearStalledRunningTimer();
-                        }
-                        if (event.type === 'SESSION_RESTORED') {
-                            const p = event.payload as { running: boolean };
-                            if (p.running) {
-                                startStalledRunningProbe(event.sessionId);
-                            }
-                        }
-                        if (event.type === 'AGENT_ERROR') {
-                            const p = event.payload as { errorType?: string };
-                            if (p.errorType === 'SESSION_NOT_FOUND') {
-                                sessionIdRef.current = null;
-                                sessionStorage.removeItem(SESSION_STORAGE_KEY);
-                            }
-                        }
-                        onEventRef.current(event);
-                    } catch {
-                        console.warn('[WebSocket] Failed to parse message:', message.body);
-                    }
-                },
-            );
-            clientRef.current.publish({
-                destination: SEND_DESTINATIONS.bindSession,
-                body: JSON.stringify({ sessionId: sid }),
-            });
+            send({ action: 'bind', sessionId: sid });
         },
-        [],
+        [send],
     );
 
     useEffect(() => {
-        return cleanup;
-    }, [cleanup]);
+        return () => {
+            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+            clearStalledTimer();
+            cleanupSocket();
+        };
+    }, [cleanupSocket, clearStalledTimer]);
 
     return {
         isConnected,
         isThinking,
         connectionStatus,
-        stompClient: clientRef.current,
-        connect: createConnection,
+        connect,
         disconnect,
         sendMessage,
         approveTool,

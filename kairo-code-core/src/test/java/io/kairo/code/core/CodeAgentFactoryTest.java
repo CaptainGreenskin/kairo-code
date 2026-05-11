@@ -53,7 +53,7 @@ class CodeAgentFactoryTest {
     @Test
     void createReturnsNonNullAgent() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         Agent agent = CodeAgentFactory.create(config, new StubModelProvider());
 
@@ -63,7 +63,7 @@ class CodeAgentFactoryTest {
     @Test
     void agentHasCorrectName() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         Agent agent = CodeAgentFactory.create(config, new StubModelProvider());
 
@@ -72,7 +72,7 @@ class CodeAgentFactoryTest {
 
     @Test
     void configDefaultsAreApplied() {
-        CodeAgentConfig config = new CodeAgentConfig("test-key", null, null, 0, null, null, 0, 0);
+        CodeAgentConfig config = new CodeAgentConfig("test-key", null, null, 0, null, null, 0, 0, null);
 
         assertThat(config.baseUrl()).isEqualTo("https://api.openai.com");
         assertThat(config.modelName()).isEqualTo("gpt-4o");
@@ -81,7 +81,7 @@ class CodeAgentFactoryTest {
 
     @Test
     void configRejectsBlankApiKey() {
-        assertThatThrownBy(() -> new CodeAgentConfig("", null, null, 0, null, null, 0, 0))
+        assertThatThrownBy(() -> new CodeAgentConfig("", null, null, 0, null, null, 0, 0, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("apiKey");
     }
@@ -89,7 +89,7 @@ class CodeAgentFactoryTest {
     @Test
     void shouldRegisterExpandedToolSet() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         var session = CodeAgentFactory.createSession(config,
                 CodeAgentFactory.SessionOptions.empty().withModelProvider(new StubModelProvider()));
@@ -148,7 +148,7 @@ class CodeAgentFactoryTest {
     @Test
     void withToolUsageTracker_injectsToolInsightsIntoSystemPrompt() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         ToolUsageTracker tracker = new ToolUsageTracker();
         ToolResult ok = new ToolResult("id", "out", false, Map.of());
@@ -174,7 +174,7 @@ class CodeAgentFactoryTest {
     @Test
     void withoutToolUsageTracker_systemPromptHasNoToolInsightsSection() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         CapturingModelProvider model = new CapturingModelProvider();
         var session = CodeAgentFactory.createSession(
@@ -191,7 +191,7 @@ class CodeAgentFactoryTest {
     @Test
     void nullMcpConfigCreatesSessionWithNullMcpRegistry() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0);
+                "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         var session = CodeAgentFactory.createSession(config,
                 CodeAgentFactory.SessionOptions.empty().withModelProvider(new StubModelProvider()));
@@ -204,7 +204,7 @@ class CodeAgentFactoryTest {
     void systemPromptContainsSessionContextWithDate() {
         CodeAgentConfig config = new CodeAgentConfig(
                 "test-api-key", "https://api.openai.com", "gpt-4o", 50,
-                "/tmp", null, 0, 0);
+                "/tmp", null, 0, 0, null);
 
         CapturingModelProvider model = new CapturingModelProvider();
         var session = CodeAgentFactory.createSession(
@@ -229,7 +229,7 @@ class CodeAgentFactoryTest {
 
         CodeAgentConfig config = new CodeAgentConfig(
                 "test-api-key", "https://api.openai.com", "gpt-4o", 50,
-                tempDir.toString(), null, 0, 0);
+                tempDir.toString(), null, 0, 0, null);
 
         CapturingModelProvider model = new CapturingModelProvider();
         var session = CodeAgentFactory.createSession(

@@ -56,7 +56,7 @@ export function ContextHealthIndicator({ tokenUsage, maxTokens, isCompacting }: 
 
     return (
         <div
-            className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[var(--bg-hover)] text-xs"
+            className="flex items-center gap-1 px-1 py-0.5 text-[11px]"
             title={`Context: ${tokenUsage.toLocaleString()} / ${maxTokens.toLocaleString()} tokens`}
             data-testid="context-health-indicator"
             aria-label={`Context usage ${pct}%${justCompacted ? ', just compacted' : ''}`}

@@ -5,7 +5,12 @@ import { ToolCallCard } from './ToolCallCard';
 
 interface ToolCallGroupProps {
     toolCalls: ToolCall[];
-    onApprove?: (toolCallId: string, approved: boolean) => void;
+    onApprove?: (
+        toolCallId: string,
+        approved: boolean,
+        reason?: string,
+        editedArgs?: Record<string, unknown>,
+    ) => void;
     isStreaming?: boolean;
 }
 
@@ -82,36 +87,69 @@ export function ToolCallGroup({ toolCalls, onApprove, isStreaming }: ToolCallGro
                         className={`transition-transform ${expanded ? 'rotate-90' : ''} ${iconColor}`}
                     />
                 )}
-                <span className="font-mono font-medium text-[var(--text-primary)]">
+                <span className="font-mono font-medium text-[var(--text-primary)] shrink-0">
                     {toolCalls.length} tool calls
                 </span>
-                <span className="text-[var(--text-muted)]">·</span>
-                <span>{toolSummary}</span>
+                <span className="text-[var(--text-muted)] shrink-0">·</span>
+                <span className="truncate min-w-0 flex-1">{toolSummary}</span>
                 {totalDuration > 0 && (
                     <>
-                        <span className="text-[var(--text-muted)]">·</span>
-                        <span>{(totalDuration / 1000).toFixed(1)}s</span>
+                        <span className="text-[var(--text-muted)] shrink-0">·</span>
+                        <span className="shrink-0">{(totalDuration / 1000).toFixed(1)}s</span>
                     </>
                 )}
-                <div className="ml-auto flex items-center gap-0.5">
-                    {toolCalls.map((tc) => (
+                <div className="ml-2 flex items-center gap-0.5 shrink-0">
+                    {toolCalls.slice(0, 16).map((tc) => (
                         <div
                             key={tc.id}
                             className={`w-1.5 h-1.5 rounded-full ${getStatusDotClass(tc.status)}`}
                         />
                     ))}
+                    {toolCalls.length > 16 && (
+                        <span className="ml-1 text-[10px] text-[var(--text-muted)] font-mono">
+                            +{toolCalls.length - 16}
+                        </span>
+                    )}
                 </div>
             </button>
 
             {expanded && (
                 <div className="space-y-2">
-                    {toolCalls.map((tc) => (
-                        <ToolCallCard
-                            key={tc.id}
-                            toolCall={tc}
-                            onApprove={onApprove}
-                        />
-                    ))}
+                    {(() => {
+                        // Find the LAST exit_plan_mode call. Earlier ones are superseded
+                        // (the agent retried) and are rendered as compact rows so the chat
+                        // doesn't fill up with stale plan-approval cards.
+                        let lastPlanIdx = -1;
+                        toolCalls.forEach((tc, i) => {
+                            if (tc.toolName === 'exit_plan_mode') lastPlanIdx = i;
+                        });
+                        return toolCalls.map((tc, i) => {
+                            const isSupersededPlan =
+                                tc.toolName === 'exit_plan_mode' && lastPlanIdx >= 0 && i !== lastPlanIdx;
+                            if (isSupersededPlan) {
+                                return (
+                                    <div
+                                        key={tc.id}
+                                        className="px-3 py-1.5 text-[11px] text-[var(--text-muted)] border border-dashed border-[var(--border)] rounded flex items-center gap-2"
+                                        title="An earlier plan submission that the agent revised"
+                                    >
+                                        <span className="opacity-60">⤳</span>
+                                        <span>Earlier plan submission (superseded)</span>
+                                        {tc.isError && (
+                                            <span className="text-[var(--color-danger)]/70">· error</span>
+                                        )}
+                                    </div>
+                                );
+                            }
+                            return (
+                                <ToolCallCard
+                                    key={tc.id}
+                                    toolCall={tc}
+                                    onApprove={onApprove}
+                                />
+                            );
+                        });
+                    })()}
                 </div>
             )}
         </div>

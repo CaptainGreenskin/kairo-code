@@ -50,7 +50,7 @@ class SkillPlanToolRegistrationTest {
                 List.of(), SkillCategory.GENERAL));
 
         CodeAgentConfig config = new CodeAgentConfig(
-                "k", "https://api.openai.com", "gpt-4o", 10, "/tmp", null, 0, 0);
+                "k", "https://api.openai.com", "gpt-4o", 10, "/tmp", null, 0, 0, null);
         SessionOptions opts = SessionOptions.empty()
                 .withModelProvider(new StubModelProvider())
                 .withSkills(skillRegistry, Set.of("test-skill"));
@@ -62,7 +62,7 @@ class SkillPlanToolRegistrationTest {
     @Test
     void planModeToolsAlwaysRegistered() {
         CodeAgentConfig config = new CodeAgentConfig(
-                "k", "https://api.openai.com", "gpt-4o", 10, null, null, 0, 0);
+                "k", "https://api.openai.com", "gpt-4o", 10, null, null, 0, 0, null);
         assertThatCode(() -> CodeAgentFactory.create(config, new StubModelProvider()))
                 .doesNotThrowAnyException();
     }
@@ -75,7 +75,7 @@ class SkillPlanToolRegistrationTest {
                 List.of(), SkillCategory.GENERAL));
 
         CodeAgentConfig config = new CodeAgentConfig(
-                "k", "https://api.openai.com", "gpt-4o", 10, "/tmp", null, 0, 0);
+                "k", "https://api.openai.com", "gpt-4o", 10, "/tmp", null, 0, 0, null);
         SessionOptions opts = SessionOptions.empty()
                 .withModelProvider(new StubModelProvider())
                 .withSkills(skillRegistry, Set.of("test-skill"));

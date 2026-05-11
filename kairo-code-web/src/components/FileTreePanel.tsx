@@ -24,8 +24,10 @@ interface FileTreePanelProps {
     onMentionFile?: (path: string) => void;
     onOpenInEditor?: (path: string) => void;
     width?: number;
-    trackedFiles?: string[];
-    onOpenFile?: (path: string) => void;
+    rootKey?: string;
+    workspaceId?: string;
+    /** When true, render without the outer toggle column / fixed-width chrome. The container is responsible for sizing. */
+    embedded?: boolean;
 }
 
 type TreeNode = {
@@ -65,6 +67,27 @@ function FileIcon({ name, expanded }: { name: string; expanded?: boolean }) {
         : <File size={14} className="text-[var(--text-muted)] shrink-0" />;
 }
 
+/**
+ * Walk down a chain of single-dir-child directories. Returns [head, ..., tail]
+ * where each but the last has loaded children equal to a single directory.
+ * VS Code-style "compact folders" — collapses runs like `src → main → java → io`
+ * into a single row (`src / main / java / io`) so tall trees stay readable.
+ */
+function buildChain(node: TreeNode): TreeNode[] {
+    if (!node.entry.isDir) return [node];
+    const chain: TreeNode[] = [node];
+    let cur = node;
+    while (
+        cur.children !== undefined &&
+        cur.children.length === 1 &&
+        cur.children[0].entry.isDir
+    ) {
+        cur = cur.children[0];
+        chain.push(cur);
+    }
+    return chain;
+}
+
 function TreeNodeItem({
     node,
     depth,
@@ -82,9 +105,17 @@ function TreeNodeItem({
     onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
     selectedPath?: string;
 }) {
-    const { entry, children, loading, expanded } = node;
-    const isDir = entry.isDir;
-    const isSelected = entry.path === selectedPath;
+    const isDir = node.entry.isDir;
+    const chain = buildChain(node);
+    const isCompact = chain.length > 1;
+    // Tail of the chain is the directory whose children we actually render and
+    // whose expand state drives the chevron. For non-chain rows tail === node.
+    const tail = chain[chain.length - 1];
+    const expanded = isDir ? !!tail.expanded : false;
+    const targetEntry = tail.entry;
+    const targetChildren = tail.children;
+    const targetLoading = tail.loading;
+    const isSelected = targetEntry.path === selectedPath;
 
     return (
         <div>
@@ -93,17 +124,17 @@ function TreeNodeItem({
                     isSelected ? 'bg-[var(--color-primary)]/15' : 'hover:bg-[var(--bg-hover)]'
                 }`}
                 style={{ paddingLeft: `${depth * 12 + 8}px` }}
-                onContextMenu={(e) => onContextMenu(e, entry)}
+                onContextMenu={(e) => onContextMenu(e, targetEntry)}
             >
                 <button
                     className={`flex-1 flex items-center gap-1.5 min-w-0 text-left ${
                         !isDir ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'
                     }`}
                     onClick={() => {
-                        if (isDir) onExpand(entry.path);
-                        else onSelect(entry);
+                        if (isDir) onExpand(targetEntry.path);
+                        else onSelect(node.entry);
                     }}
-                    title={entry.path}
+                    title={targetEntry.path}
                 >
                     {isDir && (
                         <span className="shrink-0 text-[var(--text-muted)]">
@@ -111,14 +142,27 @@ function TreeNodeItem({
                         </span>
                     )}
                     {!isDir && <span className="w-3 shrink-0" />}
-                    <FileIcon name={entry.name} expanded={isDir ? expanded : undefined} />
-                    <span className="truncate">{entry.name}</span>
+                    <FileIcon name={targetEntry.name} expanded={isDir ? expanded : undefined} />
+                    {isCompact ? (
+                        <span className="truncate">
+                            {chain.map((n, i) => (
+                                <span key={n.entry.path}>
+                                    {i > 0 && (
+                                        <span className="text-[var(--text-muted)] mx-1">/</span>
+                                    )}
+                                    {n.entry.name}
+                                </span>
+                            ))}
+                        </span>
+                    ) : (
+                        <span className="truncate">{node.entry.name}</span>
+                    )}
                 </button>
                 {!isDir && onMentionFile && (
                     <button
-                        onClick={(e) => { e.stopPropagation(); onMentionFile(entry.path); }}
+                        onClick={(e) => { e.stopPropagation(); onMentionFile(node.entry.path); }}
                         className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-opacity"
-                        title={`Mention @${entry.name}`}
+                        title={`Mention @${node.entry.name}`}
                     >
                         <AtSign size={11} />
                     </button>
@@ -126,7 +170,7 @@ function TreeNodeItem({
             </div>
             {isDir && expanded && (
                 <div>
-                    {loading && (
+                    {targetLoading && (
                         <div
                             className="flex items-center gap-1.5 py-1 text-xs text-[var(--text-muted)]"
                             style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
@@ -135,7 +179,7 @@ function TreeNodeItem({
                             Loading...
                         </div>
                     )}
-                    {!loading && children?.map((child) => (
+                    {!targetLoading && targetChildren?.map((child) => (
                         <TreeNodeItem
                             key={child.entry.path}
                             node={child}
@@ -147,7 +191,7 @@ function TreeNodeItem({
                             selectedPath={selectedPath}
                         />
                     ))}
-                    {!loading && children && children.length === 0 && (
+                    {!targetLoading && targetChildren && targetChildren.length === 0 && (
                         <div
                             className="py-1 text-xs text-[var(--text-muted)] italic"
                             style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
@@ -229,11 +273,10 @@ function ContextMenuPopup({
     );
 }
 
-export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, onOpenInEditor, width = 240, trackedFiles, onOpenFile }: FileTreePanelProps) {
+export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, onOpenInEditor, width = 240, rootKey, workspaceId, embedded = false }: FileTreePanelProps) {
     const [rootNodes, setRootNodes] = useState<TreeNode[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [workingDir, setWorkingDir] = useState<string>('');
     const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
     const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
 
@@ -241,26 +284,26 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
         setLoading(true);
         setError(null);
         try {
-            const entries = await listFiles(undefined);
+            const entries = await listFiles(undefined, workspaceId);
             setRootNodes(entries.map((e) => ({ entry: e })));
-            if (entries.length > 0) {
-                const first = entries[0];
-                const parts = first.path.split('/').filter(Boolean);
-                setWorkingDir(parts.length > 1 ? parts.slice(0, -1).join('/') : '.');
-            } else {
-                setWorkingDir('.');
-            }
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to load files');
             setRootNodes([]);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [workspaceId]);
 
     useEffect(() => {
         if (isOpen && rootNodes.length === 0 && !loading) loadRoot();
     }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Reload when workingDir changes (e.g. after Settings save) — without this,
+    // FileTreePanel keeps showing the previous workspace's contents.
+    useEffect(() => {
+        if (rootKey === undefined) return;
+        loadRoot();
+    }, [rootKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const updateNodeChildren = useCallback((nodes: TreeNode[], path: string, children: TreeNode[], opts?: { loading?: boolean }): TreeNode[] =>
         nodes.map((node) => {
@@ -272,6 +315,34 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
             }
             return node;
         }), []);
+
+    /**
+     * Recursively load children, cascading into single-dir-children so the entire
+     * compact chain materialises in one round-trip set. The deepest dir whose
+     * children break the chain (>1 entry, or a file) is marked expanded so the
+     * user immediately sees the contents under the compact row.
+     */
+    const loadCascade = useCallback(async (path: string): Promise<TreeNode[]> => {
+        let entries: FileEntry[];
+        try {
+            entries = await listFiles(path, workspaceId);
+        } catch {
+            return [];
+        }
+        const children: TreeNode[] = entries.map((e) => ({ entry: e }));
+        if (children.length === 1 && children[0].entry.isDir) {
+            const grandchildren = await loadCascade(children[0].entry.path);
+            const continuesChain =
+                grandchildren.length === 1 && grandchildren[0].entry.isDir;
+            children[0] = {
+                ...children[0],
+                children: grandchildren,
+                // Auto-open the chain tail so clicking the head reveals contents.
+                expanded: !continuesChain,
+            };
+        }
+        return children;
+    }, [workspaceId]);
 
     const handleExpand = useCallback(async (path: string) => {
         const findNode = (nodes: TreeNode[], target: string): TreeNode | null => {
@@ -297,14 +368,10 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
 
         const current = findNode(rootNodes, path);
         if (current && current.children === undefined) {
-            try {
-                const entries = await listFiles(path);
-                setRootNodes((prev) => updateNodeChildren(prev, path, entries.map((e) => ({ entry: e }))));
-            } catch {
-                setRootNodes((prev) => updateNodeChildren(prev, path, []));
-            }
+            const newChildren = await loadCascade(path);
+            setRootNodes((prev) => updateNodeChildren(prev, path, newChildren));
         }
-    }, [rootNodes, updateNodeChildren]);
+    }, [rootNodes, updateNodeChildren, loadCascade]);
 
     const handleSelectFile = useCallback(async (entry: FileEntry) => {
         setSelectedPath(entry.path);
@@ -318,13 +385,13 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
             return;
         }
         try {
-            const result = await getFileContent(entry.path);
+            const result = await getFileContent(entry.path, workspaceId);
             onInsertFile(entry.path, result.content, result.language);
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to read file');
             setTimeout(() => setError(null), 3000);
         }
-    }, [onInsertFile, onOpenInEditor]);
+    }, [onInsertFile, onOpenInEditor, workspaceId]);
 
     const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry) => {
         e.preventDefault();
@@ -340,7 +407,7 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
             case 'insert': {
                 if (entry.size > 100_000) { setError('File too large'); return; }
                 try {
-                    const result = await getFileContent(entry.path);
+                    const result = await getFileContent(entry.path, workspaceId);
                     onInsertFile(entry.path, result.content, result.language);
                 } catch (e) {
                     setError(e instanceof Error ? e.message : 'Failed to read file');
@@ -351,14 +418,14 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
                 const name = window.prompt('New file name:');
                 if (!name?.trim()) return;
                 const newPath = `${entry.path}/${name.trim()}`;
-                try { await createFile(newPath); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to create file'); }
+                try { await createFile(newPath, workspaceId); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to create file'); }
                 break;
             }
             case 'new-dir': {
                 const name = window.prompt('New folder name:');
                 if (!name?.trim()) return;
                 const newPath = `${entry.path}/${name.trim()}`;
-                try { await createDir(newPath); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to create folder'); }
+                try { await createDir(newPath, workspaceId); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to create folder'); }
                 break;
             }
             case 'rename': {
@@ -366,39 +433,40 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
                 if (!newName?.trim() || newName.trim() === entry.name) return;
                 const dir = entry.path.includes('/') ? entry.path.substring(0, entry.path.lastIndexOf('/')) : '';
                 const newPath = dir ? `${dir}/${newName.trim()}` : newName.trim();
-                try { await renameFile(entry.path, newPath); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Rename failed'); }
+                try { await renameFile(entry.path, newPath, workspaceId); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Rename failed'); }
                 break;
             }
             case 'delete': {
                 if (!window.confirm(`Delete "${entry.name}"?`)) return;
-                try { await deleteFile(entry.path); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Delete failed'); }
+                try { await deleteFile(entry.path, workspaceId); loadRoot(); } catch (e) { setError(e instanceof Error ? e.message : 'Delete failed'); }
                 break;
             }
         }
-    }, [onInsertFile, onOpenInEditor, loadRoot]);
-
-    const displayPath = workingDir.length > 30 ? '...' + workingDir.slice(-27) : workingDir;
+    }, [onInsertFile, onOpenInEditor, loadRoot, workspaceId]);
 
     return (
         <>
-            {/* Toggle button */}
-            <button
-                onClick={onToggle}
-                className="shrink-0 w-5 flex items-center justify-center border-r border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                title={isOpen ? 'Close file tree' : 'Open file tree'}
-            >
-                <ChevronRight size={12} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-            </button>
+            {/* Toggle button — hidden in embedded mode (parent controls visibility) */}
+            {!embedded && (
+                <button
+                    onClick={onToggle}
+                    className="shrink-0 w-5 flex items-center justify-center border-r border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                    title={isOpen ? 'Close file tree' : 'Open file tree'}
+                >
+                    <ChevronRight size={12} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                </button>
+            )}
 
             {/* Panel */}
             <div
-                className="shrink-0 flex flex-col border-r border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden transition-all duration-150"
-                style={{ width: isOpen ? `${width}px` : '0px' }}
+                className={
+                    embedded
+                        ? 'flex-1 flex flex-col min-h-0 bg-[var(--bg-secondary)] overflow-hidden'
+                        : 'shrink-0 flex flex-col border-r border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden transition-all duration-150'
+                }
+                style={embedded ? undefined : { width: isOpen ? `${width}px` : '0px' }}
             >
-                <div className="h-9 px-3 flex items-center justify-between border-b border-[var(--border)] shrink-0">
-                    <span className="text-xs text-[var(--text-muted)] font-mono truncate" title={workingDir}>
-                        {displayPath || '.'}
-                    </span>
+                <div className="h-7 px-2 flex items-center justify-end border-b border-[var(--border)] shrink-0">
                     <button
                         onClick={loadRoot}
                         className="shrink-0 p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
@@ -409,30 +477,6 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
                 </div>
 
                 <div className="flex-1 overflow-y-auto py-1">
-                    {/* Modified files summary */}
-                    {trackedFiles && trackedFiles.length > 0 && onOpenFile && (
-                        <div className="mb-2">
-                            <div className="px-3 py-1 flex items-center gap-2">
-                                <div className="flex-1 h-px bg-[var(--border)]" />
-                                <span className="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">Modified</span>
-                                <div className="flex-1 h-px bg-[var(--border)]" />
-                            </div>
-                            <div className="px-3">
-                                {trackedFiles.map((path) => (
-                                    <button
-                                        key={path}
-                                        onClick={() => onOpenFile(path)}
-                                        className="w-full flex items-center gap-1.5 py-0.5 text-xs text-[var(--text-secondary)]
-                                            hover:text-[var(--text-primary)] transition-colors text-left truncate"
-                                        title={path}
-                                    >
-                                        <File size={11} className="text-[var(--color-info)] shrink-0" />
-                                        <span className="truncate">{path}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
                     {loading && rootNodes.length === 0 && (
                         <div className="px-3 py-2 text-sm text-[var(--text-muted)] flex items-center gap-1.5">
                             <Loader2 size={13} className="animate-spin" /> Loading...

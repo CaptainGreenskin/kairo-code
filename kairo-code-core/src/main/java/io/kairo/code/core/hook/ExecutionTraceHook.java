@@ -125,13 +125,24 @@ public final class ExecutionTraceHook {
         iteration++;
         ModelResponse response = event.response();
 
+        // tokens field preserved as outputTokens for backward compat with existing trace readers;
+        // additional fields below expose input / cache usage so "tokens: 0" in this row no longer
+        // looks like missing-usage data (see fix-dual-tokenbudget-compaction-never-triggers).
         long tokens = 0;
+        long inputTokens = 0;
+        long cacheReadTokens = 0;
+        long cacheWriteTokens = 0;
+        boolean hasUsage = false;
         boolean hasToolCalls = false;
         int thinkingChars = 0;
 
         if (response != null) {
             if (response.usage() != null) {
                 tokens = response.usage().outputTokens();
+                inputTokens = response.usage().inputTokens();
+                cacheReadTokens = response.usage().cacheReadTokens();
+                cacheWriteTokens = response.usage().cacheCreationTokens();
+                hasUsage = true;
             }
             if (response.contents() != null) {
                 for (Content c : response.contents()) {
@@ -148,6 +159,10 @@ public final class ExecutionTraceHook {
         fields.put("phase", "POST_REASONING");
         fields.put("iteration", iteration);
         fields.put("tokens", tokens);
+        fields.put("input_tokens", inputTokens);
+        fields.put("cache_read_tokens", cacheReadTokens);
+        fields.put("cache_write_tokens", cacheWriteTokens);
+        fields.put("has_usage", hasUsage);
         fields.put("has_tool_calls", hasToolCalls);
         fields.put("thinking_chars", thinkingChars);
         fields.put("ts", Instant.now().toString());

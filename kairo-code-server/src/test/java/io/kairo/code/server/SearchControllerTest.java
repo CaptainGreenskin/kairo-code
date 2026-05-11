@@ -38,12 +38,12 @@ class SearchControllerTest {
         ServerProperties props = new ServerProperties(
                 "openai", "gpt-4o", tempDir.toString(),
                 "https://api.openai.com", "sk-test");
-        controller = new ConfigController(props, null, null);
+        controller = new ConfigController(props, null, null, null);
     }
 
     @Test
     void search_findsMatchInFile() {
-        var response = controller.searchFiles("hello", "", 50);
+        var response = controller.searchFiles("hello", "", 50, null);
 
         assertThat(response.query()).isEqualTo("hello");
         assertThat(response.matches()).isNotEmpty();
@@ -58,7 +58,7 @@ class SearchControllerTest {
 
     @Test
     void search_preventsPathTraversal() {
-        assertThatThrownBy(() -> controller.searchFiles("test", "../../etc", 50))
+        assertThatThrownBy(() -> controller.searchFiles("test", "../../etc", 50, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> {
                     var ex = (ResponseStatusException) e;
@@ -72,7 +72,7 @@ class SearchControllerTest {
         Files.createDirectory(nm);
         Files.writeString(nm.resolve("dep.js"), "function hello() { return 'hello'; }");
 
-        var response = controller.searchFiles("hello", "", 50);
+        var response = controller.searchFiles("hello", "", 50, null);
 
         var nodeModulesMatches = response.matches().stream()
                 .filter(m -> m.file().startsWith("node_modules"))
@@ -87,7 +87,7 @@ class SearchControllerTest {
             Files.writeString(tempDir.resolve("file" + i + ".txt"), "match line " + i);
         }
 
-        var response = controller.searchFiles("match", "", 5);
+        var response = controller.searchFiles("match", "", 5, null);
 
         assertThat(response.matches()).hasSize(5);
         assertThat(response.truncated()).isTrue();
@@ -95,7 +95,7 @@ class SearchControllerTest {
 
     @Test
     void search_caseInsensitive() {
-        var response = controller.searchFiles("HELLO", "", 50);
+        var response = controller.searchFiles("HELLO", "", 50, null);
 
         assertThat(response.matches()).isNotEmpty();
         var helloMatches = response.matches().stream()
@@ -106,13 +106,13 @@ class SearchControllerTest {
 
     @Test
     void search_shortQueryReturnsEmpty() {
-        var response = controller.searchFiles("a", "", 50);
+        var response = controller.searchFiles("a", "", 50, null);
         assertThat(response.matches()).isEmpty();
     }
 
     @Test
     void search_findsInSubdirectory() {
-        var response = controller.searchFiles("fileTreeOpen", "", 50);
+        var response = controller.searchFiles("fileTreeOpen", "", 50, null);
 
         var appMatches = response.matches().stream()
                 .filter(m -> m.file().equals("src/App.tsx"))
