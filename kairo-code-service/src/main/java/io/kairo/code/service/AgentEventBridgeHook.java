@@ -213,12 +213,11 @@ public class AgentEventBridgeHook {
     }
 
     /**
-     * Called once per session at end-of-loop, regardless of success/failure. Emits the terminal
-     * AgentEvent (done or error) directly from the agent runtime so the WS sink sees a guaranteed
-     * lifecycle close — even if AgentService's outer reactive subscribe never fires (cancelled
-     * subscription, dropped error signal). AgentService still emits in {@code doFinally} as a
-     * safety net; the Sink's tryEmit + the AgentEvent seq dedupe means duplicates collapse on the
-     * frontend rather than producing two cards.
+     * Called once per session at end-of-loop, regardless of success/failure. This is now the
+     * <strong>sole</strong> terminal event emission point — kairo-core's {@code TerminalHookGuard}
+     * guarantees that {@code onSessionEnd} fires exactly once, eliminating the previous dual-emit
+     * race between this hook and {@code AgentService.doFinally}. The latter has been reduced to
+     * resource cleanup only (slot release, runningState flip).
      */
     @io.kairo.api.hook.HookHandler(HookPhase.SESSION_END)
     public HookResult<SessionEndEvent> onSessionEnd(SessionEndEvent event) {

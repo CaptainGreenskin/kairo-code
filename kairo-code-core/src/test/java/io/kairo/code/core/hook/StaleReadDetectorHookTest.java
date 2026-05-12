@@ -28,14 +28,14 @@ class StaleReadDetectorHookTest {
 
     /** Helper: create a read tool result event with metadata containing the file path. */
     private static ToolResultEvent readEvent(String path, String content) {
-        ToolResult result = new ToolResult(
-                "id-1", content, false, Map.of("path", path, "totalLines", 100));
+        ToolResult result = ToolResult.success(
+                "id-1", content, Map.of("path", path, "totalLines", 100));
         return new ToolResultEvent("read", result, Duration.ofMillis(10), true);
     }
 
     /** Helper: create a non-read tool result event. */
     private static ToolResultEvent nonReadEvent(String toolName, String content) {
-        ToolResult result = new ToolResult("id-1", content, false, Map.of());
+        ToolResult result = ToolResult.success("id-1", content);
         return new ToolResultEvent(toolName, result, Duration.ofMillis(10), true);
     }
 
@@ -167,7 +167,7 @@ class StaleReadDetectorHookTest {
     void extractPath_fromMetadata() {
         String path = "src/main/java/Test.java";
         ToolResult result =
-                new ToolResult("id-1", "content", false, Map.of("path", path));
+                ToolResult.success("id-1", "content", Map.of("path", path));
         ToolResultEvent event =
                 new ToolResultEvent("read", result, Duration.ofMillis(10), true);
 
@@ -178,7 +178,7 @@ class StaleReadDetectorHookTest {
     void extractPath_fromContentFirstLine_whenNoMetadata() {
         String firstLine = "// src/main/java/Fallback.java";
         ToolResult result =
-                new ToolResult("id-1", firstLine + "\nrest of content", false, Map.of());
+                ToolResult.success("id-1", firstLine + "\nrest of content");
         ToolResultEvent event =
                 new ToolResultEvent("read", result, Duration.ofMillis(10), true);
 
@@ -188,7 +188,7 @@ class StaleReadDetectorHookTest {
     @Test
     void extractPath_nullWhenNoPathAvailable() {
         ToolResult result =
-                new ToolResult("id-1", "", false, Map.of());
+                ToolResult.success("id-1", "");
         ToolResultEvent event =
                 new ToolResultEvent("read", result, Duration.ofMillis(10), true);
 

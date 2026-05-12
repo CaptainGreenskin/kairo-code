@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Circle, ClipboardList, Loader2 } from 'lucide-react';
+import { Check, Square, ClipboardList, Loader2 } from 'lucide-react';
 import type { Todo } from '@/types/agent';
 
 interface InlineTodoCardProps {
@@ -8,6 +8,25 @@ interface InlineTodoCardProps {
 }
 
 const PREVIEW_COUNT = 6;
+
+/** Priority dot color mapping */
+function PriorityDot({ priority }: { priority?: Todo['priority'] }) {
+    if (!priority) return null;
+    const colors: Record<string, string> = {
+        high: 'bg-rose-400',
+        medium: 'bg-amber-400',
+        low: 'bg-slate-400',
+    };
+    return <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-[5px] ${colors[priority]}`} />;
+}
+
+/** Group todos by status in display order: in_progress → pending → completed */
+function groupByStatus(todos: Todo[]) {
+    const inProgress = todos.filter((t) => t.status === 'in_progress');
+    const pending = todos.filter((t) => t.status === 'pending');
+    const completed = todos.filter((t) => t.status === 'completed');
+    return { inProgress, pending, completed };
+}
 
 /**
  * Inline rendering of a {@code todo_write} tool snapshot inside the message stream.
@@ -27,21 +46,42 @@ export function InlineTodoCard({ todos, overview }: InlineTodoCardProps) {
         );
     }
 
-    const completed = todos.filter((t) => t.status === 'completed').length;
+    const completedCount = todos.filter((t) => t.status === 'completed').length;
     const total = todos.length;
-    const visible = showAll ? todos : todos.slice(0, PREVIEW_COUNT);
+    const progressPct = total > 0 ? (completedCount / total) * 100 : 0;
+    const { inProgress, pending, completed } = groupByStatus(todos);
+
+    // For preview mode, flatten groups and slice
+    const allGrouped = [...inProgress, ...pending, ...completed];
+    const visible = showAll ? allGrouped : allGrouped.slice(0, PREVIEW_COUNT);
     const remaining = total - PREVIEW_COUNT;
+
+    // Determine which groups are visible in preview mode
+    const visibleInProgress = visible.filter((t) => t.status === 'in_progress');
+    const visiblePending = visible.filter((t) => t.status === 'pending');
+    const visibleCompleted = visible.filter((t) => t.status === 'completed');
 
     return (
         <div className="my-2 border border-amber-500/20 rounded-lg overflow-hidden bg-gradient-to-br from-amber-500/5 to-transparent">
+            {/* Header */}
             <div className="px-3 py-2 flex items-center gap-2 bg-amber-500/10 border-b border-amber-500/20">
                 <ClipboardList size={14} className="text-amber-300 shrink-0" />
                 <span className="text-sm font-semibold text-amber-200">
                     Plan · {total} To-do{total === 1 ? '' : 's'}
                 </span>
                 <span className="text-xs text-[var(--text-muted)] ml-auto">
-                    {completed} Done
+                    {completedCount}/{total}
                 </span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="px-3 pt-2">
+                <div className="h-1 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+                    <div
+                        className="h-full bg-emerald-500 transition-all duration-500"
+                        style={{ width: `${progressPct}%` }}
+                    />
+                </div>
             </div>
 
             {overview && (
@@ -50,10 +90,18 @@ export function InlineTodoCard({ todos, overview }: InlineTodoCardProps) {
                 </div>
             )}
 
-            <div className="px-3 py-2 space-y-1">
-                {visible.map((todo) => (
-                    <TodoItem key={todo.id} todo={todo} />
-                ))}
+            {/* Grouped task list */}
+            <div className="px-3 py-2 space-y-2">
+                {visibleInProgress.length > 0 && (
+                    <StatusGroup label="IN PROGRESS" count={inProgress.length} items={visibleInProgress} color="text-amber-400" />
+                )}
+                {visiblePending.length > 0 && (
+                    <StatusGroup label="TO DO" count={pending.length} items={visiblePending} color="text-[var(--text-muted)]" />
+                )}
+                {visibleCompleted.length > 0 && (
+                    <StatusGroup label="DONE" count={completed.length} items={visibleCompleted} color="text-emerald-400" />
+                )}
+
                 {!showAll && remaining > 0 && (
                     <button
                         onClick={() => setShowAll(true)}
@@ -75,20 +123,28 @@ export function InlineTodoCard({ todos, overview }: InlineTodoCardProps) {
     );
 }
 
+function StatusGroup({ label, count, items, color }: { label: string; count: number; items: Todo[]; color: string }) {
+    return (
+        <div className="space-y-1">
+            <div className={`text-[10px] font-semibold uppercase tracking-wider ${color} opacity-80`}>
+                {label} ({count})
+            </div>
+            {items.map((todo) => (
+                <TodoItem key={todo.id} todo={todo} />
+            ))}
+        </div>
+    );
+}
+
 function TodoItem({ todo }: { todo: Todo }) {
     return (
-        <div className="flex items-start gap-2">
-            {todo.status === 'completed' ? (
-                <Check size={13} className="text-emerald-400 shrink-0 mt-0.5" />
-            ) : todo.status === 'in_progress' ? (
-                <Loader2 size={13} className="text-[var(--accent)] shrink-0 mt-0.5 animate-spin" />
-            ) : (
-                <Circle size={13} className="text-[var(--text-muted)] shrink-0 mt-0.5" />
-            )}
+        <div className={`flex items-start gap-2 ${todo.status === 'completed' ? 'opacity-50' : ''}`}>
+            <StatusIcon status={todo.status} />
+            <PriorityDot priority={todo.priority} />
             <span
                 className={`text-xs leading-relaxed ${
                     todo.status === 'completed'
-                        ? 'text-[var(--text-muted)] line-through opacity-60'
+                        ? 'text-[var(--text-muted)] line-through'
                         : todo.status === 'in_progress'
                             ? 'text-[var(--text-primary)] font-medium'
                             : 'text-[var(--text-primary)]'
@@ -98,6 +154,16 @@ function TodoItem({ todo }: { todo: Todo }) {
             </span>
         </div>
     );
+}
+
+function StatusIcon({ status }: { status: Todo['status'] }) {
+    if (status === 'completed') {
+        return <Check size={13} className="text-emerald-400 shrink-0 mt-0.5" />;
+    }
+    if (status === 'in_progress') {
+        return <Loader2 size={13} className="text-amber-400 shrink-0 mt-0.5 animate-spin" />;
+    }
+    return <Square size={13} className="text-[var(--text-muted)] shrink-0 mt-0.5" />;
 }
 
 /**

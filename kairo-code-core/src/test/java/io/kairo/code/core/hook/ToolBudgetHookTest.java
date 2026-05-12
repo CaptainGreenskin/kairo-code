@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
 class ToolBudgetHookTest {
 
     private static ToolResultEvent toolEvent(String tool) {
-        ToolResult result = new ToolResult("id1", "output", false, Map.of());
+        ToolResult result = ToolResult.success("id1", "output");
         return new ToolResultEvent(tool, result, Duration.ofMillis(50), true);
     }
 

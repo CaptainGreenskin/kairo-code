@@ -12,12 +12,12 @@ import org.junit.jupiter.api.Test;
 class FailurePatternTrackerTest {
 
     private static ToolResultEvent event(String tool, boolean success) {
-        ToolResult result = new ToolResult("id1", "output", !success, Map.of());
+        ToolResult result = success ? ToolResult.success("id1", "output") : ToolResult.error("id1", "output");
         return new ToolResultEvent(tool, result, Duration.ofMillis(100), success);
     }
 
     private static ToolResultEvent event(String tool, boolean success, String content) {
-        ToolResult result = new ToolResult("id1", content, !success, Map.of());
+        ToolResult result = success ? ToolResult.success("id1", content) : ToolResult.error("id1", content);
         return new ToolResultEvent(tool, result, Duration.ofMillis(100), success);
     }
 

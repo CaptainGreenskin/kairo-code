@@ -14,7 +14,69 @@ const FILE_WRITE_TOOLS = new Set([
     'write_file', 'create_file', 'patch_file', 'apply_diff', 'edit_file', 'str_replace_editor',
 ]);
 
+const FILE_READ_TOOLS = new Set([
+    'read', 'read_file', 'cat', 'view',
+]);
+
+const BASH_TOOLS = new Set(['bash', 'shell', 'execute', 'run_command', 'terminal']);
+
 const COLLAPSE_LINES = 5;
+
+/**
+ * Generate a short preview string for a completed tool result.
+ * Returns a truncated one-liner suitable for display in the collapsed card header.
+ */
+function getCollapsedPreview(
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    result: string | undefined,
+): string {
+    if (!result) return '';
+
+    // File write tools: show "→ filepath"
+    if (FILE_WRITE_TOOLS.has(toolName)) {
+        const path = (input as { path?: string; file?: string; file_path?: string })?.path
+            ?? (input as { file?: string })?.file
+            ?? (input as { file_path?: string })?.file_path
+            ?? '';
+        if (path) return `→ ${path}`;
+    }
+
+    // Bash tools: show first line of stdout
+    if (BASH_TOOLS.has(toolName)) {
+        const firstLine = result.split('\n').find(l => l.trim());
+        if (firstLine) {
+            return firstLine.length > 60 ? firstLine.slice(0, 57) + '…' : firstLine;
+        }
+        return '';
+    }
+
+    // Read tools: show "Read filepath (N lines)"
+    if (FILE_READ_TOOLS.has(toolName)) {
+        const path = (input as { path?: string; file?: string; file_path?: string })?.path
+            ?? (input as { file?: string })?.file
+            ?? (input as { file_path?: string })?.file_path
+            ?? 'file';
+        const lineCount = result.split('\n').length;
+        return `Read ${path} (${lineCount} lines)`;
+    }
+
+    // todo_write: show "Plan: N items, X done"
+    if (toolName === 'todo_write') {
+        const { todos } = parseTodoWriteInput(input);
+        if (todos.length > 0) {
+            const doneCount = todos.filter(t => t.status === 'completed').length;
+            return `Plan: ${todos.length} items, ${doneCount} done`;
+        }
+    }
+
+    // Generic: first meaningful line of result
+    const firstLine = result.split('\n').find(l => l.trim());
+    if (firstLine) {
+        return firstLine.length > 60 ? firstLine.slice(0, 57) + '…' : firstLine;
+    }
+    return '';
+}
 
 /**
  * Drop the synthetic `_streaming_result` marker from tool input. The backend uses it to feed
@@ -423,6 +485,20 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     const riskLabel = RISK_LABELS[risk];
     const [expanded, setExpanded] = useState(false);
 
+    // Card-level collapse: completed cards start collapsed, showing only a preview.
+    // Pending/running cards are always expanded so the user sees live state.
+    const isComplete = toolCall.status === 'done' || toolCall.status === 'error' || toolCall.status === 'rejected';
+    const [cardCollapsed, setCardCollapsed] = useState(isComplete);
+    // Auto-collapse once the tool finishes executing
+    useEffect(() => {
+        if (isComplete) setCardCollapsed(true);
+    }, [isComplete]);
+
+    const collapsedPreview = useMemo(
+        () => getCollapsedPreview(toolCall.toolName, toolCall.input, toolCall.result),
+        [toolCall.toolName, toolCall.input, toolCall.result],
+    );
+
     // Timeout countdown for pending tool calls
     const [timeRemaining, setTimeRemaining] = useState(approvalTimeout);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -520,13 +596,16 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
 
     return (
         <div className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}>
-            <div className="px-3 py-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
+            <div
+                className={`px-3 py-2 flex items-center justify-between ${isComplete ? 'cursor-pointer hover:bg-[var(--bg-hover)] transition-colors' : ''}`}
+                onClick={() => { if (isComplete) setCardCollapsed(prev => !prev); }}
+            >
+                <div className="flex items-center gap-2 min-w-0">
                     <span
                         className={`w-1 h-1 rounded-full flex-shrink-0 ${statusDotClasses(toolCall)}`}
                         title={toolCall.status}
                     />
-                    <code className="text-sm font-mono font-medium text-[var(--text-primary)]">
+                    <code className="text-sm font-mono font-medium text-[var(--text-primary)] shrink-0">
                         {toolCall.toolName}
                     </code>
                     <ToolRiskBadge toolName={toolCall.toolName} />
@@ -535,12 +614,18 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                             {riskLabel}
                         </span>
                     )}
-                    <span className={`flex items-center gap-1 text-xs ${config.color}`}>
+                    <span className={`flex items-center gap-1 text-xs ${config.color} shrink-0`}>
                         {config.icon}
                         {config.label}
                     </span>
+                    {/* Collapsed preview: brief result summary */}
+                    {cardCollapsed && isComplete && collapsedPreview && (
+                        <span className="text-xs text-[var(--text-muted)] truncate min-w-0" title={collapsedPreview}>
+                            {collapsedPreview}
+                        </span>
+                    )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                     <FailureReasonChip toolCall={toolCall} />
                     <ProgressChip toolCall={toolCall} />
                     {toolCall.durationMs !== undefined && toolCall.status === 'done' && (
@@ -548,40 +633,49 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                             {(toolCall.durationMs / 1000).toFixed(1)}s
                         </span>
                     )}
+                    {isComplete && (
+                        <span className="text-[var(--text-muted)]">
+                            {cardCollapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+                        </span>
+                    )}
                 </div>
             </div>
 
-            <button
-                onClick={() => setExpanded((prev) => !prev)}
-                className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors border-t border-[var(--border)]"
-            >
-                {expanded ? 'Hide' : 'Show'} input
-            </button>
+            {!cardCollapsed && (
+                <>
+                    <button
+                        onClick={() => setExpanded((prev) => !prev)}
+                        className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors border-t border-[var(--border)]"
+                    >
+                        {expanded ? 'Hide' : 'Show'} input
+                    </button>
 
-            {expanded && (
-                <pre className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] max-h-48">
-                    {JSON.stringify(stripStreamingMarker(toolCall.input), null, 2)}
-                </pre>
+                    {expanded && (
+                        <pre className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] overflow-x-auto bg-[var(--code-bg)] max-h-48">
+                            {JSON.stringify(stripStreamingMarker(toolCall.input), null, 2)}
+                        </pre>
+                    )}
+
+                    {toolCall.toolName === 'todo_write' ? (
+                        <div className="px-3 pb-2 border-t border-[var(--border)] pt-2">
+                            {(() => {
+                                const { todos, overview } = parseTodoWriteInput(toolCall.input);
+                                return <InlineTodoCard todos={todos} overview={overview} />;
+                            })()}
+                        </div>
+                    ) : (
+                        toolCall.result && toolCall.status === 'done' && (
+                            <ResultOutput
+                                toolName={toolCall.toolName}
+                                result={toolCall.result}
+                                input={toolCall.input}
+                            />
+                        )
+                    )}
+
+                    {fileWriteInfo && <FileContentPreview info={fileWriteInfo} />}
+                </>
             )}
-
-            {toolCall.toolName === 'todo_write' ? (
-                <div className="px-3 pb-2 border-t border-[var(--border)] pt-2">
-                    {(() => {
-                        const { todos, overview } = parseTodoWriteInput(toolCall.input);
-                        return <InlineTodoCard todos={todos} overview={overview} />;
-                    })()}
-                </div>
-            ) : (
-                toolCall.result && toolCall.status === 'done' && (
-                    <ResultOutput
-                        toolName={toolCall.toolName}
-                        result={toolCall.result}
-                        input={toolCall.input}
-                    />
-                )
-            )}
-
-            {fileWriteInfo && <FileContentPreview info={fileWriteInfo} />}
 
             {isPending && onApprove && (
                 <div className="px-3 py-2 border-t border-[var(--border)]">

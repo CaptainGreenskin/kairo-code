@@ -27,12 +27,12 @@ import org.junit.jupiter.api.Test;
 class CompileErrorFeedbackHookTest {
 
     private static ToolResultEvent bashEvent(String content, boolean isError) {
-        ToolResult result = new ToolResult("id-1", content, isError, Map.of());
+        ToolResult result = isError ? ToolResult.error("id-1", content) : ToolResult.success("id-1", content);
         return new ToolResultEvent("bash", result, Duration.ofMillis(500), !isError);
     }
 
     private static ToolResultEvent nonBashEvent(String content) {
-        ToolResult result = new ToolResult("id-1", content, false, Map.of());
+        ToolResult result = ToolResult.success("id-1", content);
         return new ToolResultEvent("read_file", result, Duration.ofMillis(10), true);
     }
 

@@ -34,7 +34,7 @@ class TextOnlyStallHookTest {
     }
 
     private static PostActingEvent postActingEvent(String toolName) {
-        return new PostActingEvent(toolName, new ToolResult("t-1", "ok", false, Map.of()));
+        return new PostActingEvent(toolName, ToolResult.success("t-1", "ok"));
     }
 
     @Test

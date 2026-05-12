@@ -96,7 +96,7 @@ class AgentEventBridgeHookTest {
     void postActingEmitsToolResult() {
         var collector = sink.asFlux().collectList().toFuture();
 
-        ToolResult result = new ToolResult("id-bash", "output content", false, Map.of());
+        ToolResult result = ToolResult.success("id-bash", "output content");
         PostActingEvent event = new PostActingEvent("bash", result);
         hook.onPostActing(event);
         sink.tryEmitComplete();
@@ -112,7 +112,7 @@ class AgentEventBridgeHookTest {
     void onToolResultEmitsToolResult() {
         var collector = sink.asFlux().collectList().toFuture();
 
-        ToolResult result = new ToolResult("id-write", "wrote 5 lines", false, Map.of());
+        ToolResult result = ToolResult.success("id-write", "wrote 5 lines");
         ToolResultEvent event = new ToolResultEvent("write_file", result,
                 java.time.Duration.ofMillis(100), true);
         hook.onToolResult(event);

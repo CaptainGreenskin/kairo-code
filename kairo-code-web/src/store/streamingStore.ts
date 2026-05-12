@@ -50,10 +50,16 @@ export function collapseRetryRepeats(text: string): string {
 }
 
 export const streamingStore = {
-  append(sessionId: string, chunk: string) {
+  /**
+   * Append a text chunk to the buffer for the given session.
+   * @param notify — when false, accumulates silently without triggering subscriber
+   *   re-renders. Used for background sessions so their events don't cause the
+   *   active session's UI to re-render needlessly.
+   */
+  append(sessionId: string, chunk: string, notify = true) {
     const current = streamingChunks.get(sessionId) ?? ''
     streamingChunks.set(sessionId, current + chunk)
-    subscribers.forEach(fn => fn())
+    if (notify) subscribers.forEach(fn => fn())
   },
 
   getContent(sessionId: string): string {

@@ -142,7 +142,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     } else if (pendingThinking) {
                         setMessageThinkingIn(sid, getActiveMsgId()!, pendingThinking);
                     }
-                    streamingStore.append(sid, text);
+                    streamingStore.append(sid, text, isActive);
                     break;
                 }
 

@@ -163,7 +163,7 @@ class AgentEventPrinterToolTest {
         PreActingEvent preEvent = new PreActingEvent("bash", Map.of(), false);
         printer.onPreActing(preEvent);
 
-        PostActingEvent postEvent = new PostActingEvent("bash", new ToolResult("t-1", "", false, Map.of()));
+        PostActingEvent postEvent = new PostActingEvent("bash", ToolResult.success("t-1", ""));
         printer.onPostActing(postEvent);
 
         String output = outputCapture.toString();
@@ -176,7 +176,7 @@ class AgentEventPrinterToolTest {
         PreActingEvent preEvent = new PreActingEvent("bash", Map.of(), false);
         printer.onPreActing(preEvent);
 
-        PostActingEvent postEvent = new PostActingEvent("bash", new ToolResult("t-1", "", true, Map.of()));
+        PostActingEvent postEvent = new PostActingEvent("bash", ToolResult.error("t-1", ""));
         printer.onPostActing(postEvent);
 
         String output = outputCapture.toString();
@@ -204,6 +204,6 @@ class AgentEventPrinterToolTest {
     }
 
     private static PostActingEvent postActing(String toolName, boolean isError, String content) {
-        return new PostActingEvent(toolName, new ToolResult("tool-1", content, isError, Map.of()));
+        return new PostActingEvent(toolName, isError ? ToolResult.error("tool-1", content) : ToolResult.success("tool-1", content));
     }
 }

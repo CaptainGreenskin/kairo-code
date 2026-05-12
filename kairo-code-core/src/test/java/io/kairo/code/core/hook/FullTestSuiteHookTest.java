@@ -27,12 +27,12 @@ import org.junit.jupiter.api.Test;
 class FullTestSuiteHookTest {
 
     private static ToolResultEvent bashEvent(String content, boolean isError) {
-        ToolResult result = new ToolResult("id-1", content, isError, Map.of());
+        ToolResult result = isError ? ToolResult.error("id-1", content) : ToolResult.success("id-1", content);
         return new ToolResultEvent("bash", result, Duration.ofMillis(500), !isError);
     }
 
     private static ToolResultEvent nonBashEvent(String content) {
-        ToolResult result = new ToolResult("id-1", content, false, Map.of());
+        ToolResult result = ToolResult.success("id-1", content);
         return new ToolResultEvent("read_file", result, Duration.ofMillis(10), true);
     }
 
@@ -149,7 +149,7 @@ class FullTestSuiteHookTest {
     void nullContent_doesNotTrigger() {
         FullTestSuiteHook hook = new FullTestSuiteHook();
 
-        ToolResult result = new ToolResult("id-1", null, false, Map.of());
+        ToolResult result = ToolResult.success("id-1", null);
         ToolResultEvent event = new ToolResultEvent("bash", result, Duration.ofMillis(500), true);
 
         HookResult<ToolResultEvent> hookResult = hook.onToolResult(event);

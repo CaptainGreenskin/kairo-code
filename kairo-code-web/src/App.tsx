@@ -78,6 +78,7 @@ import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
 import { useAgentNotification } from '@hooks/useAgentNotification';
 import { useFileTracker } from '@hooks/useFileTracker';
 import { useAgentEventHandler } from '@hooks/useAgentEventHandler';
+import { streamingStore } from '@store/streamingStore';
 import { useGlobalShortcuts } from '@hooks/useGlobalShortcuts';
 import { FileTrackerBadge } from '@components/FileTrackerBadge';
 
@@ -647,6 +648,12 @@ function App() {
             // Already open as a tab → just switch active, leave its messages intact.
             const alreadyOpen = useSessionStore.getState().openTabs.includes(id);
             if (alreadyOpen) {
+                // IMMEDIATELY clear streaming state to prevent old-session events from
+                // contaminating the new session's view during the transition window.
+                streamingStore.clear(id);
+                setStreamingMsgId(assistantMsgRef.current[id] ?? null);
+                setAgentPhase('thinking');
+                setCurrentToolName(undefined);
                 useSessionStore.getState().setActiveSession(id);
                 setLastSessionId(id);
                 if (isConnected) switchSession(id);
@@ -677,6 +684,8 @@ function App() {
                     // Snapshot fetch failure is non-fatal; SESSION_RESTORED will fill in.
                 }
             }
+            // Clear any stale streaming buffer for the destination before hydration.
+            streamingStore.clear(id);
             assistantMsgRef.current[id] = null;
             setStreamingMsgId(null);
             setAgentPhase('thinking');
@@ -916,7 +925,11 @@ function App() {
     }, [addToast]);
 
     const handleInsertFile = useCallback((path: string, content: string, language: string) => {
-        const block = `\`\`\`${language}\n// ${path}\n${content}\n\`\`\`\n`;
+        const block = `\`\`\`${language}
+// ${path}
+${content}
+\`\`\`
+`;
         setChatInputAppend(block);
     }, []);
 

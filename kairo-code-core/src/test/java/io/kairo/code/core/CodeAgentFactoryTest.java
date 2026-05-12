@@ -76,7 +76,7 @@ class CodeAgentFactoryTest {
 
         assertThat(config.baseUrl()).isEqualTo("https://api.openai.com");
         assertThat(config.modelName()).isEqualTo("gpt-4o");
-        assertThat(config.maxIterations()).isEqualTo(50);
+        assertThat(config.maxIterations()).isEqualTo(Integer.MAX_VALUE);
     }
 
     @Test
@@ -151,7 +151,7 @@ class CodeAgentFactoryTest {
                 "test-api-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
         ToolUsageTracker tracker = new ToolUsageTracker();
-        ToolResult ok = new ToolResult("id", "out", false, Map.of());
+        ToolResult ok = ToolResult.success("id", "out");
         tracker.onToolResult(new ToolResultEvent("bash", ok, Duration.ofMillis(120), true));
         tracker.onToolResult(new ToolResultEvent("bash", ok, Duration.ofMillis(120), true));
 

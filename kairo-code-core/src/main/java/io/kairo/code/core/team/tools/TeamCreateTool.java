@@ -17,13 +17,15 @@ package io.kairo.code.core.team.tools;
 
 import io.kairo.api.tool.Tool;
 import io.kairo.api.tool.ToolCategory;
-import io.kairo.api.tool.ToolHandler;
+import io.kairo.api.tool.ToolContext;
 import io.kairo.api.tool.ToolParam;
 import io.kairo.api.tool.ToolResult;
+import io.kairo.api.tool.SyncTool;
 import io.kairo.api.tool.ToolSideEffect;
 import io.kairo.code.core.team.Team;
 import io.kairo.code.core.team.TeamManager;
 import java.util.Map;
+import reactor.core.publisher.Mono;
 
 /**
  * Tool to create a new team of agents for collaborative work.
@@ -34,7 +36,7 @@ import java.util.Map;
     category = ToolCategory.GENERAL,
     sideEffect = ToolSideEffect.READ_ONLY
 )
-public class TeamCreateTool implements ToolHandler {
+public class TeamCreateTool implements SyncTool {
 
     private final TeamManager teamManager;
 
@@ -49,31 +51,27 @@ public class TeamCreateTool implements ToolHandler {
     private String goal;
 
     @Override
-    public ToolResult execute(Map<String, Object> input) {
+    public Mono<ToolResult> execute(Map<String, Object> input, ToolContext ctx) {
         String nameIn = stringInput(input, "name");
         String goalIn = stringInput(input, "goal");
 
         if (nameIn == null || nameIn.isBlank()) {
-            return errorResult("Parameter 'name' is required and must be non-blank.");
+            return Mono.just(ToolResult.error(null, "Parameter 'name' is required and must be non-blank."));
         }
         if (goalIn == null || goalIn.isBlank()) {
-            return errorResult("Parameter 'goal' is required and must be non-blank.");
+            return Mono.just(ToolResult.error(null, "Parameter 'goal' is required and must be non-blank."));
         }
 
         Team team = teamManager.createTeam(nameIn, goalIn);
         String json = "{\"teamId\": \"" + team.teamId()
             + "\", \"name\": \"" + escape(team.name())
             + "\", \"status\": \"" + team.status() + "\"}";
-        return new ToolResult(null, json, false, Map.of());
+        return Mono.just(ToolResult.success(null, json));
     }
 
     private static String stringInput(Map<String, Object> input, String key) {
         Object v = input.get(key);
         return v == null ? null : v.toString();
-    }
-
-    private static ToolResult errorResult(String message) {
-        return new ToolResult(null, message, true, Map.of());
     }
 
     private static String escape(String value) {

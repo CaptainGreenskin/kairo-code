@@ -27,22 +27,22 @@ import org.junit.jupiter.api.Test;
 class AutoCommitOnSuccessHookTest {
 
     private static ToolResultEvent bashEvent(String content) {
-        ToolResult result = new ToolResult("id-1", content, false, Map.of());
+        ToolResult result = ToolResult.success("id-1", content);
         return new ToolResultEvent("bash", result, Duration.ofMillis(500), true);
     }
 
     private static ToolResultEvent editEvent(String content) {
-        ToolResult result = new ToolResult("id-2", content, false, Map.of());
+        ToolResult result = ToolResult.success("id-2", content);
         return new ToolResultEvent("edit", result, Duration.ofMillis(10), true);
     }
 
     private static ToolResultEvent writeEvent(String content) {
-        ToolResult result = new ToolResult("id-3", content, false, Map.of());
+        ToolResult result = ToolResult.success("id-3", content);
         return new ToolResultEvent("write", result, Duration.ofMillis(10), true);
     }
 
     private static ToolResultEvent nonBashEvent(String content) {
-        ToolResult result = new ToolResult("id-4", content, false, Map.of());
+        ToolResult result = ToolResult.success("id-4", content);
         return new ToolResultEvent("read_file", result, Duration.ofMillis(10), true);
     }
 
@@ -144,7 +144,7 @@ class AutoCommitOnSuccessHookTest {
         // A non-bash tool result with BUILD SUCCESS should NOT trigger
         // (this tests that only "bash" tool name triggers commit)
         String successOutput = "BUILD SUCCESS";
-        ToolResult result = new ToolResult("id-5", successOutput, false, Map.of());
+        ToolResult result = ToolResult.success("id-5", successOutput);
         ToolResultEvent fakeSuccess = new ToolResultEvent("some_tool", result, Duration.ofMillis(10), true);
         HookResult<ToolResultEvent> r2 = hook.onToolResult(fakeSuccess);
 

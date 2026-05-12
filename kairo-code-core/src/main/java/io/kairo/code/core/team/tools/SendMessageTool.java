@@ -17,15 +17,17 @@ package io.kairo.code.core.team.tools;
 
 import io.kairo.api.tool.Tool;
 import io.kairo.api.tool.ToolCategory;
-import io.kairo.api.tool.ToolHandler;
+import io.kairo.api.tool.ToolContext;
 import io.kairo.api.tool.ToolParam;
 import io.kairo.api.tool.ToolResult;
+import io.kairo.api.tool.SyncTool;
 import io.kairo.api.tool.ToolSideEffect;
 import io.kairo.code.core.team.MessageBus;
 import io.kairo.code.core.team.Team;
 import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.core.team.TeamMember;
 import java.util.Map;
+import reactor.core.publisher.Mono;
 
 /**
  * Tool to send a message to a team member (or broadcast to all members).
@@ -36,7 +38,7 @@ import java.util.Map;
     category = ToolCategory.GENERAL,
     sideEffect = ToolSideEffect.READ_ONLY
 )
-public class SendMessageTool implements ToolHandler {
+public class SendMessageTool implements SyncTool {
 
     private final TeamManager teamManager;
     private final MessageBus messageBus;
@@ -56,25 +58,25 @@ public class SendMessageTool implements ToolHandler {
     private String teamId;
 
     @Override
-    public ToolResult execute(Map<String, Object> input) {
+    public Mono<ToolResult> execute(Map<String, Object> input, ToolContext ctx) {
         String toIn = stringInput(input, "to");
         String messageIn = stringInput(input, "message");
         String teamIdIn = stringInput(input, "teamId");
 
         if (toIn == null || toIn.isBlank()) {
-            return errorResult("Parameter 'to' is required and must be non-blank.");
+            return Mono.just(ToolResult.error(null, "Parameter 'to' is required and must be non-blank."));
         }
         if (messageIn == null || messageIn.isBlank()) {
-            return errorResult("Parameter 'message' is required and must be non-blank.");
+            return Mono.just(ToolResult.error(null, "Parameter 'message' is required and must be non-blank."));
         }
         if (teamIdIn == null || teamIdIn.isBlank()) {
-            return errorResult("Parameter 'teamId' is required and must be non-blank.");
+            return Mono.just(ToolResult.error(null, "Parameter 'teamId' is required and must be non-blank."));
         }
 
         Team team = teamManager.getTeam(teamIdIn)
             .orElse(null);
         if (team == null) {
-            return errorResult("Team not found: " + teamIdIn);
+            return Mono.just(ToolResult.error(null, "Team not found: " + teamIdIn));
         }
 
         String msgId;
@@ -83,7 +85,7 @@ public class SendMessageTool implements ToolHandler {
             String fromSessionId = (String) input.getOrDefault("fromSessionId", "");
             boolean ok = messageBus.broadcast(teamIdIn, fromSessionId, messageIn, teamManager);
             if (!ok) {
-                return errorResult("Failed to broadcast to team: " + teamIdIn);
+                return Mono.just(ToolResult.error(null, "Failed to broadcast to team: " + teamIdIn));
             }
             msgId = "broadcast";
         } else {
@@ -94,7 +96,7 @@ public class SendMessageTool implements ToolHandler {
                 .findFirst()
                 .orElse(null);
             if (targetSessionId == null) {
-                return errorResult("Member not found: " + toIn + " in team " + teamIdIn);
+                return Mono.just(ToolResult.error(null, "Member not found: " + toIn + " in team " + teamIdIn));
             }
             String fromSessionId = (String) input.getOrDefault("fromSessionId", "");
             msgId = messageBus.send(targetSessionId, fromSessionId, messageIn);
@@ -102,16 +104,12 @@ public class SendMessageTool implements ToolHandler {
 
         String json = "{\"delivered\": true, \"to\": \"" + escape(toIn)
             + "\", \"messageId\": \"" + escape(msgId) + "\"}";
-        return new ToolResult(null, json, false, Map.of());
+        return Mono.just(ToolResult.success(null, json));
     }
 
     private static String stringInput(Map<String, Object> input, String key) {
         Object v = input.get(key);
         return v == null ? null : v.toString();
-    }
-
-    private static ToolResult errorResult(String message) {
-        return new ToolResult(null, message, true, Map.of());
     }
 
     private static String escape(String value) {

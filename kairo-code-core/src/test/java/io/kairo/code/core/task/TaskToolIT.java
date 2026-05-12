@@ -24,7 +24,7 @@ import io.kairo.api.model.ModelConfig;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.api.model.ModelResponse;
 import io.kairo.api.tool.ToolContext;
-import io.kairo.api.tool.ToolHandler;
+import io.kairo.api.tool.SyncTool;
 import io.kairo.api.tool.ToolResult;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
@@ -125,8 +125,8 @@ class TaskToolIT {
 
         // Resolve the registered TaskTool handler from the parent registry.
         Object handler = parent.toolRegistry().getToolInstance("task");
-        assertThat(handler).isInstanceOf(ToolHandler.class);
-        ToolHandler taskHandler = (ToolHandler) handler;
+        assertThat(handler).isInstanceOf(SyncTool.class);
+        SyncTool taskHandler = (SyncTool) handler;
 
         Map<String, Object> input = new HashMap<>();
         input.put("description", "create hello.java");
@@ -139,7 +139,7 @@ class TaskToolIT {
                         "session-it",
                         Map.of(TaskToolDependencies.class.getName(), deps));
 
-        ToolResult result = taskHandler.execute(input, ctx);
+        ToolResult result = taskHandler.execute(input, ctx).block();
 
         assertThat(result.isError()).isFalse();
         assertThat(childSpawns.get()).isEqualTo(1);

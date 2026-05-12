@@ -177,7 +177,8 @@ class SessionCommandTest {
     private static io.kairo.api.hook.ToolResultEvent toolEvent(
             String tool, boolean success, long millis) {
         io.kairo.api.tool.ToolResult result =
-                new io.kairo.api.tool.ToolResult("id1", "output", !success, java.util.Map.of());
+                success ? io.kairo.api.tool.ToolResult.success("id1", "output")
+                        : io.kairo.api.tool.ToolResult.error("id1", "output");
         return new io.kairo.api.hook.ToolResultEvent(
                 tool, result, java.time.Duration.ofMillis(millis), success);
     }

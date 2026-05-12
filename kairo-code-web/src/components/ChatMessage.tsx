@@ -251,8 +251,14 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
         <div className="flex justify-start mb-4 animate-slide-up group">
             <div className="max-w-[85%]">
                 <div className={`relative px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)] ${searchHighlight ? 'ring-1 ring-[var(--accent)]/40' : ''} ${isCurrentMatch ? 'ring-2 ring-[var(--accent)]' : ''}`}>
-                    {message.thinking && <ThinkBlock content={message.thinking} />}
-                    {thinkBlocks.map((t, i) => <ThinkBlock key={i} content={t} />)}
+                    {/* Prefer message.thinking (from AGENT_THINKING events) over <think> blocks
+                     *  extracted from the content. Some models emit reasoning via BOTH
+                     *  reasoning_content deltas AND <think> tags in the text body; rendering
+                     *  both produces visible duplication ("TheThe user user ..."). */}
+                    {message.thinking
+                        ? <ThinkBlock content={message.thinking} />
+                        : thinkBlocks.map((t, i) => <ThinkBlock key={i} content={t} />)
+                    }
 
                     {hasContent && (() => {
                         const headings = extractHeadings(mainContent);
@@ -352,7 +358,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                                 className="px-1 py-0.5 rounded bg-[var(--bg-primary)] border border-[var(--border)]/50 text-[12px] font-mono"
                                                 style={{ color: 'var(--accent)', cursor: 'pointer' }}
                                                 onClick={() => onOpenFile?.(content)}
-                                                title={`Open ${content}`}
+                                                title={`Click to open · ${content}`}
                                             >
                                                 {content}
                                             </code>
@@ -394,6 +400,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                                         e.preventDefault();
                                                         onOpenFile?.(text);
                                                     }}
+                                                    title={`Click to open · ${text}`}
                                                     style={{
                                                         color: 'var(--accent)',
                                                         textDecoration: 'underline',
@@ -485,7 +492,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
 
                 {/* Action row sits below the bubble so icons never overlap message text. */}
                 {hasContent && (
-                    <div className="flex items-center gap-1 mt-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 mt-1 ml-2 opacity-60 hover:opacity-100 transition-opacity">
                         {message.timestamp && (
                             <span
                                 className="text-[10px] text-[var(--text-muted)] select-none"

@@ -1,13 +1,10 @@
 package io.kairo.code.service;
 
 import io.kairo.api.agent.Agent;
-import io.kairo.api.exception.AgentInterruptedException;
-import io.kairo.api.exception.ModelRateLimitException;
+import io.kairo.api.agent.AgentDiagnostics;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
-import io.kairo.api.model.ApiErrorType;
-import io.kairo.api.model.ApiException;
 import io.kairo.api.tool.ApprovalResult;
 import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.CodeAgentConfig;
@@ -297,10 +294,11 @@ public class AgentService implements DisposableBean {
         };
 
         // Single terminal emit point: subscribe captures error/response into refs, doFinally
-        // decides exactly one event to emit based on the signal type. Previously both
-        // subscribe(onNext) and doFinally could race to emit AGENT_DONE — fixed by routing all
-        // terminal emits through doFinally's switch on SignalType.
-        java.util.concurrent.atomic.AtomicReference<Throwable> errorRef = new java.util.concurrent.atomic.AtomicReference<>();
+        // handles resource cleanup. Terminal event emission (AGENT_DONE / AGENT_ERROR) is now the
+        // sole responsibility of AgentEventBridgeHook.onSessionEnd() — kairo-core's
+        // TerminalHookGuard guarantees exactly-once delivery, so we no longer need a safety net
+        // emit here. Previously both subscribe(onNext) and doFinally raced to emit — fixed by
+        // delegating terminal events entirely to the hook layer.
         long startedAtMs = System.currentTimeMillis();
 
         agent.call(userMsg)
@@ -312,33 +310,15 @@ public class AgentService implements DisposableBean {
                     slot.close();
                     runningState.put(sessionId, new AtomicBoolean(false));
                     long elapsedMs = System.currentTimeMillis() - startedAtMs;
-                    Throwable err = errorRef.get();
-                    String terminalKind;
-                    if (err != null) {
-                        String errorMsg = err.getMessage();
-                        String errorType = classifyError(err);
-                        if (err instanceof AgentInterruptedException) {
-                            errorType = "INTERRUPTED";
-                            errorMsg = "Agent execution was interrupted";
-                        }
-                        sink.tryEmitNext(AgentEvent.error(sessionId, errorMsg, errorType));
-                        terminalKind = "error";
-                    } else if (signal == reactor.core.publisher.SignalType.CANCEL) {
-                        sink.tryEmitNext(AgentEvent.error(sessionId, "Agent execution was cancelled", "CANCELLED"));
-                        terminalKind = "cancelled";
-                    } else {
-                        sink.tryEmitNext(AgentEvent.done(sessionId, 0, 0.0));
-                        terminalKind = "done";
-                    }
-                    log.info("agent.terminal session={} signal={} kind={} elapsedMs={}",
-                            sessionId, signal, terminalKind, elapsedMs);
+                    log.info("agent.terminal session={} signal={} elapsedMs={}",
+                            sessionId, signal, elapsedMs);
                 })
                 .subscribe(
                         responseMsg -> {
-                            // No-op: terminal emit happens in doFinally. Capture result here only
-                            // if we need it for sessionStore in the future.
+                            // No-op: terminal emit happens in onSessionEnd hook.
                         },
-                        errorRef::set
+                        err -> log.debug("agent.call error for session {}: {}",
+                                sessionId, err.getMessage())
                 );
 
         return sink.asFlux();
@@ -614,29 +594,6 @@ public class AgentService implements DisposableBean {
     }
 
     /**
-     * Classify a throwable into a frontend-friendly error type string.
-     */
-    private static String classifyError(Throwable error) {
-        if (error instanceof ModelRateLimitException) {
-            return "RATE_LIMITED";
-        }
-        if (error instanceof ApiException apiEx) {
-            ApiErrorType type = apiEx.getErrorType();
-            if (type == null) {
-                return "PROVIDER_ERROR";
-            }
-            return switch (type) {
-                case AUTHENTICATION_ERROR -> "AUTH_FAILURE";
-                case RATE_LIMITED -> "RATE_LIMITED";
-                case BUDGET_EXCEEDED -> "QUOTA_EXCEEDED";
-                case SERVER_ERROR -> "PROVIDER_ERROR";
-                default -> "UNKNOWN";
-            };
-        }
-        return error.getClass().getSimpleName();
-    }
-
-    /**
      * If the session's baked credentials no longer match the current default config (because the
      * user updated /api/config after the session was created), rebuild the agent in place using the
      * latest credentials. Returns the same entry untouched when the credentials still match or when
@@ -851,20 +808,40 @@ public class AgentService implements DisposableBean {
 
     /**
      * Build a {@link SessionDiagnostics} snapshot for the given session, or null when unknown.
-     * Reads from the live tracker maintained by {@link AgentEventBridgeHook}.
+     *
+     * <p>Prefers {@link Agent#diagnostics()} from kairo-core (authoritative source maintained by
+     * the agent runtime) when available, falling back to the legacy {@link SessionDiagnosticsTracker}
+     * for agents that don't implement the SPI yet.
      */
     public SessionDiagnostics getSessionDiagnostics(String sessionId) {
         SessionEntry entry = sessions.get(sessionId);
         if (entry == null) {
             return null;
         }
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        int wsClients = sink != null ? sink.currentSubscriberCount() : 0;
+
+        // Prefer kairo-core's AgentDiagnostics when the agent implements it.
+        AgentDiagnostics coreDiag = entry.session().agent().diagnostics();
+        if (coreDiag != null) {
+            long lastEpochMs = coreDiag.lastEventAt() != null
+                    ? coreDiag.lastEventAt().toEpochMilli() : 0L;
+            return new SessionDiagnostics(
+                    sessionId,
+                    coreDiag.running(),
+                    lastEpochMs,
+                    coreDiag.msSinceLastEvent(),
+                    coreDiag.eventCounts(),
+                    wsClients);
+        }
+
+        // Legacy fallback: local tracker maintained by AgentEventBridgeHook.
+        // TODO: remove once all agent implementations expose diagnostics()
         SessionDiagnosticsTracker tracker = diagnosticsTrackers.get(sessionId);
         long lastEventAt = tracker != null ? tracker.lastEventAt() : 0L;
         long now = System.currentTimeMillis();
         long msSince = lastEventAt > 0 ? Math.max(0, now - lastEventAt) : Long.MAX_VALUE;
         Map<String, Long> counts = tracker != null ? tracker.snapshotCounts() : Map.of();
-        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-        int wsClients = sink != null ? sink.currentSubscriberCount() : 0;
         return new SessionDiagnostics(
                 sessionId, isRunning(sessionId), lastEventAt, msSince, counts, wsClients);
     }

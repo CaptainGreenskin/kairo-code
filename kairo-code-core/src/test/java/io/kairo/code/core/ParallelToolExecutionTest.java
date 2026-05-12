@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.kairo.api.tool.ToolCategory;
 import io.kairo.api.tool.ToolDefinition;
-import io.kairo.api.tool.ToolHandler;
+import io.kairo.api.tool.SyncTool;
 import io.kairo.api.tool.ToolResult;
 import io.kairo.api.tool.ToolSideEffect;
 import io.kairo.api.tool.JsonSchema;
@@ -33,6 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Mono;
 
 /**
  * Verifies that kairo-code's tool registration correctly supports parallel execution
@@ -56,7 +57,7 @@ class ParallelToolExecutionTest {
         executor = new DefaultToolExecutor(registry, new DefaultPermissionGuard());
     }
 
-    private void registerTool(String name, ToolSideEffect sideEffect, ToolHandler handler) {
+    private void registerTool(String name, ToolSideEffect sideEffect, SyncTool handler) {
         ToolDefinition def = new ToolDefinition(
                 name, "test tool: " + name, ToolCategory.GENERAL,
                 new JsonSchema("object", null, null, null),
@@ -76,14 +77,14 @@ class ParallelToolExecutionTest {
 
         for (int i = 0; i < 3; i++) {
             String name = "read_" + i;
-            registerTool(name, ToolSideEffect.READ_ONLY, input -> {
+            registerTool(name, ToolSideEffect.READ_ONLY, (input, ctx) -> {
                 int current = concurrentCount.incrementAndGet();
                 maxConcurrent.updateAndGet(max -> Math.max(max, current));
                 try { Thread.sleep(100); } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
                 concurrentCount.decrementAndGet();
-                return new ToolResult(name, "ok", false, Map.of());
+                return Mono.just(ToolResult.success(name, "ok"));
             });
         }
 
@@ -110,9 +111,9 @@ class ParallelToolExecutionTest {
 
         for (int i = 0; i < 3; i++) {
             String name = "write_" + i;
-            registerTool(name, ToolSideEffect.WRITE, input -> {
+            registerTool(name, ToolSideEffect.WRITE, (input, ctx) -> {
                 order.add(name);
-                return new ToolResult(name, "ok", false, Map.of());
+                return Mono.just(ToolResult.success(name, "ok"));
             });
         }
 
@@ -135,7 +136,7 @@ class ParallelToolExecutionTest {
         var executionOrder = new CopyOnWriteArrayList<String>();
         AtomicInteger concurrentReads = new AtomicInteger(0);
 
-        registerTool("read_a", ToolSideEffect.READ_ONLY, input -> {
+        registerTool("read_a", ToolSideEffect.READ_ONLY, (input, ctx) -> {
             executionOrder.add("read_a_start");
             int c = concurrentReads.incrementAndGet();
             if (c > 1) executionOrder.add("read_concurrent:" + c);
@@ -144,12 +145,12 @@ class ParallelToolExecutionTest {
             }
             concurrentReads.decrementAndGet();
             executionOrder.add("read_a_end");
-            return new ToolResult("read_a", "data", false, Map.of());
+            return Mono.just(ToolResult.success("read_a", "data"));
         });
 
-        registerTool("write_b", ToolSideEffect.WRITE, input -> {
+        registerTool("write_b", ToolSideEffect.WRITE, (input, ctx) -> {
             executionOrder.add("write_b");
-            return new ToolResult("write_b", "ok", false, Map.of());
+            return Mono.just(ToolResult.success("write_b", "ok"));
         });
 
         var invocations = List.of(
@@ -172,11 +173,11 @@ class ParallelToolExecutionTest {
     @Test
     void resultsReturnedInOriginalOrder() {
         registerTool("read", ToolSideEffect.READ_ONLY,
-                input -> new ToolResult("read", "read_result", false, Map.of()));
+                (input, ctx) -> Mono.just(ToolResult.success("read", "read_result")));
         registerTool("write", ToolSideEffect.WRITE,
-                input -> new ToolResult("write", "write_result", false, Map.of()));
+                (input, ctx) -> Mono.just(ToolResult.success("write", "write_result")));
         registerTool("grep", ToolSideEffect.READ_ONLY,
-                input -> new ToolResult("grep", "grep_result", false, Map.of()));
+                (input, ctx) -> Mono.just(ToolResult.success("grep", "grep_result")));
 
         var invocations = List.of(
                 new io.kairo.api.tool.ToolInvocation("read", Map.of()),
@@ -202,9 +203,11 @@ class ParallelToolExecutionTest {
 
         for (int i = 0; i < numReads; i++) {
             String name = "fast_read_" + i;
-            registerTool(name, ToolSideEffect.READ_ONLY, input -> {
-                Thread.sleep(sleepMs);
-                return new ToolResult(name, "ok", false, Map.of());
+            registerTool(name, ToolSideEffect.READ_ONLY, (input, ctx) -> {
+                try { Thread.sleep(sleepMs); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return Mono.just(ToolResult.success(name, "ok"));
             });
         }
 

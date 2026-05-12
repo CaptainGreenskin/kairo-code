@@ -77,7 +77,7 @@ class TaskToolTest {
         input.put("prompt", "create child.txt");
         input.put("__tool_use_id", "tu-1");
 
-        ToolResult result = tool.execute(input, ctx);
+        ToolResult result = tool.execute(input, ctx).block();
 
         assertThat(result.isError()).isFalse();
         assertThat(spawnCount.get()).isEqualTo(1);
@@ -123,7 +123,7 @@ class TaskToolTest {
         input.put("description", "throwaway");
         input.put("prompt", "create child.txt");
 
-        ToolResult result = tool.execute(input, ctxWithDeps(deps));
+        ToolResult result = tool.execute(input, ctxWithDeps(deps)).block();
 
         assertThat(result.isError()).isFalse();
         assertThat(result.content()).contains("outcome=\"discard\"");
@@ -151,7 +151,7 @@ class TaskToolTest {
         input.put("description", "no-op");
         input.put("prompt", "do nothing");
 
-        ToolResult result = tool.execute(input, ctxWithDeps(deps));
+        ToolResult result = tool.execute(input, ctxWithDeps(deps)).block();
 
         assertThat(result.isError()).isFalse();
         assertThat(promptCalls.get()).isZero();
@@ -167,7 +167,7 @@ class TaskToolTest {
         input.put("prompt", "y");
 
         ToolContext ctx = new ToolContext("agent", "session", Map.of());
-        ToolResult result = tool.execute(input, ctx);
+        ToolResult result = tool.execute(input, ctx).block();
 
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).contains("TaskToolDependencies not registered");
@@ -189,7 +189,7 @@ class TaskToolTest {
         input.put("description", "  ");
         input.put("prompt", "do something");
 
-        ToolResult result = tool.execute(input, ctxWithDeps(deps));
+        ToolResult result = tool.execute(input, ctxWithDeps(deps)).block();
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).contains("description");
     }

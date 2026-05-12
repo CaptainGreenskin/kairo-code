@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class ToolUsageTrackerTest {
 
     private static ToolResultEvent event(String tool, boolean success, long millis) {
-        ToolResult result = new ToolResult("id1", "output", !success, Map.of());
+        ToolResult result = success ? ToolResult.success("id1", "output") : ToolResult.error("id1", "output");
         return new ToolResultEvent(tool, result, Duration.ofMillis(millis), success);
     }
 

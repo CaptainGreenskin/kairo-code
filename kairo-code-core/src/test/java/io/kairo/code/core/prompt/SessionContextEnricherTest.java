@@ -17,7 +17,7 @@ class SessionContextEnricherTest {
     private static final String BASE = "You are Kairo Code.";
 
     private static ToolResultEvent event(String tool, boolean success, long millis) {
-        ToolResult result = new ToolResult("id", "output", !success, Map.of());
+        ToolResult result = success ? ToolResult.success("id", "output") : ToolResult.error("id", "output");
         return new ToolResultEvent(tool, result, Duration.ofMillis(millis), success);
     }
 

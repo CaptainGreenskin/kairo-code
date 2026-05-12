@@ -20,7 +20,7 @@ import io.kairo.api.message.MsgRole;
 import io.kairo.api.tool.Tool;
 import io.kairo.api.tool.ToolCategory;
 import io.kairo.api.tool.ToolContext;
-import io.kairo.api.tool.ToolHandler;
+import io.kairo.api.tool.SyncTool;
 import io.kairo.api.tool.ToolParam;
 import io.kairo.api.tool.ToolResult;
 import io.kairo.api.tool.ToolSideEffect;
@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
 
 /**
  * Spawn a child agent session to handle a sub-task in isolation, then return its final response to
@@ -71,7 +72,7 @@ import org.slf4j.LoggerFactory;
                 "Prefer one task call per coherent sub-goal. Keep prompts concrete: state the inputs, the "
                         + "expected output, and any constraints. Avoid spawning a task for trivial work that "
                         + "would fit in 1-2 tool calls.")
-public class TaskTool implements ToolHandler {
+public class TaskTool implements SyncTool {
 
     private static final Logger LOG = LoggerFactory.getLogger(TaskTool.class);
 
@@ -94,31 +95,24 @@ public class TaskTool implements ToolHandler {
     private String isolation;
 
     @Override
-    public ToolResult execute(Map<String, Object> input) {
-        return error(
-                null,
-                "TaskTool requires ToolContext. Ensure the agent invokes execute(input, context).");
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> input, ToolContext context) {
+    public Mono<ToolResult> execute(Map<String, Object> input, ToolContext context) {
         TaskToolDependencies deps =
                 context.getBean(TaskToolDependencies.class).orElse(null);
         if (deps == null) {
-            return error(
+            return Mono.just(error(
                     null,
                     "TaskToolDependencies not registered in agent's toolDependencies. "
-                            + "Wire it via AgentBuilder.toolDependencies(...).");
+                            + "Wire it via AgentBuilder.toolDependencies(...).")); 
         }
 
         String descIn = stringInput(input, "description");
         String promptIn = stringInput(input, "prompt");
         String isoIn = stringInput(input, "isolation");
         if (descIn == null || descIn.isBlank()) {
-            return error(null, "Parameter 'description' is required and must be non-blank.");
+            return Mono.just(error(null, "Parameter 'description' is required and must be non-blank."));
         }
         if (promptIn == null || promptIn.isBlank()) {
-            return error(null, "Parameter 'prompt' is required and must be non-blank.");
+            return Mono.just(error(null, "Parameter 'prompt' is required and must be non-blank."));
         }
         boolean writable = !"none".equalsIgnoreCase(isoIn);
         String taskId = newTaskId();
@@ -133,7 +127,7 @@ public class TaskTool implements ToolHandler {
             ws = provider.acquire(req);
         } catch (WorktreeException e) {
             LOG.warn("Worktree acquire failed for task {}: {}", taskId, e.getMessage());
-            return error(toolUseId, "Failed to set up workspace for sub-task: " + e.getMessage());
+            return Mono.just(error(toolUseId, "Failed to set up workspace for sub-task: " + e.getMessage()));
         }
 
         boolean isolated = "worktree".equals(ws.metadata().get("kairo.workspace.isolation"));
@@ -181,11 +175,11 @@ public class TaskTool implements ToolHandler {
         provider.release(ws.id());
 
         if (childFailure != null) {
-            return error(
+            return Mono.just(error(
                     toolUseId,
-                    "Child agent for task '" + descIn + "' failed: " + childFailure.getMessage());
+                    "Child agent for task '" + descIn + "' failed: " + childFailure.getMessage()));
         }
-        return ok(toolUseId, taskId, descIn, isolated, choice, diff, keptAt, childResponse);
+        return Mono.just(ok(toolUseId, taskId, descIn, isolated, choice, diff, keptAt, childResponse));
     }
 
     /* ------------------------------------------------------------------ helpers */
@@ -231,7 +225,7 @@ public class TaskTool implements ToolHandler {
     }
 
     private static ToolResult error(String toolUseId, String message) {
-        return new ToolResult(toolUseId, message, true, Map.of());
+        return ToolResult.error(toolUseId, message);
     }
 
     private static ToolResult ok(
@@ -269,7 +263,7 @@ public class TaskTool implements ToolHandler {
         meta.put("task.insertions", diff.insertions());
         meta.put("task.deletions", diff.deletions());
         if (keptAt != null) meta.put("task.kept_at", keptAt.toString());
-        return new ToolResult(toolUseId, sb.toString(), false, Map.copyOf(meta));
+        return ToolResult.success(toolUseId, sb.toString(), Map.copyOf(meta));
     }
 
     private static String attr(String key, String value) {

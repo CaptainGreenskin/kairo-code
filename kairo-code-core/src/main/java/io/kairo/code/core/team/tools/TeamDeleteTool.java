@@ -17,12 +17,14 @@ package io.kairo.code.core.team.tools;
 
 import io.kairo.api.tool.Tool;
 import io.kairo.api.tool.ToolCategory;
-import io.kairo.api.tool.ToolHandler;
+import io.kairo.api.tool.ToolContext;
 import io.kairo.api.tool.ToolParam;
 import io.kairo.api.tool.ToolResult;
+import io.kairo.api.tool.SyncTool;
 import io.kairo.api.tool.ToolSideEffect;
 import io.kairo.code.core.team.TeamManager;
 import java.util.Map;
+import reactor.core.publisher.Mono;
 
 /**
  * Tool to dissolve (delete) an existing team.
@@ -33,7 +35,7 @@ import java.util.Map;
     category = ToolCategory.GENERAL,
     sideEffect = ToolSideEffect.READ_ONLY
 )
-public class TeamDeleteTool implements ToolHandler {
+public class TeamDeleteTool implements SyncTool {
 
     private final TeamManager teamManager;
 
@@ -45,28 +47,24 @@ public class TeamDeleteTool implements ToolHandler {
     private String teamId;
 
     @Override
-    public ToolResult execute(Map<String, Object> input) {
+    public Mono<ToolResult> execute(Map<String, Object> input, ToolContext ctx) {
         String teamIdIn = stringInput(input, "teamId");
 
         if (teamIdIn == null || teamIdIn.isBlank()) {
-            return errorResult("Parameter 'teamId' is required and must be non-blank.");
+            return Mono.just(ToolResult.error(null, "Parameter 'teamId' is required and must be non-blank."));
         }
 
         if (teamManager.getTeam(teamIdIn).isEmpty()) {
-            return errorResult("Team not found: " + teamIdIn);
+            return Mono.just(ToolResult.error(null, "Team not found: " + teamIdIn));
         }
 
         teamManager.dissolveTeam(teamIdIn);
         String json = "{\"dissolved\": true, \"teamId\": \"" + teamIdIn + "\"}";
-        return new ToolResult(null, json, false, Map.of());
+        return Mono.just(ToolResult.success(null, json));
     }
 
     private static String stringInput(Map<String, Object> input, String key) {
         Object v = input.get(key);
         return v == null ? null : v.toString();
-    }
-
-    private static ToolResult errorResult(String message) {
-        return new ToolResult(null, message, true, Map.of());
     }
 }

@@ -232,7 +232,7 @@ class ExecutionTraceHookTest {
 
     private static PostActingEvent postActing(String toolName, boolean isError) {
         return new PostActingEvent(
-                toolName, new ToolResult("tool-1", "ok", isError, Map.of()));
+                toolName, isError ? ToolResult.error("tool-1", "ok") : ToolResult.success("tool-1", "ok"));
     }
 
     private static PostReasoningEvent postReasoning() {

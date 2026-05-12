@@ -18,6 +18,7 @@ package io.kairo.code.core.team.tools;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import io.kairo.api.tool.ToolContext;
 import io.kairo.api.tool.ToolResult;
 import io.kairo.code.core.team.MessageBus;
 import io.kairo.code.core.team.Team;
@@ -46,7 +47,7 @@ class TeamToolsTest {
         ToolResult result = tool.execute(Map.of(
             "name", "test-team",
             "goal", "build feature"
-        ));
+        ), null).block();
 
         assertThat(result.isError()).isFalse();
         assertThat(result.content()).contains("\"teamId\":");
@@ -63,7 +64,7 @@ class TeamToolsTest {
         TeamCreateTool tool = new TeamCreateTool(teamManager);
         ToolResult result = tool.execute(Map.of(
             "goal", "build feature"
-        ));
+        ), null).block();
 
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).contains("'name' is required");
@@ -74,7 +75,7 @@ class TeamToolsTest {
         TeamCreateTool tool = new TeamCreateTool(teamManager);
         ToolResult result = tool.execute(Map.of(
             "name", "test-team"
-        ));
+        ), null).block();
 
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).contains("'goal' is required");
@@ -87,7 +88,7 @@ class TeamToolsTest {
 
         ToolResult result = tool.execute(Map.of(
             "teamId", team.teamId()
-        ));
+        ), null).block();
 
         assertThat(result.isError()).isFalse();
         assertThat(result.content()).contains("\"dissolved\": true");
@@ -100,7 +101,7 @@ class TeamToolsTest {
 
         ToolResult result = tool.execute(Map.of(
             "teamId", "nonexistent"
-        ));
+        ), null).block();
 
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).contains("Team not found");
@@ -110,7 +111,7 @@ class TeamToolsTest {
     void teamDeleteToolMissingTeamId() {
         TeamDeleteTool tool = new TeamDeleteTool(teamManager);
 
-        ToolResult result = tool.execute(Map.of());
+        ToolResult result = tool.execute(Map.of(), null).block();
 
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).contains("'teamId' is required");
@@ -128,7 +129,7 @@ class TeamToolsTest {
             "message", "hello worker",
             "teamId", team.teamId(),
             "fromSessionId", "session-coordinator"
-        ));
+        ), null).block();
 
         assertThat(result.isError()).isFalse();
         assertThat(result.content()).contains("\"delivered\": true");
@@ -151,7 +152,7 @@ class TeamToolsTest {
             "message", "hello",
             "teamId", team.teamId(),
             "fromSessionId", "session-coordinator"
-        ));
+        ), null).block();
 
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).contains("Member not found");
@@ -171,7 +172,7 @@ class TeamToolsTest {
             "message", "broadcast msg",
             "teamId", team.teamId(),
             "fromSessionId", "s-coord"
-        ));
+        ), null).block();
 
         assertThat(result.isError()).isFalse();
         assertThat(result.content()).contains("\"delivered\": true");
@@ -184,7 +185,7 @@ class TeamToolsTest {
     void sendMessageMissingParams() {
         SendMessageTool tool = new SendMessageTool(teamManager, messageBus);
 
-        ToolResult result = tool.execute(Map.of("to", "w1"));
+        ToolResult result = tool.execute(Map.of("to", "w1"), null).block();
 
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).contains("'message' is required");
