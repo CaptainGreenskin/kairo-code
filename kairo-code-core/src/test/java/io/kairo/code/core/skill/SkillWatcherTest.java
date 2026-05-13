@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -50,9 +52,10 @@ class SkillWatcherTest {
         Path projectDir = Files.createDirectories(tempDir.resolve("project"));
 
         FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir);
+        CountDownLatch latch = new CountDownLatch(1);
         List<List<SkillWithSource>> received = new CopyOnWriteArrayList<>();
         try (SkillWatcher watcher = new SkillWatcher(loader)) {
-            watcher.addListener(received::add);
+            watcher.addListener(skills -> { received.add(skills); latch.countDown(); });
 
             // Give the watcher thread time to register directories
             Thread.sleep(300);
@@ -70,10 +73,8 @@ class SkillWatcherTest {
                     """);
 
             // Wait up to 5 seconds for debounce + notification
-            long deadline = System.currentTimeMillis() + 5000;
-            while (received.isEmpty() && System.currentTimeMillis() < deadline) {
-                Thread.sleep(200);
-            }
+            assertThat(latch.await(5, TimeUnit.SECONDS))
+                    .as("Event not received within 5s").isTrue();
         }
         assertThat(received).as("Listener should have been called after file change").isNotEmpty();
         assertThat(received.get(0)).anySatisfy(s ->
@@ -86,9 +87,10 @@ class SkillWatcherTest {
 
         FsSkillLoader loader = new FsSkillLoader(globalDir, null);
 
+        CountDownLatch latch = new CountDownLatch(1);
         List<List<SkillWithSource>> received = new CopyOnWriteArrayList<>();
         try (SkillWatcher watcher = new SkillWatcher(loader)) {
-            watcher.addListener(received::add);
+            watcher.addListener(skills -> { received.add(skills); latch.countDown(); });
 
             // Give the watcher thread time to register directories
             Thread.sleep(300);
@@ -107,10 +109,8 @@ class SkillWatcherTest {
             }
 
             // Wait for debounce to fire
-            long deadline = System.currentTimeMillis() + 5000;
-            while (received.isEmpty() && System.currentTimeMillis() < deadline) {
-                Thread.sleep(200);
-            }
+            assertThat(latch.await(5, TimeUnit.SECONDS))
+                    .as("Debounce event not received within 5s").isTrue();
         }
 
         // Should have received at least one reload
@@ -125,6 +125,7 @@ class SkillWatcherTest {
         Path globalDir = Files.createDirectories(tempDir.resolve("global"));
         FsSkillLoader loader = new FsSkillLoader(globalDir, null);
 
+        CountDownLatch latch = new CountDownLatch(1);
         AtomicBoolean goodListenerCalled = new AtomicBoolean(false);
 
         try (SkillWatcher watcher = new SkillWatcher(loader)) {
@@ -134,7 +135,7 @@ class SkillWatcherTest {
             });
 
             // Add a good listener
-            watcher.addListener(skills -> goodListenerCalled.set(true));
+            watcher.addListener(skills -> { goodListenerCalled.set(true); latch.countDown(); });
 
             // Give the watcher thread time to register directories
             Thread.sleep(300);
@@ -148,10 +149,8 @@ class SkillWatcherTest {
                     # Test
                     """);
 
-            long deadline = System.currentTimeMillis() + 5000;
-            while (!goodListenerCalled.get() && System.currentTimeMillis() < deadline) {
-                Thread.sleep(200);
-            }
+            assertThat(latch.await(5, TimeUnit.SECONDS))
+                    .as("Good listener should have been called within 5s").isTrue();
         }
         assertThat(goodListenerCalled).as("Good listener should have been called").isTrue();
     }

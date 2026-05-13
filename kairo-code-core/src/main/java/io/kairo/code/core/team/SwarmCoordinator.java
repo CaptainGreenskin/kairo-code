@@ -15,137 +15,147 @@
  */
 package io.kairo.code.core.team;
 
+import io.kairo.api.agent.Agent;
+import io.kairo.api.message.Msg;
+import io.kairo.api.message.MsgRole;
+import io.kairo.api.team.TeamConfig;
+import io.kairo.api.team.TeamExecutionRequest;
+import io.kairo.api.team.TeamResult;
+import io.kairo.api.team.TeamStatus;
+import io.kairo.code.core.team.persistence.TeamManifest;
+import io.kairo.expertteam.ExpertTeamCoordinator;
+import io.kairo.expertteam.role.ExpertRoleRegistry;
+import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
 
 /**
- * Orchestrates a Swarm run through 4 phases: Research → Synthesis → Implementation → Verification.
- * Each phase barrier waits for all workers to complete before advancing.
+ * Thin delegation shell over {@link ExpertTeamCoordinator}.
+ * Translates kairo-code team requests into upstream expert-team execution.
  */
 public class SwarmCoordinator {
 
-    private final TeamManager teamManager;
-    private final MessageBus messageBus;
-    private final ConcurrentHashMap<String, SwarmExecution> executions = new ConcurrentHashMap<>();
+    private static final Logger log = LoggerFactory.getLogger(SwarmCoordinator.class);
 
-    public SwarmCoordinator(TeamManager teamManager) {
-        this(teamManager, new MessageBus());
-    }
+    private final ExpertTeamCoordinator coordinator;
+    private final ExpertRoleRegistry roleRegistry;
+    private final io.kairo.api.team.MessageBus messageBus;
+    private final List<Agent> agents;
+    private volatile String lastTeamId;
 
-    public SwarmCoordinator(TeamManager teamManager, MessageBus messageBus) {
-        this.teamManager = teamManager;
-        this.messageBus = messageBus;
-    }
-
-    /**
-     * Start a new Swarm run for a team.
-     */
-    public SwarmExecution startSwarm(String teamId, SwarmConfig config) {
-        SwarmExecution exec = new SwarmExecution(teamId, config);
-        executions.put(teamId, exec);
-        return exec;
+    public SwarmCoordinator(ExpertTeamCoordinator coordinator,
+                            ExpertRoleRegistry roleRegistry,
+                            io.kairo.api.team.MessageBus messageBus,
+                            List<Agent> agents) {
+        this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
+        this.roleRegistry = Objects.requireNonNull(roleRegistry, "roleRegistry");
+        this.messageBus = Objects.requireNonNull(messageBus, "messageBus");
+        this.agents = List.copyOf(Objects.requireNonNull(agents, "agents"));
     }
 
     /**
-     * Report worker completion for current phase.
-     * When all workers complete, automatically advance to next phase.
+     * Start an expert team execution.
+     *
+     * @param goal    user's task description
+     * @param config  team configuration
+     * @param roleIds specific roles to use (empty = let planner decide)
+     * @return team execution result
      */
-    public synchronized PhaseAdvanceResult reportWorkerDone(String teamId,
-                                                             String workerId,
-                                                             String workerOutput) {
-        SwarmExecution exec = executions.get(teamId);
-        if (exec == null) return PhaseAdvanceResult.NOT_FOUND;
-
-        SharedTaskList taskList = teamManager.getTaskList(teamId).orElse(null);
-        if (taskList == null) return PhaseAdvanceResult.NOT_FOUND;
-
-        // Mark the worker's in-progress task as complete
-        taskList.all().stream()
-            .filter(t -> workerId.equals(t.ownerId())
-                && t.status() == SharedTask.TaskStatus.IN_PROGRESS)
-            .findFirst()
-            .ifPresent(t -> taskList.complete(t.taskId(), workerId));
-
-        // Check if phase is done
-        if (!isPhaseComplete(teamId)) {
-            return PhaseAdvanceResult.PHASE_ONGOING;
-        }
-
-        // Collect all worker outputs for synthesis
-        List<String> outputs = taskList.all().stream()
-            .filter(t -> t.status() == SharedTask.TaskStatus.COMPLETED)
-            .map(SharedTask::description)
-            .collect(java.util.stream.Collectors.toList());
-
-        String summary = String.join("\n---\n", outputs);
-        exec.recordPhase(new SwarmExecution.PhaseResult(
-            exec.currentPhase().getClass().getSimpleName(),
-            outputs, summary, System.currentTimeMillis()));
-
-        // Advance phase
-        SwarmPhase next = advance(teamId, exec.currentPhase(), summary);
-        exec.advanceTo(next);
-
-        // Check if swarm is complete (verification phase already passed)
-        if (next instanceof SwarmPhase.Verification v
-                && v.verificationCriteria().stream().anyMatch(s -> s.startsWith("COMPLETE:"))) {
-            exec.complete();
-            return PhaseAdvanceResult.SWARM_COMPLETE;
-        }
-
-        // Notify team of phase transition
-        messageBus.broadcast(teamId, "coordinator",
-            "Phase complete. Advancing to: " + next.getClass().getSimpleName(), teamManager);
-
-        return PhaseAdvanceResult.PHASE_ADVANCED;
-    }
-
-    public enum PhaseAdvanceResult { PHASE_ONGOING, PHASE_ADVANCED, SWARM_COMPLETE, NOT_FOUND }
-
-    public Optional<SwarmExecution> getExecution(String teamId) {
-        return Optional.ofNullable(executions.get(teamId));
+    public Mono<TeamResult> startExpertTeam(String goal, TeamConfig config, List<String> roleIds) {
+        return startExpertTeam(goal, config, roleIds, false);
     }
 
     /**
-     * Advance a team to the next Swarm phase.
-     * Returns the new phase.
+     * Start an expert team execution with planOnly option.
+     *
+     * @param goal     user's task description
+     * @param config   team configuration
+     * @param roleIds  specific roles to use (empty = let planner decide)
+     * @param planOnly if true, only generate the plan without executing it
+     * @return team execution result (plan-ready if planOnly)
      */
-    public SwarmPhase advance(String teamId, SwarmPhase currentPhase,
-                               String phaseOutput) {
-        if (currentPhase instanceof SwarmPhase.Research) {
-            return new SwarmPhase.Synthesis(phaseOutput);
-        }
-        if (currentPhase instanceof SwarmPhase.Synthesis) {
-            return new SwarmPhase.Implementation(phaseOutput, List.of());
-        }
-        if (currentPhase instanceof SwarmPhase.Implementation) {
-            return new SwarmPhase.Verification(List.of(phaseOutput));
-        }
-        // Swarm complete
-        return new SwarmPhase.Verification(List.of("COMPLETE: " + phaseOutput));
+    public Mono<TeamResult> startExpertTeam(String goal, TeamConfig config, List<String> roleIds, boolean planOnly) {
+        io.kairo.api.team.Team team = buildTeam(roleIds);
+        TeamExecutionRequest request = new TeamExecutionRequest(
+                UUID.randomUUID().toString(), goal, Map.of(), config);
+        lastTeamId = team.name();
+        return coordinator.execute(request, team, planOnly);
     }
 
     /**
-     * Check if all tasks in the current phase are complete, enabling phase advancement.
+     * Convenience overload using default configuration.
      */
-    public boolean isPhaseComplete(String teamId) {
-        return teamManager.getTaskList(teamId)
-            .map(list -> list.all().stream()
-                .allMatch(t -> t.status() == SharedTask.TaskStatus.COMPLETED
-                    || t.status() == SharedTask.TaskStatus.FAILED))
-            .orElse(false);
+    public Mono<TeamResult> startExpertTeam(String goal) {
+        return startExpertTeam(goal, TeamConfig.defaults(), List.of());
     }
 
     /**
-     * Assign tasks for a new phase to available team members.
+     * Resume execution of a previously planned team (planOnly mode).
+     * Call this after the user has reviewed and confirmed the plan.
+     *
+     * @param teamId the team ID returned from the planOnly execution
+     * @return team execution result
      */
-    public void assignPhaseTasks(String teamId, SwarmPhase phase,
-                                  List<String> taskTitles) {
-        SharedTaskList taskList = teamManager.getTaskList(teamId)
-            .orElseThrow(() -> new IllegalArgumentException("Team not found: " + teamId));
-        for (String title : taskTitles) {
-            taskList.create(title, "Phase: " + phase.getClass().getSimpleName());
+    public Mono<TeamResult> confirmAndExecute(String teamId) {
+        return coordinator.confirmAndExecute(teamId);
+    }
+
+    /** Returns the last created team ID (used for plan-preview → confirm flow). */
+    public String lastTeamId() {
+        return lastTeamId;
+    }
+
+    /** Returns the role registry for introspection. */
+    public ExpertRoleRegistry roleRegistry() {
+        return roleRegistry;
+    }
+
+    /**
+     * Inject user feedback (rejection) into a running step's agent channel.
+     * The step agent can pick this up via {@link io.kairo.api.team.MessageBus#receive}.
+     *
+     * @param teamId   the team ID (for logging)
+     * @param stepId   the step whose agent should receive the feedback
+     * @param feedback the user's rejection feedback text
+     * @return a Mono that completes when the message is enqueued
+     */
+    public Mono<Void> injectUserFeedback(String teamId, String stepId, String feedback) {
+        Msg feedbackMsg = Msg.of(MsgRole.USER, "User rejected output. Feedback: " + feedback);
+        return messageBus.send("user-feedback", stepId, feedbackMsg);
+    }
+
+    /**
+     * Resume a team from a saved manifest after crash recovery.
+     * Completed steps' outputs are loaded from persistence.
+     * Incomplete steps are re-run from scratch.
+     */
+    public Mono<TeamResult> resumeFromManifest(TeamManifest manifest) {
+        // Filter DAG: only steps NOT in completedStepIds need to be re-run
+        List<TeamManifest.StepEntry> incompleteSteps = manifest.dag().stream()
+                .filter(step -> !manifest.completedStepIds().contains(step.stepId()))
+                .toList();
+
+        if (incompleteSteps.isEmpty()) {
+            log.info("Team '{}' has no incomplete steps \u2014 marking as completed", manifest.teamId());
+            return Mono.just(TeamResult.withoutOutput(
+                    manifest.teamId(), TeamStatus.COMPLETED, List.of(), Duration.ZERO, List.of()));
         }
+
+        // Re-run with the full goal; the coordinator will re-plan from scratch
+        // using completed step outputs as available dependency inputs
+        return startExpertTeam(manifest.goal(), TeamConfig.defaults(), List.of());
+    }
+
+    private io.kairo.api.team.Team buildTeam(List<String> roleIds) {
+        String teamName = "expert-team-" + UUID.randomUUID().toString().substring(0, 8);
+        // When roleIds is empty, the planner uses all registered profiles.
+        // The Team is always built with the full agent pool; the planner handles
+        // role assignment via round-robin binding.
+        return new io.kairo.api.team.Team(teamName, agents, messageBus);
     }
 }

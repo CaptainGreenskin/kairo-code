@@ -2,7 +2,6 @@ package io.kairo.code.service;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentDiagnostics;
-import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.tool.ApprovalResult;
@@ -13,9 +12,16 @@ import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.hook.ContextCompactionHook;
+import io.kairo.code.service.agent.AgentSessionPayload;
+import io.kairo.code.service.agent.MessageRequest;
+import io.kairo.code.service.agent.SessionPayload;
+import io.kairo.code.service.agent.TeamSessionPayload;
 import io.kairo.code.service.concurrency.AgentConcurrencyController;
+import io.kairo.code.service.team.TriageGate;
+import io.kairo.code.core.team.SwarmCoordinator;
 import io.kairo.code.service.concurrency.AgentConcurrencyException;
 import io.kairo.code.service.concurrency.AgentSlot;
+import io.kairo.code.service.workspace.WorkspaceSnapshotService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
@@ -29,12 +35,15 @@ import reactor.util.concurrent.Queues;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.Base64;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -53,6 +62,18 @@ public class AgentService implements DisposableBean {
     private final Map<String, SessionEntry> sessions = new ConcurrentHashMap<>();
     private final Map<String, AtomicBoolean> runningState = new ConcurrentHashMap<>();
     private final Map<String, ToolProgressTracker> progressTrackers = new ConcurrentHashMap<>();
+
+    // ── Plan-pending state machine ──────────────────────────────────────────────
+    /** Per-session lifecycle phase. */
+    private final Map<String, AtomicReference<SessionPhase>> sessionPhases = new ConcurrentHashMap<>();
+    /** Per-session bounded queue for refinement messages while PLAN_PENDING (max 5, drop-newest). */
+    private final Map<String, Deque<io.kairo.api.message.Msg>> planRefinementQueues = new ConcurrentHashMap<>();
+    /** Per-session plan overview captured by the intercept hook. */
+    private final Map<String, String> planOverviews = new ConcurrentHashMap<>();
+    /** Maximum pending refinement messages per session. */
+    private static final int MAX_REFINEMENT_QUEUE_SIZE = 5;
+    /** Serialization lock for plan refinement requests (one LLM call at a time per session). */
+    private final Map<String, AtomicBoolean> refinementLocks = new ConcurrentHashMap<>();
     /** Per-session telemetry counters, updated by {@link AgentEventBridgeHook} on each emit
      *  and read by {@code SessionDiagnosticsController}. Lazily created on first read/write. */
     private final Map<String, SessionDiagnosticsTracker> diagnosticsTrackers = new ConcurrentHashMap<>();
@@ -71,8 +92,17 @@ public class AgentService implements DisposableBean {
     @Autowired(required = false)
     private Tracer tracer;
 
+    @Autowired(required = false)
+    private SwarmCoordinator swarmCoordinator;
+
+    @Autowired(required = false)
+    private TriageGate triageGate;
+
     @Autowired
     private WorktreeManager worktreeManager;
+
+    @Autowired
+    private WorkspaceSnapshotService workspaceSnapshotService;
 
     private volatile CodeAgentConfig defaultConfig;
 
@@ -113,16 +143,29 @@ public class AgentService implements DisposableBean {
     }
 
     /**
-     * Create a new session bound to a workspace. If {@code useWorktree} is true and the workspace
-     * is a git repo, the session runs in a fresh worktree on branch {@code kairo/<sid8>}; otherwise
-     * the session runs directly in {@code config.workingDir()}.
+     * Create a new session bound to a workspace (defaults to "chat" mode).
+     */
+    public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree) {
+        return createSession(config, workspaceId, useWorktree, "chat");
+    }
+
+    /**
+     * Create a new session bound to a workspace with explicit session mode.
+     * If {@code useWorktree} is true and the workspace is a git repo, the session runs in a
+     * fresh worktree on branch {@code kairo/<sid8>}; otherwise the session runs directly in
+     * {@code config.workingDir()}.
      *
      * @param config       agent config (its {@code workingDir} is the workspace dir)
      * @param workspaceId  owning workspace id (may be null for legacy tests)
      * @param useWorktree  whether to provision a per-session git worktree
+     * @param sessionMode  "chat" for single-agent, "experts" for expert-team
      * @return the new session ID
      */
-    public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree) {
+    public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
+                                String sessionMode) {
+        if (sessionMode == null || sessionMode.isBlank()) {
+            sessionMode = "chat";
+        }
         String sessionId = UUID.randomUUID().toString();
 
         // Resolve effective cwd via worktree manager. Falls back to workspace dir when not a git
@@ -177,6 +220,21 @@ public class AgentService implements DisposableBean {
         // single source of truth for compaction in this session.
         ContextCompactionHook compactionHook = buildCompactionHook(sink, sessionId);
 
+        // Plan-pending state machine: register phase and intercept hook
+        String finalWorkingDir = config.workingDir();
+        AtomicReference<SessionPhase> phaseRef = new AtomicReference<>(SessionPhase.IDLE);
+        sessionPhases.put(sessionId, phaseRef);
+        planRefinementQueues.put(sessionId, new ArrayDeque<>());
+        refinementLocks.put(sessionId, new AtomicBoolean(false));
+        PlanPendingInterceptHook planHook = new PlanPendingInterceptHook(
+                sink, sessionId, finalWorkingDir, phaseRef,
+                overview -> planOverviews.put(sessionId, overview),
+                () -> persistPhase(finalWorkingDir, SessionPhase.PLAN_PENDING));
+
+        // Crash recovery: check if a previous session left behind persisted state indicating
+        // it was in EXECUTING or PLANNING when it crashed. Force to FAILED_EXECUTION.
+        recoverPersistedPhase(config.workingDir(), phaseRef);
+
         try {
             // Web sessions are interactive (like a REPL) — skip the one-shot/batch hooks that
             // force tool calls on text-only responses (TextOnlyStallHook, NoWriteDetectedHook,
@@ -185,13 +243,25 @@ public class AgentService implements DisposableBean {
             SessionOptions opts = SessionOptions.empty()
                     .asReplSession()
                     .withApprovalHandler(approvalHandler)
-                    .withHooks(List.of(bridgeHook, compactionHook));
+                    .withHooks(List.of(bridgeHook, compactionHook, planHook));
             if (tracer != null) {
                 opts = opts.withTracer(tracer);
             }
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts);
 
-            SessionEntry entry = new SessionEntry(sessionId, config, session, approvalHandler, workspaceId);
+            SessionEntry entry;
+            if ("experts".equals(sessionMode) && swarmCoordinator != null && triageGate != null) {
+                // Expert team mode — create TeamSessionPayload with triage + fallback
+                AgentSessionPayload fallback = new AgentSessionPayload(config, session);
+                TeamSessionPayload teamPayload = new TeamSessionPayload(
+                        swarmCoordinator, io.kairo.api.team.TeamConfig.defaults(),
+                        sessionId, triageGate);
+                teamPayload.setFallback(fallback);
+                entry = new SessionEntry(sessionId, workspaceId, sessionMode,
+                        teamPayload, approvalHandler, System.currentTimeMillis());
+            } else {
+                entry = SessionEntry.forAgent(sessionId, config, session, approvalHandler, workspaceId, sessionMode);
+            }
             sessions.put(sessionId, entry);
             runningState.put(sessionId, new AtomicBoolean(false));
 
@@ -215,8 +285,7 @@ public class AgentService implements DisposableBean {
      * or → AGENT_ERROR
      */
     public Flux<AgentEvent> sendMessage(String sessionId, String text) {
-        Msg userMsg = Msg.of(MsgRole.USER, text);
-        return sendMessage(sessionId, userMsg);
+        return sendMessage(sessionId, MessageRequest.text(text));
     }
 
     /**
@@ -230,22 +299,52 @@ public class AgentService implements DisposableBean {
     public Flux<AgentEvent> sendMessage(String sessionId, String text,
                                          String imageData, String imageMediaType) {
         if (imageData != null && !imageData.isBlank()) {
-            byte[] bytes = Base64.getDecoder().decode(imageData);
-            Msg userMsg = Msg.builder()
-                    .role(MsgRole.USER)
-                    .addContent(new Content.TextContent(text))
-                    .addContent(new Content.ImageContent(null, imageMediaType, bytes))
-                    .build();
-            return sendMessage(sessionId, userMsg);
+            return sendMessage(sessionId, new MessageRequest(text, imageData, imageMediaType));
         }
         return sendMessage(sessionId, text);
     }
 
-    private Flux<AgentEvent> sendMessage(String sessionId, Msg userMsg) {
+    private Flux<AgentEvent> sendMessage(String sessionId, MessageRequest request) {
         SessionEntry entry = sessions.get(sessionId);
         if (entry == null) {
             return Flux.just(AgentEvent.error(sessionId,
                     "Session not found: " + sessionId, "SESSION_NOT_FOUND"));
+        }
+
+        // ── Expert team mode: polymorphic dispatch via TeamSessionPayload ────────
+        if (entry.payload() instanceof TeamSessionPayload teamPayload) {
+            return teamPayload.handleMessage(request);
+        }
+
+        // ── Plan-pending state machine checks ───────────────────────────────────
+        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
+        if (phaseRef != null) {
+            SessionPhase phase = phaseRef.get();
+
+            // FAILED_EXECUTION: reject until revert
+            if (phase == SessionPhase.FAILED_EXECUTION) {
+                return Flux.just(AgentEvent.error(sessionId,
+                        "Previous execution interrupted, revert recommended",
+                        "REVERT_REQUIRED"));
+            }
+
+            // PLAN_PENDING: route to refinement (not rejected as SESSION_BUSY)
+            if (phase == SessionPhase.PLAN_PENDING) {
+                Msg refinementMsg = entry.agentPayload().buildUserMsg(request);
+                return handlePlanRefinement(sessionId, entry, refinementMsg);
+            }
+
+            // FAILED_PLANNING: allow retry — transition back to PLANNING
+            if (phase == SessionPhase.FAILED_PLANNING) {
+                phaseRef.set(SessionPhase.PLANNING);
+                persistPhase(entry.config().workingDir(), SessionPhase.PLANNING);
+            }
+
+            // IDLE or COMPLETED: start a new planning cycle
+            if (phase == SessionPhase.IDLE || phase == SessionPhase.COMPLETED) {
+                phaseRef.set(SessionPhase.PLANNING);
+                persistPhase(entry.config().workingDir(), SessionPhase.PLANNING);
+            }
         }
 
         AtomicBoolean running = runningState.get(sessionId);
@@ -268,7 +367,10 @@ public class AgentService implements DisposableBean {
         // but the session id, workspace, and UI message history are preserved.
         entry = rebuildIfStale(entry);
 
-        Agent agent = entry.session().agent();
+        // Build Msg from the MessageRequest via the AgentSessionPayload
+        AgentSessionPayload agentPayload = entry.agentPayload();
+        Msg userMsg = agentPayload.buildUserMsg(request);
+        Agent agent = agentPayload.session().agent();
 
         // All lifecycle events (THINKING / DONE / ERROR) go through `sink` (autoCancel=false)
         // rather than the per-call Flux.create emitter. The emitter dies when the WS subscriber
@@ -312,16 +414,216 @@ public class AgentService implements DisposableBean {
                     long elapsedMs = System.currentTimeMillis() - startedAtMs;
                     log.info("agent.terminal session={} signal={} elapsedMs={}",
                             sessionId, signal, elapsedMs);
+                    // Phase transition: if still PLANNING (hook didn't intercept) mark completed.
+                    // If PLAN_PENDING was set by the hook, don't touch it.
+                    if (phaseRef != null) {
+                        phaseRef.compareAndSet(SessionPhase.PLANNING, SessionPhase.IDLE);
+                    }
                 })
                 .subscribe(
                         responseMsg -> {
                             // No-op: terminal emit happens in onSessionEnd hook.
                         },
-                        err -> log.debug("agent.call error for session {}: {}",
-                                sessionId, err.getMessage())
+                        err -> {
+                            log.debug("agent.call error for session {}: {}",
+                                    sessionId, err.getMessage());
+                            // Transition to FAILED_PLANNING on error during planning
+                            if (phaseRef != null) {
+                                phaseRef.compareAndSet(SessionPhase.PLANNING, SessionPhase.FAILED_PLANNING);
+                            }
+                        }
                 );
 
         return sink.asFlux();
+    }
+
+    // ── Plan refinement in PLAN_PENDING state ────────────────────────────────────
+
+    /**
+     * Handle a user message while the session is in PLAN_PENDING state.
+     * Messages are routed to the plan agent for refinement.
+     * Bounded queue (max 5), drop-newest. Serialized: one LLM call at a time.
+     */
+    private Flux<AgentEvent> handlePlanRefinement(String sessionId, SessionEntry entry, Msg userMsg) {
+        Deque<Msg> queue = planRefinementQueues.get(sessionId);
+        if (queue == null) {
+            return Flux.just(AgentEvent.error(sessionId,
+                    "Internal error: refinement queue not found", "INTERNAL_ERROR"));
+        }
+
+        // Bounded queue: drop-newest when full
+        synchronized (queue) {
+            if (queue.size() >= MAX_REFINEMENT_QUEUE_SIZE) {
+                log.warn("Plan refinement queue full for session {} — dropping newest message",
+                        sessionId);
+                return Flux.just(AgentEvent.error(sessionId,
+                        "Too many refinement requests pending (max " + MAX_REFINEMENT_QUEUE_SIZE + ")",
+                        "REFINEMENT_QUEUE_FULL"));
+            }
+            queue.addLast(userMsg);
+        }
+
+        // Try to acquire the refinement lock (serialized LLM calls)
+        AtomicBoolean lock = refinementLocks.get(sessionId);
+        if (lock == null || !lock.compareAndSet(false, true)) {
+            // Already processing a refinement — message is queued and will be picked up
+            Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+            return sink != null ? sink.asFlux() : Flux.empty();
+        }
+
+        // Process the queue
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        if (sink == null) {
+            lock.set(false);
+            return Flux.empty();
+        }
+
+        processRefinementQueue(sessionId, entry, sink, lock);
+        return sink.asFlux();
+    }
+
+    /**
+     * Drain the refinement queue one message at a time. Runs on boundedElastic.
+     */
+    private void processRefinementQueue(
+            String sessionId, SessionEntry entry,
+            Sinks.Many<AgentEvent> sink, AtomicBoolean lock) {
+
+        reactor.core.publisher.Mono.fromRunnable(() -> {
+            try {
+                Deque<Msg> queue = planRefinementQueues.get(sessionId);
+                while (queue != null) {
+                    Msg msg;
+                    synchronized (queue) {
+                        msg = queue.pollFirst();
+                    }
+                    if (msg == null) break;
+
+                    // Check phase — if no longer PLAN_PENDING, stop processing
+                    AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
+                    if (phaseRef == null || phaseRef.get() != SessionPhase.PLAN_PENDING) {
+                        break;
+                    }
+
+                    sink.tryEmitNext(AgentEvent.thinking(sessionId));
+
+                    // Call the agent for refinement (still in plan mode context)
+                    try {
+                        entry.session().agent().call(msg).block();
+                    } catch (Exception e) {
+                        log.warn("Plan refinement call failed for session {}: {}",
+                                sessionId, e.getMessage());
+                        sink.tryEmitNext(AgentEvent.error(sessionId,
+                                "Plan refinement failed: " + e.getMessage(), "REFINEMENT_ERROR"));
+                    }
+                }
+            } finally {
+                lock.set(false);
+            }
+        }).subscribeOn(Schedulers.boundedElastic()).subscribe();
+    }
+
+    // ── Confirm build (PLAN_PENDING → EXECUTING) ────────────────────────────────
+
+    /**
+     * Confirm the plan and begin execution. Only transitions from PLAN_PENDING to EXECUTING.
+     * This is the ONLY way to start execution — no keyword detection, only explicit action.
+     *
+     * @param sessionId the session ID
+     * @return true if confirmation accepted, false if session not in PLAN_PENDING
+     */
+    public boolean confirmBuild(String sessionId) {
+        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
+        if (phaseRef == null || !phaseRef.compareAndSet(SessionPhase.PLAN_PENDING, SessionPhase.EXECUTING)) {
+            log.warn("confirmBuild rejected for session {} — not in PLAN_PENDING (phase={})",
+                    sessionId, phaseRef != null ? phaseRef.get() : "null");
+            return false;
+        }
+
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) {
+            phaseRef.set(SessionPhase.PLAN_PENDING); // rollback
+            return false;
+        }
+
+        log.info("Plan confirmed for session {} — transitioning to EXECUTING", sessionId);
+        persistPhase(entry.config().workingDir(), SessionPhase.EXECUTING);
+
+        // Create workspace snapshot before execution begins
+        if (workspaceSnapshotService.isGitWorkspace(entry.config().workingDir())) {
+            workspaceSnapshotService.createSnapshot(entry.config().workingDir());
+        }
+
+        // Clear refinement queue
+        Deque<Msg> queue = planRefinementQueues.get(sessionId);
+        if (queue != null) {
+            synchronized (queue) {
+                queue.clear();
+            }
+        }
+
+        // Acquire running state
+        AtomicBoolean running = runningState.get(sessionId);
+        if (running == null || !running.compareAndSet(false, true)) {
+            log.error("confirmBuild: session {} already running — inconsistent state", sessionId);
+            return false;
+        }
+
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        if (sink == null) {
+            runningState.put(sessionId, new AtomicBoolean(false));
+            phaseRef.set(SessionPhase.PLAN_PENDING);
+            return false;
+        }
+
+        sink.tryEmitNext(AgentEvent.thinking(sessionId));
+
+        // Send confirmation message to the agent so it resumes execution.
+        // The agent is still in plan mode (exit_plan_mode was skipped); send a synthetic
+        // user message that tells it the plan was approved and it should now execute.
+        Msg confirmMsg = Msg.of(MsgRole.USER,
+                "Plan confirmed by user. Proceed with execution now. "
+                        + "Call exit_plan_mode if still in plan mode, then execute the plan.");
+
+        Agent agent = entry.session().agent();
+        AgentSlot slot;
+        try {
+            slot = concurrencyController.acquire(sessionId);
+        } catch (AgentConcurrencyException e) {
+            sink.tryEmitNext(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
+            runningState.put(sessionId, new AtomicBoolean(false));
+            phaseRef.set(SessionPhase.PLAN_PENDING);
+            return false;
+        }
+
+        long startedAtMs = System.currentTimeMillis();
+
+        agent.call(confirmMsg)
+                .subscribeOn(Schedulers.boundedElastic())
+                .doFinally(signal -> {
+                    slot.close();
+                    runningState.put(sessionId, new AtomicBoolean(false));
+                    long elapsedMs = System.currentTimeMillis() - startedAtMs;
+                    log.info("agent.terminal(confirmBuild) session={} signal={} elapsedMs={}",
+                            sessionId, signal, elapsedMs);
+                    // On successful completion: drop snapshot and clean up
+                    if (phaseRef.compareAndSet(SessionPhase.EXECUTING, SessionPhase.COMPLETED)) {
+                        persistPhase(entry.config().workingDir(), SessionPhase.COMPLETED);
+                        // Drop the snapshot stash entry on successful completion
+                        dropSnapshotIfPresent(entry.config().workingDir());
+                    }
+                })
+                .subscribe(
+                        responseMsg -> { /* terminal emit via hook */ },
+                        err -> {
+                            log.warn("confirmBuild execution error for session {}: {}",
+                                    sessionId, err.getMessage());
+                            phaseRef.compareAndSet(SessionPhase.EXECUTING, SessionPhase.FAILED_EXECUTION);
+                            persistPhase(entry.config().workingDir(), SessionPhase.FAILED_EXECUTION);
+                        }
+                );
+
+        return true;
     }
 
     /**
@@ -372,10 +674,123 @@ public class AgentService implements DisposableBean {
             entry.approvalHandler().cancelAll();
             entry.session().agent().interrupt();
             runningState.put(sessionId, new AtomicBoolean(false));
-            log.info("Session {} stopped", sessionId);
+
+            // Phase transition: stop() during EXECUTING → FAILED_EXECUTION
+            AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
+            if (phaseRef != null) {
+                SessionPhase current = phaseRef.get();
+                if (current == SessionPhase.EXECUTING) {
+                    phaseRef.set(SessionPhase.FAILED_EXECUTION);
+                    persistPhase(entry.config().workingDir(), SessionPhase.FAILED_EXECUTION);
+                    log.info("Session {} stopped during EXECUTING — transitioned to FAILED_EXECUTION",
+                            sessionId);
+                } else if (current == SessionPhase.PLANNING) {
+                    phaseRef.set(SessionPhase.FAILED_PLANNING);
+                    persistPhase(entry.config().workingDir(), SessionPhase.FAILED_PLANNING);
+                    log.info("Session {} stopped during PLANNING — transitioned to FAILED_PLANNING",
+                            sessionId);
+                } else {
+                    log.info("Session {} stopped (phase={})", sessionId, current);
+                }
+            } else {
+                log.info("Session {} stopped", sessionId);
+            }
         } catch (Exception e) {
             log.warn("Error stopping session {}", sessionId, e);
         }
+    }
+
+    // ── Revert mechanism ─────────────────────────────────────────────────────────
+
+    /**
+     * Revert a session's workspace to the pre-execution snapshot.
+     *
+     * <p>Only valid when the session phase is FAILED_EXECUTION or COMPLETED.
+     * Rejects EXECUTING sessions — the user must stop first.
+     *
+     * <p>After a successful revert:
+     * <ul>
+     *   <li>plan.md is PRESERVED (git-tracked, restored by stash apply)</li>
+     *   <li>dag.json is PRESERVED if it exists</li>
+     *   <li>snapshot.ref is CLEARED (deleted)</li>
+     *   <li>REVERTED event emitted</li>
+     *   <li>CLEAR_EXECUTION_MESSAGES event emitted (frontend clears execution-phase messages)</li>
+     *   <li>Phase transitions to PLAN_PENDING</li>
+     * </ul>
+     *
+     * @param sessionId the session ID
+     * @return true if revert was successful
+     */
+    public boolean revertSession(String sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) {
+            log.warn("revertSession: session {} not found", sessionId);
+            return false;
+        }
+
+        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
+        if (phaseRef == null) {
+            log.warn("revertSession: no phase tracking for session {}", sessionId);
+            return false;
+        }
+
+        SessionPhase current = phaseRef.get();
+        if (current == SessionPhase.EXECUTING) {
+            log.warn("revertSession rejected for session {} — still EXECUTING, stop first", sessionId);
+            return false;
+        }
+        if (current != SessionPhase.FAILED_EXECUTION && current != SessionPhase.COMPLETED) {
+            log.warn("revertSession rejected for session {} — phase {} not revertible", sessionId, current);
+            return false;
+        }
+
+        String workspaceDir = entry.config().workingDir();
+
+        // Read snapshot ref from .kairo-session/snapshot.ref
+        Path snapshotRefPath = Path.of(workspaceDir, SESSION_DIR, "snapshot.ref");
+        String snapshotRef;
+        try {
+            if (!Files.exists(snapshotRefPath)) {
+                log.warn("revertSession: no snapshot.ref found for session {} in {}", sessionId, workspaceDir);
+                return false;
+            }
+            snapshotRef = Files.readString(snapshotRefPath).trim();
+            if (snapshotRef.isBlank()) {
+                log.warn("revertSession: empty snapshot.ref for session {} in {}", sessionId, workspaceDir);
+                return false;
+            }
+        } catch (IOException e) {
+            log.error("revertSession: failed to read snapshot.ref for session {}: {}", sessionId, e.getMessage());
+            return false;
+        }
+
+        // Perform the revert via WorkspaceSnapshotService
+        boolean reverted = workspaceSnapshotService.revert(workspaceDir, snapshotRef);
+        if (!reverted) {
+            log.error("revertSession: revert failed for session {} (ref={})", sessionId, snapshotRef);
+            return false;
+        }
+
+        // Transition phase to PLAN_PENDING
+        phaseRef.set(SessionPhase.PLAN_PENDING);
+        persistPhase(workspaceDir, SessionPhase.PLAN_PENDING);
+
+        // Delete snapshot.ref (already deleted by revert(), but ensure idempotency)
+        try {
+            Files.deleteIfExists(snapshotRefPath);
+        } catch (IOException e) {
+            log.debug("Could not delete snapshot.ref after revert: {}", e.getMessage());
+        }
+
+        // Emit events
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        if (sink != null) {
+            sink.tryEmitNext(AgentEvent.reverted(sessionId));
+            sink.tryEmitNext(AgentEvent.clearExecutionMessages(sessionId));
+        }
+
+        log.info("Session {} reverted successfully (ref={}) — phase now PLAN_PENDING", sessionId, snapshotRef);
+        return true;
     }
 
     /**
@@ -395,6 +810,12 @@ public class AgentService implements DisposableBean {
             tracker.clear();
         }
         diagnosticsTrackers.remove(sessionId);
+
+        // Clean up plan-pending state
+        sessionPhases.remove(sessionId);
+        planRefinementQueues.remove(sessionId);
+        planOverviews.remove(sessionId);
+        refinementLocks.remove(sessionId);
 
         Sinks.Many<AgentEvent> sink = eventSinks.remove(sessionId);
         if (sink != null) {
@@ -578,13 +999,20 @@ public class AgentService implements DisposableBean {
      */
     public List<SessionInfo> listSessions() {
         return sessions.values().stream()
-                .map(e -> new SessionInfo(
-                        e.sessionId(),
-                        e.config().workingDir(),
-                        e.config().modelName(),
-                        e.createdAt(),
-                        isRunning(e.sessionId()),
-                        e.workspaceId()))
+                .map(e -> {
+                    String workDir = e.config().workingDir();
+                    boolean isGit = workspaceSnapshotService != null
+                            && workDir != null
+                            && workspaceSnapshotService.isGitWorkspace(workDir);
+                    return new SessionInfo(
+                            e.sessionId(),
+                            workDir,
+                            e.config().modelName(),
+                            e.createdAt(),
+                            isRunning(e.sessionId()),
+                            e.workspaceId(),
+                            isGit);
+                })
                 .toList();
     }
 
@@ -654,7 +1082,7 @@ public class AgentService implements DisposableBean {
 
         try {
             CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts);
-            SessionEntry newEntry = new SessionEntry(
+            SessionEntry newEntry = SessionEntry.forAgent(
                     entry.sessionId(),
                     rebuilt,
                     newSession,
@@ -687,6 +1115,91 @@ public class AgentService implements DisposableBean {
                 log.warn("Failed to emit CONTEXT_COMPACTED for session {}: {}", sessionId, emit);
             }
         });
+    }
+
+    // ── Plan persistence & crash recovery ───────────────────────────────────────
+
+    private static final String SESSION_DIR = ".kairo-session";
+    private static final String PHASE_FILE = "phase.txt";
+
+    /**
+     * Persist the current session phase to {@code {workspaceDir}/.kairo-session/phase.txt}.
+     * Called on significant state transitions so that crash recovery can detect interrupted ops.
+     */
+    void persistPhase(String workingDir, SessionPhase phase) {
+        if (workingDir == null) return;
+        try {
+            Path dir = Path.of(workingDir, SESSION_DIR);
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve(PHASE_FILE), phase.name());
+        } catch (IOException e) {
+            log.debug("Failed to persist phase for workingDir {}: {}", workingDir, e.getMessage());
+        }
+    }
+
+    /**
+     * Read the snapshot ref from disk and drop the associated stash entry.
+     * Used on successful completion to prevent stash accumulation.
+     */
+    private void dropSnapshotIfPresent(String workingDir) {
+        if (workingDir == null) return;
+        Path refFile = Path.of(workingDir, SESSION_DIR, "snapshot.ref");
+        try {
+            if (!Files.exists(refFile)) return;
+            String ref = Files.readString(refFile).trim();
+            if (!ref.isBlank()) {
+                workspaceSnapshotService.dropSnapshot(workingDir, ref);
+            }
+        } catch (IOException e) {
+            log.debug("Failed to read/drop snapshot ref in {}: {}", workingDir, e.getMessage());
+        }
+    }
+
+    /**
+     * On session creation, check if a previous session left behind persisted state.
+     * If the persisted phase was EXECUTING or PLANNING, the previous session was interrupted;
+     * force to FAILED_EXECUTION with a note recommending revert.
+     */
+    private void recoverPersistedPhase(String workingDir, AtomicReference<SessionPhase> phaseRef) {
+        if (workingDir == null) return;
+        Path phaseFile = Path.of(workingDir, SESSION_DIR, PHASE_FILE);
+        if (!Files.exists(phaseFile)) return;
+
+        try {
+            String persisted = Files.readString(phaseFile).trim();
+            SessionPhase previous = SessionPhase.valueOf(persisted);
+            if (previous == SessionPhase.EXECUTING || previous == SessionPhase.PLANNING) {
+                phaseRef.set(SessionPhase.FAILED_EXECUTION);
+                // Write the new state so subsequent restarts don't re-warn
+                Files.writeString(phaseFile, SessionPhase.FAILED_EXECUTION.name());
+                // Check if snapshot ref is available for revert
+                boolean hasSnapshot = Files.exists(Path.of(workingDir, SESSION_DIR, "snapshot.ref"));
+                log.warn("Previous execution interrupted in workingDir={} (was {}). "
+                        + "Forcing FAILED_EXECUTION. {}",
+                        workingDir, previous,
+                        hasSnapshot ? "Snapshot available — revert recommended."
+                                   : "No snapshot found.");
+            } else if (previous == SessionPhase.PLAN_PENDING) {
+                // Restore plan-pending state (plan is already on disk)
+                phaseRef.set(SessionPhase.PLAN_PENDING);
+            } else if (previous == SessionPhase.FAILED_EXECUTION) {
+                // Restore failed state so the session remains blocked until revert
+                phaseRef.set(SessionPhase.FAILED_EXECUTION);
+            }
+        } catch (IllegalArgumentException e) {
+            log.debug("Unknown persisted phase in {}: {}", phaseFile, e.getMessage());
+        } catch (IOException e) {
+            log.debug("Failed to read persisted phase from {}: {}", phaseFile, e.getMessage());
+        }
+    }
+
+    /**
+     * Return the current session phase for a given session, or null if unknown.
+     * Exposed for WebSocket handler / controller integration.
+     */
+    public SessionPhase getSessionPhase(String sessionId) {
+        AtomicReference<SessionPhase> ref = sessionPhases.get(sessionId);
+        return ref != null ? ref.get() : null;
     }
 
     /**
@@ -856,28 +1369,79 @@ public class AgentService implements DisposableBean {
 
     /**
      * Holds a session and its associated state.
+     *
+     * <p>The polymorphic {@link SessionPayload} encapsulates either a single-agent
+     * ({@link AgentSessionPayload}) or expert-team execution context.
+     * {@code sessionMode} is {@code "chat"} for single-agent, {@code "experts"}
+     * for expert-team mode.
      */
     public record SessionEntry(
             String sessionId,
-            CodeAgentConfig config,
-            CodeAgentSession session,
+            String workspaceId,
+            String sessionMode,
+            SessionPayload payload,
             WebSocketApprovalHandler approvalHandler,
-            long createdAt,
-            String workspaceId
+            long createdAt
     ) {
-        public SessionEntry(String sessionId, CodeAgentConfig config,
-                            CodeAgentSession session, WebSocketApprovalHandler approvalHandler) {
-            this(sessionId, config, session, approvalHandler, System.currentTimeMillis(), null);
+
+        // ── Backward-compatible factory methods ──
+
+        /** Legacy factory: single-agent session without workspace binding. */
+        public static SessionEntry forAgent(String sessionId, CodeAgentConfig config,
+                                             CodeAgentSession session,
+                                             WebSocketApprovalHandler approvalHandler) {
+            return forAgent(sessionId, config, session, approvalHandler, null, "chat");
         }
 
-        public SessionEntry(String sessionId, CodeAgentConfig config,
-                            CodeAgentSession session, WebSocketApprovalHandler approvalHandler,
-                            String workspaceId) {
-            this(sessionId, config, session, approvalHandler, System.currentTimeMillis(), workspaceId);
+        /** Factory: single-agent session bound to a workspace (defaults to "chat" mode). */
+        public static SessionEntry forAgent(String sessionId, CodeAgentConfig config,
+                                             CodeAgentSession session,
+                                             WebSocketApprovalHandler approvalHandler,
+                                             String workspaceId) {
+            return forAgent(sessionId, config, session, approvalHandler, workspaceId, "chat");
         }
 
+        /** Factory: session bound to a workspace with explicit mode. */
+        public static SessionEntry forAgent(String sessionId, CodeAgentConfig config,
+                                             CodeAgentSession session,
+                                             WebSocketApprovalHandler approvalHandler,
+                                             String workspaceId, String sessionMode) {
+            return new SessionEntry(
+                    sessionId, workspaceId, sessionMode,
+                    new AgentSessionPayload(config, session),
+                    approvalHandler, System.currentTimeMillis());
+        }
+
+        // ── Backward-compatible accessors ──
+
+        /**
+         * The agent configuration for this session.
+         * Only valid for "chat" mode sessions backed by {@link AgentSessionPayload}.
+         */
+        public CodeAgentConfig config() {
+            return agentPayload().config();
+        }
+
+        /**
+         * The underlying code-agent session.
+         * Only valid for "chat" mode sessions backed by {@link AgentSessionPayload}.
+         */
+        public CodeAgentSession session() {
+            return agentPayload().session();
+        }
+
+        /** Shorthand for {@code session().agent()}. */
         public Agent agent() {
-            return session.agent();
+            return session().agent();
+        }
+
+        AgentSessionPayload agentPayload() {
+            if (payload instanceof AgentSessionPayload asp) {
+                return asp;
+            }
+            throw new IllegalStateException(
+                    "Session " + sessionId + " is in '" + sessionMode
+                    + "' mode — config()/session() require 'chat' mode");
         }
     }
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentEvent, ConnectionStatus } from '@/types/agent';
 import { useSessionStore } from '@store/sessionStore';
+import { useSessionModeStore } from '@store/sessionModeStore';
 
 /**
  * Agent WebSocket hook — talks to /ws/agent over native WebSocket + JSON.
@@ -106,6 +107,16 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
             }
             return { type: 'CONTEXT_COMPACTED', sessionId, timestamp: ts, payload: parsed };
         }
+        case 'PLAN_READY':
+            return {
+                type: 'PLAN_READY', sessionId, timestamp: ts,
+                payload: { planSummary: (raw.content as string) ?? '' },
+            };
+        case 'REVERTED':
+            return {
+                type: 'REVERTED', sessionId, timestamp: ts,
+                payload: { message: (raw.content as string) ?? '' },
+            };
         default:
             return {
                 type: 'AGENT_ERROR', sessionId, timestamp: ts,
@@ -114,12 +125,18 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
     }
 }
 
+interface UseAgentWebSocketOptions {
+    onRawMessage?: (data: string) => void;
+}
+
 interface UseAgentWebSocketReturn {
     isConnected: boolean;
     isThinking: boolean;
     connectionStatus: ConnectionStatus;
     connect: () => void;
     disconnect: () => void;
+    /** Generic send — pass any JSON-serializable payload over the shared WS. */
+    send: (payload: Record<string, unknown>) => boolean;
     sendMessage: (sessionId: string, text: string, imageData?: string, imageMediaType?: string) => void;
     approveTool: (
         sessionId: string,
@@ -132,10 +149,13 @@ interface UseAgentWebSocketReturn {
     createSession: (workspaceId: string) => Promise<string>;
     bindSession: (sessionId: string) => void;
     switchSession: (sessionId: string) => void;
+    /** Generic send — pass any JSON payload over the shared WS. */
+    sendAction: (payload: Record<string, unknown>) => boolean;
 }
 
 export function useAgentWebSocket(
     onEvent: (event: AgentEvent) => void,
+    options?: UseAgentWebSocketOptions,
 ): UseAgentWebSocketReturn {
     const [isConnected, setIsConnected] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
@@ -153,7 +173,9 @@ export function useAgentWebSocket(
         timer: ReturnType<typeof setTimeout>;
     } | null>(null);
 
+    const onRawMessageRef = useRef(options?.onRawMessage);
     useEffect(() => { onEventRef.current = onEvent; }, [onEvent]);
+    useEffect(() => { onRawMessageRef.current = options?.onRawMessage; }, [options?.onRawMessage]);
 
     const clearStalledTimer = useCallback(() => {
         if (stalledTimerRef.current) {
@@ -182,6 +204,9 @@ export function useAgentWebSocket(
     }, []);
 
     const handleIncoming = useCallback((data: string) => {
+        // Forward raw message to external handlers (e.g. expert team)
+        onRawMessageRef.current?.(data);
+
         let raw: Record<string, unknown>;
         try {
             raw = JSON.parse(data);
@@ -380,7 +405,7 @@ export function useAgentWebSocket(
                             }
                         }, 10_000);
                         createPendingRef.current = { resolve, reject, timer };
-                        send({ action: 'create', workspaceId });
+                        send({ action: 'create', workspaceId, mode: useSessionModeStore.getState().getMode(workspaceId) });
                     } else if (attemptsLeft > 0) {
                         setTimeout(() => tryCreate(attemptsLeft - 1), 200);
                     } else {
@@ -425,11 +450,13 @@ export function useAgentWebSocket(
         connectionStatus,
         connect,
         disconnect,
+        send,
         sendMessage,
         approveTool,
         stopAgent,
         createSession,
         bindSession,
         switchSession,
+        sendAction: send,
     };
 }

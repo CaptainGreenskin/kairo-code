@@ -25,9 +25,10 @@ interface Team {
 interface TeamPanelProps {
     isOpen: boolean;
     onClose: () => void;
+    onSelectTeamId?: (teamId: string) => void;
 }
 
-export function TeamPanel({ isOpen, onClose }: TeamPanelProps) {
+export function TeamPanel({ isOpen, onClose, onSelectTeamId }: TeamPanelProps) {
     const [teams, setTeams] = useState<Team[]>([]);
     const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
     const [tasks, setTasks] = useState<SharedTask[]>([]);
@@ -105,6 +106,7 @@ export function TeamPanel({ isOpen, onClose }: TeamPanelProps) {
                             <button
                                 key={team.teamId}
                                 onClick={() => setSelectedTeam(team)}
+                                onDoubleClick={() => onSelectTeamId?.(team.teamId)}
                                 className={`w-full text-left px-2 py-1.5 rounded text-xs
                                     ${selectedTeam?.teamId === team.teamId
                                         ? 'bg-[var(--accent)] text-white'
@@ -125,6 +127,16 @@ export function TeamPanel({ isOpen, onClose }: TeamPanelProps) {
                             </p>
                         ) : (
                             <div className="space-y-4">
+                                {onSelectTeamId && (
+                                    <button
+                                        onClick={() => onSelectTeamId(selectedTeam.teamId)}
+                                        className="px-3 py-1.5 text-xs font-medium rounded border
+                                                   border-[var(--accent)] text-[var(--accent)]
+                                                   hover:bg-[var(--accent)]/10 transition-colors"
+                                    >
+                                        ▶ Open Expert DAG View
+                                    </button>
+                                )}
                                 <div>
                                     <h3 className="text-xs font-semibold text-[var(--text-secondary)]
                                                    uppercase tracking-wide mb-1">

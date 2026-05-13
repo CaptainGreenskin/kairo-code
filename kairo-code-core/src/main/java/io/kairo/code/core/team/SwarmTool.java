@@ -15,61 +15,56 @@
  */
 package io.kairo.code.core.team;
 
+import io.kairo.api.team.TeamConfig;
+import io.kairo.api.team.TeamResult;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import reactor.core.publisher.Mono;
 
 /**
- * Tool to start a Swarm run for a team.
- * Creates the team, configures SwarmConfig, starts the SwarmExecution,
- * and returns a status summary.
+ * Tool to start an expert team run.
+ * Delegates to {@link SwarmCoordinator} which drives the upstream
+ * plan→generate→evaluate lifecycle.
  */
 public class SwarmTool {
 
-    private final TeamManager teamManager;
     private final SwarmCoordinator coordinator;
 
-    public SwarmTool(TeamManager teamManager, SwarmCoordinator coordinator) {
-        this.teamManager = teamManager;
+    public SwarmTool(SwarmCoordinator coordinator) {
         this.coordinator = coordinator;
     }
 
     /**
-     * Start a new Swarm run.
+     * Start a new expert team execution.
      *
-     * @param goal             The goal description for the swarm
-     * @param researchWorkers  Number of research workers (default 2)
-     * @param implementWorkers Number of implementation workers (default 3)
-     * @return Status map with swarmId, teamId, phase, and status
+     * @param goal    the goal description for the team
+     * @param roleIds specific roles to involve (empty = all available)
+     * @return status map with requestId, status, and goal
      */
-    public Map<String, Object> execute(String goal, int researchWorkers, int implementWorkers) {
-        SwarmConfig config = new SwarmConfig(
-            goal,
-            researchWorkers,
-            implementWorkers,
-            2,   // verifyWorkers default
-            true, // allowParallelImpl
-            300, // phaseTimeoutSeconds default
-            List.of(),
-            List.of()
-        );
-        return execute(config);
+    public Map<String, Object> execute(String goal, List<String> roleIds) {
+        Mono<TeamResult> resultMono = coordinator.startExpertTeam(
+                goal, TeamConfig.defaults(), roleIds);
+        TeamResult result = resultMono.block();
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("requestId", result != null ? result.requestId() : "unknown");
+        response.put("status", result != null ? result.status().name() : "UNKNOWN");
+        response.put("goal", goal);
+        response.put("finalOutput", result != null
+                ? result.finalOutput().orElse("") : "");
+        return response;
     }
 
     /**
-     * Start a new Swarm run with full config control.
+     * Start a new expert team execution with default roles.
+     *
+     * @param goal             the goal description
+     * @param researchWorkers  ignored (kept for API compat); planner decides parallelism
+     * @param implementWorkers ignored (kept for API compat); planner decides parallelism
+     * @return status map with requestId, status, and goal
      */
-    public Map<String, Object> execute(SwarmConfig config) {
-        Team team = teamManager.createTeam("swarm-" + config.goal().substring(0, Math.min(20, config.goal().length())),
-            config.goal());
-
-        SwarmExecution exec = coordinator.startSwarm(team.teamId(), config);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("swarmId", team.teamId());
-        result.put("teamId", team.teamId());
-        result.put("phase", exec.currentPhase().getClass().getSimpleName());
-        result.put("status", exec.status().name());
-        return result;
+    public Map<String, Object> execute(String goal, int researchWorkers, int implementWorkers) {
+        return execute(goal, List.of());
     }
 }

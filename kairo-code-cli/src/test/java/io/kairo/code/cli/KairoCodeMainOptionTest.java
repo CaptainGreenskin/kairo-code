@@ -6,7 +6,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,6 +19,16 @@ import picocli.CommandLine;
  * Only covers validation paths that exit before making any network call.
  */
 class KairoCodeMainOptionTest {
+
+    @BeforeAll
+    static void enableDryRun() {
+        System.setProperty("kairo.code.dryrun", "true");
+    }
+
+    @AfterAll
+    static void disableDryRun() {
+        System.clearProperty("kairo.code.dryrun");
+    }
 
     @TempDir
     Path tempDir;

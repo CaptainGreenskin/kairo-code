@@ -254,6 +254,11 @@ public class KairoCodeMain implements Callable<Integer> {
                 resolvedTask = Files.readString(taskFile, StandardCharsets.UTF_8);
             }
 
+            if (toolBudget < 0) {
+                System.err.println("Error: --tool-budget must be >= 0");
+                return 1;
+            }
+
             RetryPolicy retryPolicy = new RetryPolicy(maxRetries);
 
             if (acpServer) {
@@ -318,6 +323,11 @@ public class KairoCodeMain implements Callable<Integer> {
 
     private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider,
             boolean planMode) {
+        // Fast-exit for test/validation: skip agent execution when dry-run is enabled.
+        if (Boolean.getBoolean("kairo.code.dryrun")) {
+            return 0;
+        }
+
         PlanModeHook planHook = planMode ? new PlanModeHook(true) : null;
         PrintWriter sysErr = new PrintWriter(System.err, true);
         AgentEventPrinter eventPrinter = new AgentEventPrinter(sysErr, "", false, null, false);

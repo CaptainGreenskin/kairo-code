@@ -12,10 +12,18 @@ public record SessionInfo(
         String model,
         long createdAt,
         boolean running,
-        String workspaceId
+        String workspaceId,
+        boolean isGit
 ) {
+    /** Legacy 5-arg constructor (no workspace, no git flag). */
     public SessionInfo(String sessionId, String workingDir, String model,
                        long createdAt, boolean running) {
-        this(sessionId, workingDir, model, createdAt, running, null);
+        this(sessionId, workingDir, model, createdAt, running, null, false);
+    }
+
+    /** Legacy 6-arg constructor (no git flag). */
+    public SessionInfo(String sessionId, String workingDir, String model,
+                       long createdAt, boolean running, String workspaceId) {
+        this(sessionId, workingDir, model, createdAt, running, workspaceId, false);
     }
 }

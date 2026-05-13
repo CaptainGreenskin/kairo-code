@@ -4,6 +4,7 @@ import { streamingStore } from '@store/streamingStore';
 import { usePreferencesStore, shouldAutoApprove } from '@store/preferencesStore';
 import { usePlanModeStore } from '@store/planModeStore';
 import type { AgentEvent, ToolCall, SessionRestoredPayload, TodosUpdatedPayload } from '@/types/agent';
+import { useBuildPhaseStore } from '@store/buildPhaseStore';
 import type { Phase } from '@components/ThinkingIndicator';
 import type { ToastMessage } from '@components/Toast';
 import { deleteSnapshot, saveSnapshot, setLastSessionId } from '@utils/sessionSnapshot';
@@ -289,6 +290,10 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         inputTokens: number;
                         outputTokens: number;
                     };
+                    // Transition build phase on agent completion during EXECUTING
+                    if (useBuildPhaseStore.getState().phase === 'EXECUTING') {
+                        useBuildPhaseStore.getState().setPhase('COMPLETED');
+                    }
                     // Safety net: any tool call still 'approved' (Running) at agent-done
                     // never received a TOOL_RESULT. Mark them errored so the UI doesn't
                     // pin a forever-spinning card. Real backend hangs still need fixing.
@@ -363,6 +368,10 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
 
                 case 'AGENT_ERROR': {
                     const payload = event.payload as { message: string; errorType?: string };
+                    // Transition build phase on agent error during EXECUTING
+                    if (useBuildPhaseStore.getState().phase === 'EXECUTING') {
+                        useBuildPhaseStore.getState().setPhase('FAILED_EXECUTION');
+                    }
                     // Same safety net as AGENT_DONE — finalize stuck-running tool cards.
                     {
                         const msgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
@@ -490,6 +499,18 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                             compactionTimerRef.current = null;
                         }, 3000);
                     }
+                    break;
+                }
+
+                case 'PLAN_READY': {
+                    useBuildPhaseStore.getState().setPhase('PLAN_PENDING');
+                    break;
+                }
+
+                case 'REVERTED': {
+                    useBuildPhaseStore.getState().setPhase('idle');
+                    // Optionally: could clear execution messages here;
+                    // parent handles via phase change observation.
                     break;
                 }
             }

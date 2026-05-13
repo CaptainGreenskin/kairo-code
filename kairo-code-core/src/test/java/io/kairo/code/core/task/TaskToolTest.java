@@ -30,6 +30,9 @@ import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
 import io.kairo.core.tool.DefaultPermissionGuard;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
+import io.kairo.expertteam.role.ExpertProfile;
+import io.kairo.expertteam.role.ExpertRoleRegistry;
+import io.kairo.api.team.RoleDefinition;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -41,6 +44,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -194,6 +198,162 @@ class TaskToolTest {
         assertThat(result.content()).contains("description");
     }
 
+    /* --------------------------------------------------------- expert_role tests */
+
+    @Test
+    void expertRoleResolvesCorrectProfile(@TempDir Path tmp) throws Exception {
+        Path repo = initRepoWith(tmp.resolve("parent"), "README.md", "hello\n");
+        WorktreeLifecycle lifecycle = new WorktreeLifecycle(tmp.resolve("worktrees"), "git");
+        WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(repo, lifecycle);
+
+        AtomicReference<String> capturedPrompt = new AtomicReference<>();
+        ChildSessionSpawner spawner =
+                (taskId, workDir) ->
+                        newSession(new PromptCapturingAgent(capturedPrompt));
+        WorktreeMergePrompter prompter =
+                (taskId, desc, stats, wt) -> Mono.just(WorktreeMergeChoice.DISCARD);
+        TaskToolDependencies deps = new TaskToolDependencies(provider, spawner, prompter);
+
+        ExpertRoleRegistry registry = new ExpertRoleRegistry();
+        ToolContext ctx = ctxWithDepsAndRegistry(deps, registry);
+
+        TaskTool tool = new TaskTool();
+        Map<String, Object> input = new HashMap<>();
+        input.put("description", "review code");
+        input.put("prompt", "Check the main service");
+        input.put("expert_role", "reviewer");
+        input.put("isolation", "none");
+
+        ToolResult result = tool.execute(input, ctx).block();
+
+        assertThat(result.isError()).as("Tool error: %s", result.content()).isFalse();
+        assertThat(result.content()).contains("expert_role=\"expert:reviewer\"");
+        assertThat(result.metadata()).containsEntry("task.expert_role", "expert:reviewer");
+        // Role instructions should be prepended to prompt
+        assertThat(capturedPrompt.get()).contains("<role_instructions>");
+        assertThat(capturedPrompt.get()).contains("code reviewer");
+        assertThat(capturedPrompt.get()).contains("Check the main service");
+        // Reviewer has tool restrictions
+        assertThat(capturedPrompt.get()).contains("<tool_restrictions>");
+        assertThat(capturedPrompt.get()).contains("read_file");
+    }
+
+    @Test
+    void unknownExpertRoleReturnsError(@TempDir Path tmp) throws Exception {
+        Path repo = initRepoWith(tmp.resolve("parent"), "README.md", "hello\n");
+        WorktreeLifecycle lifecycle = new WorktreeLifecycle(tmp.resolve("worktrees"), "git");
+        WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(repo, lifecycle);
+        TaskToolDependencies deps =
+                new TaskToolDependencies(
+                        provider,
+                        (taskId, wd) -> newSession(new NoOpAgent()),
+                        (id, d, s, w) -> Mono.just(WorktreeMergeChoice.DISCARD));
+
+        ExpertRoleRegistry registry = new ExpertRoleRegistry();
+        ToolContext ctx = ctxWithDepsAndRegistry(deps, registry);
+
+        TaskTool tool = new TaskTool();
+        Map<String, Object> input = new HashMap<>();
+        input.put("description", "test task");
+        input.put("prompt", "do work");
+        input.put("expert_role", "nonexistent_role");
+
+        ToolResult result = tool.execute(input, ctx).block();
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.content()).contains("Unknown expert_role 'nonexistent_role'");
+        assertThat(result.content()).contains("Available roles:");
+    }
+
+    @Test
+    void expertRoleWithoutRegistryReturnsError(@TempDir Path tmp) throws Exception {
+        Path repo = initRepoWith(tmp.resolve("parent"), "README.md", "hello\n");
+        WorktreeLifecycle lifecycle = new WorktreeLifecycle(tmp.resolve("worktrees"), "git");
+        WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(repo, lifecycle);
+        TaskToolDependencies deps =
+                new TaskToolDependencies(
+                        provider,
+                        (taskId, wd) -> newSession(new NoOpAgent()),
+                        (id, d, s, w) -> Mono.just(WorktreeMergeChoice.DISCARD));
+
+        // No ExpertRoleRegistry in context
+        ToolContext ctx = ctxWithDeps(deps);
+
+        TaskTool tool = new TaskTool();
+        Map<String, Object> input = new HashMap<>();
+        input.put("description", "test task");
+        input.put("prompt", "do work");
+        input.put("expert_role", "coder");
+
+        ToolResult result = tool.execute(input, ctx).block();
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.content()).contains("no ExpertRoleRegistry is available");
+    }
+
+    @Test
+    void withoutExpertRoleBackwardCompatible(@TempDir Path tmp) throws Exception {
+        Path repo = initRepoWith(tmp.resolve("parent"), "README.md", "hello\n");
+        WorktreeLifecycle lifecycle = new WorktreeLifecycle(tmp.resolve("worktrees"), "git");
+        WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(repo, lifecycle);
+
+        AtomicReference<String> capturedPrompt = new AtomicReference<>();
+        ChildSessionSpawner spawner =
+                (taskId, workDir) ->
+                        newSession(new PromptCapturingAgent(capturedPrompt));
+        WorktreeMergePrompter prompter =
+                (taskId, desc, stats, wt) -> Mono.just(WorktreeMergeChoice.DISCARD);
+        TaskToolDependencies deps = new TaskToolDependencies(provider, spawner, prompter);
+
+        // Has registry but no expert_role in input
+        ExpertRoleRegistry registry = new ExpertRoleRegistry();
+        ToolContext ctx = ctxWithDepsAndRegistry(deps, registry);
+
+        TaskTool tool = new TaskTool();
+        Map<String, Object> input = new HashMap<>();
+        input.put("description", "simple task");
+        input.put("prompt", "just do work");
+        input.put("isolation", "none");
+
+        ToolResult result = tool.execute(input, ctx).block();
+
+        assertThat(result.isError()).isFalse();
+        // Prompt should be passed through unchanged
+        assertThat(capturedPrompt.get()).isEqualTo("just do work");
+        // No expert_role in output
+        assertThat(result.content()).doesNotContain("expert_role");
+        assertThat(result.metadata()).doesNotContainKey("task.expert_role");
+    }
+
+    @Test
+    void buildEffectivePromptWithMountedSkills() {
+        RoleDefinition roleDef = new RoleDefinition(
+                "custom", "Custom", "Be a custom agent.", "agent.default",
+                List.of("read_file", "search"));
+        ExpertProfile profile = new ExpertProfile(
+                "custom", roleDef, "custom-profile",
+                List.of("git-skill", "docker-skill"), "custom-ns", null);
+
+        String result = TaskTool.buildEffectivePrompt("Do the task", profile);
+
+        assertThat(result).contains("<role_instructions>");
+        assertThat(result).contains("Be a custom agent.");
+        assertThat(result).contains("</role_instructions>");
+        assertThat(result).contains("<tool_restrictions>");
+        assertThat(result).contains("read_file, search");
+        assertThat(result).contains("</tool_restrictions>");
+        assertThat(result).contains("<mounted_skills>");
+        assertThat(result).contains("git-skill, docker-skill");
+        assertThat(result).contains("</mounted_skills>");
+        assertThat(result).endsWith("Do the task");
+    }
+
+    @Test
+    void buildEffectivePromptWithoutProfileReturnsBasePrompt() {
+        String result = TaskTool.buildEffectivePrompt("plain prompt", null);
+        assertThat(result).isEqualTo("plain prompt");
+    }
+
     /* ------------------------------------------------------------------ helpers */
 
     private static ToolContext ctxWithDeps(TaskToolDependencies deps) {
@@ -201,6 +361,14 @@ class TaskToolTest {
                 "agent-x",
                 "session-y",
                 Map.of(TaskToolDependencies.class.getName(), deps));
+    }
+
+    private static ToolContext ctxWithDepsAndRegistry(
+            TaskToolDependencies deps, ExpertRoleRegistry registry) {
+        Map<String, Object> depsMap = new HashMap<>();
+        depsMap.put(TaskToolDependencies.class.getName(), deps);
+        depsMap.put(ExpertRoleRegistry.class.getName(), registry);
+        return new ToolContext("agent-x", "session-y", depsMap);
     }
 
     private static CodeAgentSession newSession(Agent agent) {
@@ -323,6 +491,40 @@ class TaskToolTest {
         @Override
         public String name() {
             return "fake-noop-agent";
+        }
+
+        @Override
+        public AgentState state() {
+            return AgentState.IDLE;
+        }
+
+        @Override
+        public void interrupt() {}
+    }
+
+    /** Captures the prompt text for assertion. */
+    private static final class PromptCapturingAgent implements Agent {
+        private final AtomicReference<String> captured;
+        private final String id = "capture-" + UUID.randomUUID().toString().substring(0, 6);
+
+        PromptCapturingAgent(AtomicReference<String> captured) {
+            this.captured = captured;
+        }
+
+        @Override
+        public Mono<Msg> call(Msg input) {
+            captured.set(input.text());
+            return Mono.just(Msg.of(MsgRole.ASSISTANT, "captured"));
+        }
+
+        @Override
+        public String id() {
+            return id;
+        }
+
+        @Override
+        public String name() {
+            return "fake-capture-agent";
         }
 
         @Override

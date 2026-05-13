@@ -32,6 +32,14 @@
             <artifactId>kairo-spring-boot-starter-core</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-expert-team</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-multi-agent</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>

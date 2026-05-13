@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
@@ -14,6 +16,16 @@ import picocli.CommandLine;
  * network call.
  */
 class KairoCodeProviderTest {
+
+    @BeforeAll
+    static void enableDryRun() {
+        System.setProperty("kairo.code.dryrun", "true");
+    }
+
+    @AfterAll
+    static void disableDryRun() {
+        System.clearProperty("kairo.code.dryrun");
+    }
 
     private final PrintStream originalErr = System.err;
     private ByteArrayOutputStream errCapture;

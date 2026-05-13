@@ -16,103 +16,95 @@
 package io.kairo.code.core.team;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.kairo.api.team.TeamConfig;
+import io.kairo.api.team.TeamResult;
+import io.kairo.expertteam.ExpertTeamCoordinator;
+import io.kairo.expertteam.SimpleEvaluationStrategy;
+import io.kairo.expertteam.internal.DefaultPlanner;
+import io.kairo.expertteam.role.ExpertRoleRegistry;
+import io.kairo.expertteam.tck.NoopMessageBus;
+import io.kairo.expertteam.tck.StubAgent;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Mono;
 
 class SwarmCoordinatorTest {
 
     private SwarmCoordinator coordinator;
-    private TeamManager teamManager;
+    private ExpertRoleRegistry roleRegistry;
 
     @BeforeEach
     void setUp() {
-        teamManager = new TeamManager();
-        coordinator = new SwarmCoordinator(teamManager);
+        roleRegistry = new ExpertRoleRegistry();
+        DefaultPlanner planner = new DefaultPlanner(roleRegistry, null, null);
+        ExpertTeamCoordinator expertCoordinator = new ExpertTeamCoordinator(
+                null, new SimpleEvaluationStrategy(), null, planner, roleRegistry);
+
+        coordinator = new SwarmCoordinator(
+                expertCoordinator,
+                roleRegistry,
+                new NoopMessageBus(),
+                List.of(StubAgent.fixed("worker", "done")));
     }
 
     @Test
-    void researchAdvancesToSynthesis() {
-        SwarmPhase phase = new SwarmPhase.Research(List.of("explore codebase"));
-        SwarmPhase next = coordinator.advance("team-1", phase, "found 3 modules");
-        assertInstanceOf(SwarmPhase.Synthesis.class, next);
-        assertEquals("found 3 modules", ((SwarmPhase.Synthesis) next).researchSummary());
+    void startExpertTeamDelegatesToCoordinator() {
+        Mono<TeamResult> resultMono = coordinator.startExpertTeam(
+                "refactor auth module", TeamConfig.defaults(), List.of());
+
+        TeamResult result = resultMono.block();
+        assertNotNull(result);
+        assertNotNull(result.requestId());
+        assertNotNull(result.status());
     }
 
     @Test
-    void synthesisAdvancesToImplementation() {
-        SwarmPhase phase = new SwarmPhase.Synthesis("summary");
-        SwarmPhase next = coordinator.advance("team-1", phase, "plan: add 3 files");
-        assertInstanceOf(SwarmPhase.Implementation.class, next);
+    void startExpertTeamConvenienceOverload() {
+        Mono<TeamResult> resultMono = coordinator.startExpertTeam("build a feature");
+
+        TeamResult result = resultMono.block();
+        assertNotNull(result);
+        assertNotNull(result.requestId());
     }
 
     @Test
-    void implementationAdvancesToVerification() {
-        SwarmPhase phase = new SwarmPhase.Implementation("plan", List.of());
-        SwarmPhase next = coordinator.advance("team-1", phase, "done");
-        assertInstanceOf(SwarmPhase.Verification.class, next);
+    void emptyRoleIdsUsesAllRegisteredProfiles() {
+        Mono<TeamResult> resultMono = coordinator.startExpertTeam(
+                "analyze codebase", TeamConfig.defaults(), List.of());
+
+        TeamResult result = resultMono.block();
+        assertNotNull(result);
+        assertNotNull(result.stepOutcomes());
     }
 
     @Test
-    void researchPhaseIsReadOnly() {
-        SwarmPhase phase = new SwarmPhase.Research(List.of());
-        assertTrue(phase.isReadOnly());
+    void roleRegistryIsExposed() {
+        ExpertRoleRegistry registry = coordinator.roleRegistry();
+        assertNotNull(registry);
+        assertEquals(roleRegistry, registry);
     }
 
     @Test
-    void implementationPhaseIsNotReadOnly() {
-        SwarmPhase phase = new SwarmPhase.Implementation("plan", List.of());
-        assertFalse(phase.isReadOnly());
+    void constructorRejectsNullCoordinator() {
+        assertThrows(NullPointerException.class, () ->
+                new SwarmCoordinator(null, roleRegistry, new NoopMessageBus(), List.of()));
     }
 
     @Test
-    void isPhaseCompleteReturnsFalseForNewTeam() {
-        Team team = teamManager.createTeam("t", "g");
-        // Empty task list: all() returns empty, stream.allMatch on empty is true
-        assertTrue(coordinator.isPhaseComplete(team.teamId()));
+    void constructorRejectsNullRegistry() {
+        ExpertTeamCoordinator expertCoordinator = new ExpertTeamCoordinator(null);
+        assertThrows(NullPointerException.class, () ->
+                new SwarmCoordinator(expertCoordinator, null, new NoopMessageBus(), List.of()));
     }
 
     @Test
-    void isPhaseCompleteReturnsTrueWhenAllTasksDone() {
-        Team team = teamManager.createTeam("t", "g");
-        SharedTaskList taskList = teamManager.getTaskList(team.teamId()).orElseThrow();
-        SharedTask task = taskList.create("work", "do it");
-        taskList.claim(task.taskId(), "w1");
-        taskList.complete(task.taskId(), "w1");
-
-        assertTrue(coordinator.isPhaseComplete(team.teamId()));
-    }
-
-    @Test
-    void isPhaseCompleteReturnsFalseWhenTaskInProgress() {
-        Team team = teamManager.createTeam("t", "g");
-        SharedTaskList taskList = teamManager.getTaskList(team.teamId()).orElseThrow();
-        SharedTask task = taskList.create("work", "do it");
-        taskList.claim(task.taskId(), "w1");
-
-        assertFalse(coordinator.isPhaseComplete(team.teamId()));
-    }
-
-    @Test
-    void assignPhaseTasksCreatesTasks() {
-        Team team = teamManager.createTeam("t", "g");
-        SwarmPhase phase = new SwarmPhase.Research(List.of("explore"));
-        coordinator.assignPhaseTasks(team.teamId(), phase, List.of("task1", "task2"));
-
-        SharedTaskList taskList = teamManager.getTaskList(team.teamId()).orElseThrow();
-        assertEquals(2, taskList.all().size());
-    }
-
-    @Test
-    void verificationAdvancesToComplete() {
-        SwarmPhase phase = new SwarmPhase.Verification(List.of("criteria"));
-        SwarmPhase next = coordinator.advance("team-1", phase, "all passed");
-        assertInstanceOf(SwarmPhase.Verification.class, next);
-        SwarmPhase.Verification v = (SwarmPhase.Verification) next;
-        assertTrue(v.verificationCriteria().get(0).startsWith("COMPLETE:"));
+    void constructorRejectsNullMessageBus() {
+        ExpertTeamCoordinator expertCoordinator = new ExpertTeamCoordinator(null);
+        assertThrows(NullPointerException.class, () ->
+                new SwarmCoordinator(expertCoordinator, roleRegistry, null, List.of()));
     }
 }

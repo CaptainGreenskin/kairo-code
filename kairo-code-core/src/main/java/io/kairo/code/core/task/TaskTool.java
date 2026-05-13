@@ -31,11 +31,15 @@ import io.kairo.code.core.workspace.DiffStats;
 import io.kairo.code.core.workspace.WorktreeException;
 import io.kairo.code.core.workspace.WorktreeLifecycle;
 import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
+import io.kairo.expertteam.role.ExpertProfile;
+import io.kairo.expertteam.role.ExpertRoleRegistry;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
@@ -94,6 +98,17 @@ public class TaskTool implements SyncTool {
             required = false)
     private String isolation;
 
+    @ToolParam(
+            description =
+                    "Optional expert role ID to specialize the child agent. When set, the child receives "
+                            + "role-specific system instructions, tool restrictions, and skill context from the "
+                            + "resolved ExpertProfile. Built-in roles use the 'expert:' prefix: "
+                            + "expert:architect, expert:researcher, expert:coder, expert:reviewer, "
+                            + "expert:tester, expert:synthesizer. Short names (e.g. 'reviewer') are "
+                            + "auto-expanded to 'expert:reviewer'.",
+            required = false)
+    private String expert_role;
+
     @Override
     public Mono<ToolResult> execute(Map<String, Object> input, ToolContext context) {
         TaskToolDependencies deps =
@@ -102,18 +117,42 @@ public class TaskTool implements SyncTool {
             return Mono.just(error(
                     null,
                     "TaskToolDependencies not registered in agent's toolDependencies. "
-                            + "Wire it via AgentBuilder.toolDependencies(...).")); 
+                            + "Wire it via AgentBuilder.toolDependencies(...)."));
         }
 
         String descIn = stringInput(input, "description");
         String promptIn = stringInput(input, "prompt");
         String isoIn = stringInput(input, "isolation");
+        String roleId = stringInput(input, "expert_role");
         if (descIn == null || descIn.isBlank()) {
             return Mono.just(error(null, "Parameter 'description' is required and must be non-blank."));
         }
         if (promptIn == null || promptIn.isBlank()) {
             return Mono.just(error(null, "Parameter 'prompt' is required and must be non-blank."));
         }
+
+        // Resolve expert role if provided
+        ExpertProfile resolvedProfile = null;
+        if (roleId != null && !roleId.isBlank()) {
+            ExpertRoleRegistry registry =
+                    context.getBean(ExpertRoleRegistry.class).orElse(null);
+            if (registry == null) {
+                return Mono.just(error(null,
+                        "expert_role '" + roleId + "' specified but no ExpertRoleRegistry is available. "
+                                + "Register an ExpertRoleRegistry in toolDependencies."));
+            }
+            // Try exact match first, then with 'expert:' prefix
+            resolvedProfile = registry.resolve(roleId).orElse(null);
+            if (resolvedProfile == null && !roleId.contains(":")) {
+                resolvedProfile = registry.resolve("expert:" + roleId).orElse(null);
+            }
+            if (resolvedProfile == null) {
+                return Mono.just(error(null,
+                        "Unknown expert_role '" + roleId + "'. Available roles: "
+                                + registry.registeredRoleIds() + "."));
+            }
+        }
+
         boolean writable = !"none".equalsIgnoreCase(isoIn);
         String taskId = newTaskId();
         String toolUseId = (String) input.getOrDefault("__tool_use_id", null);
@@ -133,12 +172,15 @@ public class TaskTool implements SyncTool {
         boolean isolated = "worktree".equals(ws.metadata().get("kairo.workspace.isolation"));
         Path workDir = ws.root();
 
+        // Build effective prompt: prepend role instructions if profile resolved
+        String effectivePrompt = buildEffectivePrompt(promptIn, resolvedProfile);
+
         Msg childResponse;
         Throwable childFailure = null;
         try {
             CodeAgentSession child = deps.spawner().spawn(taskId, workDir);
             childResponse =
-                    child.agent().call(Msg.of(MsgRole.USER, promptIn)).block();
+                    child.agent().call(Msg.of(MsgRole.USER, effectivePrompt)).block();
         } catch (Throwable t) {
             childResponse = null;
             childFailure = t;
@@ -179,10 +221,44 @@ public class TaskTool implements SyncTool {
                     toolUseId,
                     "Child agent for task '" + descIn + "' failed: " + childFailure.getMessage()));
         }
-        return Mono.just(ok(toolUseId, taskId, descIn, isolated, choice, diff, keptAt, childResponse));
+        return Mono.just(ok(toolUseId, taskId, descIn, isolated, choice, diff, keptAt,
+                childResponse, resolvedProfile));
     }
 
     /* ------------------------------------------------------------------ helpers */
+
+    /**
+     * Build the effective prompt sent to the child agent. If an expert profile is resolved, its
+     * role instructions are prepended as a system-level preamble, and tool restrictions / mounted
+     * skills are appended as context.
+     */
+    static String buildEffectivePrompt(String basePrompt, @Nullable ExpertProfile profile) {
+        if (profile == null) {
+            return basePrompt;
+        }
+        StringBuilder sb = new StringBuilder();
+        String instructions = profile.roleDefinition().instructions();
+        if (instructions != null && !instructions.isBlank()) {
+            sb.append("<role_instructions>\n");
+            sb.append(instructions).append("\n");
+            sb.append("</role_instructions>\n\n");
+        }
+        List<String> allowedTools = profile.roleDefinition().allowedTools();
+        if (allowedTools != null && !allowedTools.isEmpty()) {
+            sb.append("<tool_restrictions>\n");
+            sb.append("You may ONLY use the following tools: ");
+            sb.append(String.join(", ", allowedTools)).append("\n");
+            sb.append("</tool_restrictions>\n\n");
+        }
+        List<String> skills = profile.mountedSkills();
+        if (skills != null && !skills.isEmpty()) {
+            sb.append("<mounted_skills>\n");
+            sb.append("Available skills: ").append(String.join(", ", skills)).append("\n");
+            sb.append("</mounted_skills>\n\n");
+        }
+        sb.append(basePrompt);
+        return sb.toString();
+    }
 
     private static Path applyChoice(
             WorktreeLifecycle lifecycle,
@@ -236,7 +312,8 @@ public class TaskTool implements SyncTool {
             WorktreeMergeChoice choice,
             DiffStats diff,
             Path keptAt,
-            Msg childResponse) {
+            Msg childResponse,
+            @Nullable ExpertProfile profile) {
         String childText = childResponse == null ? "" : childResponse.text();
         StringBuilder sb = new StringBuilder();
         sb.append("<task_result")
@@ -247,6 +324,9 @@ public class TaskTool implements SyncTool {
                 .append(attr("files_changed", String.valueOf(diff.filesChanged())))
                 .append(attr("insertions", String.valueOf(diff.insertions())))
                 .append(attr("deletions", String.valueOf(diff.deletions())));
+        if (profile != null) {
+            sb.append(attr("expert_role", profile.roleId()));
+        }
         if (keptAt != null) {
             sb.append(attr("kept_at", keptAt.toString()));
         }
@@ -262,6 +342,17 @@ public class TaskTool implements SyncTool {
         meta.put("task.files_changed", diff.filesChanged());
         meta.put("task.insertions", diff.insertions());
         meta.put("task.deletions", diff.deletions());
+        if (profile != null) {
+            meta.put("task.expert_role", profile.roleId());
+            List<String> tools = profile.roleDefinition().allowedTools();
+            if (tools != null && !tools.isEmpty()) {
+                meta.put("task.allowed_tools", tools);
+            }
+            List<String> skills = profile.mountedSkills();
+            if (skills != null && !skills.isEmpty()) {
+                meta.put("task.mounted_skills", skills);
+            }
+        }
         if (keptAt != null) meta.put("task.kept_at", keptAt.toString());
         return ToolResult.success(toolUseId, sb.toString(), Map.copyOf(meta));
     }

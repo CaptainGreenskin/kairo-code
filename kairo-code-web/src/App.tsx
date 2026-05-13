@@ -47,6 +47,8 @@ import { HookConfigPanel } from '@components/HookConfigPanel';
 import { ToolStatsDashboard } from '@components/ToolStatsDashboard';
 import { SessionSearchPanel } from '@components/SessionSearchPanel';
 import { TeamPanel } from '@components/TeamPanel';
+import { ExpertTeamPanel } from '@components/ExpertTeamPanel';
+import { TeamReplay } from '@components/TeamReplay';
 import { ExportMenu } from '@components/ExportMenu';
 import { ExecutionTimeline } from '@components/ExecutionTimeline';
 import { BookmarkPanel } from '@components/BookmarkPanel';
@@ -78,8 +80,12 @@ import { sortSessions, type SessionSortOrder } from '@utils/sessionSort';
 import { useAgentNotification } from '@hooks/useAgentNotification';
 import { useFileTracker } from '@hooks/useFileTracker';
 import { useAgentEventHandler } from '@hooks/useAgentEventHandler';
+import { useExpertTeamHandler } from '@hooks/useExpertTeamHandler';
 import { streamingStore } from '@store/streamingStore';
 import { useGlobalShortcuts } from '@hooks/useGlobalShortcuts';
+import { ConfirmBuildChip } from '@components/ConfirmBuildChip';
+import { RevertButton } from '@components/RevertButton';
+import { useBuildPhaseStore } from '@store/buildPhaseStore';
 import { FileTrackerBadge } from '@components/FileTrackerBadge';
 
 declare const __APP_VERSION__: string;
@@ -297,12 +303,25 @@ function App() {
         connectionStatus,
         connect,
         disconnect,
+        send,
         sendMessage,
         approveTool,
         stopAgent,
         createSession,
         switchSession,
-    } = useAgentWebSocket(handleEvent);
+    } = useAgentWebSocket(handleEvent, {
+        onRawMessage: (data: string) => teamHandlerRef.current?.(data),
+    });
+
+    // Expert Team handler wiring
+    const teamHandlerRef = useRef<((data: string) => void) | null>(null);
+    const { handleRawMessage: teamHandleRaw, subscribe: teamSubscribe, unsubscribe: teamUnsubscribe } = useExpertTeamHandler({
+        sendAction: send,
+        isConnected,
+    });
+    useEffect(() => {
+        teamHandlerRef.current = teamHandleRaw;
+    }, [teamHandleRaw]);
 
     useEffect(() => {
         approveToolRef.current = approveTool;
@@ -796,6 +815,8 @@ function App() {
     const [showTimeline, setShowTimeline] = useState(false);
     const [showBookmarks, setShowBookmarks] = useState(false);
     const [showTeamPanel, setShowTeamPanel] = useState(false);
+    const [expertTeamId, setExpertTeamId] = useState<string | null>(null);
+    const [expertTeamReplayId, setExpertTeamReplayId] = useState<string | null>(null);
     const [bookmarks, setBookmarks] = useState<Set<string>>(() =>
         sessionId ? new Set(getBookmarks(sessionId)) : new Set()
     );
@@ -1485,21 +1506,54 @@ ${content}
                                                 );
                                             }}
                                             components={{
-                                                Footer: () =>
-                                                    isRunning ? (
-                                                        <div>
-                                                            <ThinkingIndicator
-                                                                isVisible={true}
-                                                                phase={agentPhase}
-                                                                toolName={currentToolName}
-                                                                toolElapsed={toolElapsed}
-                                                                thinkingText={thinkingText}
-                                                            />
-                                                            {lastTool && (
-                                                                <LastToolDisplay name={lastTool.name} elapsed={lastTool.elapsed} />
+                                                Footer: () => {
+                                                    const buildPhase = useBuildPhaseStore((s) => s.phase);
+                                                    const buildIsGit = useBuildPhaseStore((s) => s.isGit);
+                                                    return (
+                                                        <div className="px-4">
+                                                            {buildPhase === 'PLAN_PENDING' && sessionId && (
+                                                                <ConfirmBuildChip
+                                                                    sessionId={sessionId}
+                                                                    isVisible={true}
+                                                                    onConfirm={() => {
+                                                                        if (sessionId) {
+                                                                            send({ action: 'confirmBuild', sessionId });
+                                                                            useBuildPhaseStore.getState().setPhase('EXECUTING');
+                                                                        }
+                                                                    }}
+                                                                />
+                                                            )}
+                                                            {(buildPhase === 'FAILED_EXECUTION' || buildPhase === 'COMPLETED') && sessionId && (
+                                                                <div className="mt-2 mb-2">
+                                                                    <RevertButton
+                                                                        sessionId={sessionId}
+                                                                        isGit={buildIsGit}
+                                                                        phase={buildPhase}
+                                                                        onRevert={() => {
+                                                                            if (sessionId) {
+                                                                                send({ action: 'revert', sessionId });
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                            {isRunning && (
+                                                                <div>
+                                                                    <ThinkingIndicator
+                                                                        isVisible={true}
+                                                                        phase={agentPhase}
+                                                                        toolName={currentToolName}
+                                                                        toolElapsed={toolElapsed}
+                                                                        thinkingText={thinkingText}
+                                                                    />
+                                                                    {lastTool && (
+                                                                        <LastToolDisplay name={lastTool.name} elapsed={lastTool.elapsed} />
+                                                                    )}
+                                                                </div>
                                                             )}
                                                         </div>
-                                                    ) : null,
+                                                    );
+                                                },
                                             }}
                                         />
                                     </ErrorBoundary>
@@ -1681,8 +1735,49 @@ ${content}
                     }}
                 />
             )}
-            {showTeamPanel && (
-                <TeamPanel isOpen={showTeamPanel} onClose={() => setShowTeamPanel(false)} />
+            {showTeamPanel && !expertTeamId && !expertTeamReplayId && (
+                <TeamPanel
+                    isOpen={showTeamPanel}
+                    onClose={() => setShowTeamPanel(false)}
+                    onSelectTeamId={(teamId: string) => {
+                        setExpertTeamId(teamId);
+                        teamSubscribe(teamId);
+                    }}
+                />
+            )}
+            {showTeamPanel && expertTeamId && !expertTeamReplayId && (
+                <div className="fixed inset-0 z-50 flex flex-col bg-[var(--bg-primary)]">
+                    <div className="flex items-center gap-3 px-4 py-2 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
+                        <button
+                            onClick={() => { teamUnsubscribe(); setExpertTeamId(null); }}
+                            className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors font-medium"
+                        >
+                            ← Back to Teams
+                        </button>
+                        <span className="text-xs text-[var(--text-muted)]">Team: {expertTeamId}</span>
+                        <button
+                            onClick={() => { teamUnsubscribe(); setExpertTeamId(null); setShowTeamPanel(false); }}
+                            className="ml-auto text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg leading-none"
+                            title="Close"
+                        >
+                            &times;
+                        </button>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                        <ExpertTeamPanel
+                            teamId={expertTeamId}
+                            onReplay={() => setExpertTeamReplayId(expertTeamId)}
+                        />
+                    </div>
+                </div>
+            )}
+            {showTeamPanel && expertTeamReplayId && (
+                <div className="fixed inset-0 z-50 flex flex-col bg-[var(--bg-primary)]">
+                    <TeamReplay
+                        teamId={expertTeamReplayId}
+                        onClose={() => setExpertTeamReplayId(null)}
+                    />
+                </div>
             )}
             <DevDiagnosticsPanel />
         </div>

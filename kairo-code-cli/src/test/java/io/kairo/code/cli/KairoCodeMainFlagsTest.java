@@ -21,7 +21,9 @@ import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
@@ -31,6 +33,16 @@ import picocli.CommandLine;
  * These are lightweight tests that verify option parsing and config wiring.
  */
 class KairoCodeMainFlagsTest {
+
+    @BeforeAll
+    static void enableDryRun() {
+        System.setProperty("kairo.code.dryrun", "true");
+    }
+
+    @AfterAll
+    static void disableDryRun() {
+        System.clearProperty("kairo.code.dryrun");
+    }
 
     private final PrintStream originalErr = System.err;
     private ByteArrayOutputStream errCapture;
@@ -97,10 +109,10 @@ class KairoCodeMainFlagsTest {
     }
 
     @Test
-    void negativeToolBudget_clampedToZero() {
-        // Picocli may reject negative int for --tool-budget; verify it doesn't crash
+    void negativeToolBudget_rejectedWithError() {
+        // Negative --tool-budget is validated and rejected before agent execution
         int code = run("--api-key", "fake", "--task", "t", "--tool-budget", "-1");
-        // Either parse error (2) or runtime error (1) — both acceptable
-        assertThat(code).isNotEqualTo(0);
+        assertThat(code).isEqualTo(1);
+        assertThat(capturedErr()).contains("--tool-budget must be >= 0");
     }
 }

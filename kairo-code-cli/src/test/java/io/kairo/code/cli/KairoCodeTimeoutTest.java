@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
@@ -15,6 +17,16 @@ import picocli.CommandLine;
  * Only tests validation paths that do not make network calls.
  */
 class KairoCodeTimeoutTest {
+
+    @BeforeAll
+    static void enableDryRun() {
+        System.setProperty("kairo.code.dryrun", "true");
+    }
+
+    @AfterAll
+    static void disableDryRun() {
+        System.clearProperty("kairo.code.dryrun");
+    }
 
     private final PrintStream originalErr = System.err;
     private ByteArrayOutputStream errCapture;

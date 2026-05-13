@@ -2,6 +2,9 @@ package io.kairo.code.server.websocket;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.kairo.api.message.Msg;
+import io.kairo.api.message.MsgRole;
+import io.kairo.api.team.MessageBus;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.config.WorkspaceConfig;
@@ -9,6 +12,7 @@ import io.kairo.code.server.config.WorkspacePersistenceService;
 import io.kairo.code.server.dto.CreateSessionResponse;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.AgentService;
+import io.kairo.code.service.SessionInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -32,6 +36,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *   {"action":"message",  "sessionId":"...", "message":"...", "imageData":"...", "imageMediaType":"..."}
  *   {"action":"approve",  "sessionId":"...", "toolCallId":"...", "approved":true,  "reason":"..."}
  *   {"action":"stop",     "sessionId":"..."}
+ *   {"action":"revert",   "sessionId":"..."}
+ *   {"action":"rejectStep", "teamId":"...", "stepId":"...", "feedback":"..."}
  * </pre>
  *
  * <p>Server → Client (events for the bound session arrive on this socket only):
@@ -53,16 +59,22 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
     private final AgentService agentService;
     private final ServerProperties serverProperties;
     private final WorkspacePersistenceService workspaces;
+    private final MessageBus messageBus;
 
     /** sessionId → WS sessions bound to it (multiple browser tabs supported). */
     private final ConcurrentHashMap<String, Set<WebSocketSession>> subscribers = new ConcurrentHashMap<>();
 
+    /** teamId → WS sessions subscribed to team events. */
+    private final ConcurrentHashMap<String, Set<WebSocketSession>> teamSubscribers = new ConcurrentHashMap<>();
+
     public AgentWebSocketHandler(AgentService agentService,
                                  ServerProperties serverProperties,
-                                 WorkspacePersistenceService workspaces) {
+                                 WorkspacePersistenceService workspaces,
+                                 MessageBus messageBus) {
         this.agentService = agentService;
         this.serverProperties = serverProperties;
         this.workspaces = workspaces;
+        this.messageBus = messageBus;
     }
 
     @Override
@@ -85,6 +97,10 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                 case "message" -> handleMessage(session, root);
                 case "approve" -> handleApprove(session, root);
                 case "stop"    -> handleStop(session, root);
+                case "revert"  -> handleRevert(session, root);
+                case "subscribeTeam"   -> handleSubscribeTeam(session, root);
+                case "unsubscribeTeam" -> handleUnsubscribeTeam(session, root);
+                case "rejectStep"      -> handleRejectStep(session, root);
                 default -> sendErr(session, action, "unknown action: " + action);
             }
         } catch (Exception e) {
@@ -96,6 +112,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         unbind(session);
+        unsubscribeAllTeams(session);
         log.debug("Agent WS closed: {} ({})", session.getId(), status);
     }
 
@@ -138,26 +155,28 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         String provider = text(body, "provider");
         String baseUrl = resolveBaseUrl(provider);
         String model = nonBlank(text(body, "model"), serverProperties.model());
+        String mode = nonBlank(text(body, "mode"), "chat");
 
         CodeAgentConfig config = new CodeAgentConfig(
                 apiKey, baseUrl, model, Integer.MAX_VALUE, workspace.workingDir(), null, 0, 0,
                 serverProperties.thinkingBudget());
 
-        String sessionId = agentService.createSession(config, workspace.id(), workspace.useWorktree());
+        String sessionId = agentService.createSession(config, workspace.id(), workspace.useWorktree(), mode);
         bind(session, sessionId);
 
         // After createSession, the actual cwd may have been swapped to a worktree path. Read the
         // effective workingDir from the live session so the UI sees the real path, not the
         // workspace dir.
-        String effectiveDir = agentService.listSessions().stream()
+        SessionInfo sessionInfo = agentService.listSessions().stream()
                 .filter(s -> s.sessionId().equals(sessionId))
-                .map(io.kairo.code.service.SessionInfo::workingDir)
                 .findFirst()
-                .orElse(workspace.workingDir());
+                .orElse(null);
+        String effectiveDir = sessionInfo != null ? sessionInfo.workingDir() : workspace.workingDir();
+        boolean isGit = sessionInfo != null && sessionInfo.isGit();
 
         CreateSessionResponse resp = new CreateSessionResponse(sessionId, effectiveDir, model);
-        sendJson(session, new SessionCreatedEnvelope(sessionId, resp.workingDir(), resp.model()));
-        log.info("Session {} created via WS (workspace={})", sessionId, workspace.id());
+        sendJson(session, new SessionCreatedEnvelope(sessionId, resp.workingDir(), resp.model(), isGit));
+        log.info("Session {} created via WS (workspace={}, mode={})", sessionId, workspace.id(), mode);
     }
 
     private void handleMessage(WebSocketSession session, JsonNode body) {
@@ -217,6 +236,100 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         }
         agentService.stopAgent(sid);
         log.info("Stop requested for session {}", sid);
+    }
+
+    private void handleRevert(WebSocketSession session, JsonNode body) {
+        String sid = text(body, "sessionId");
+        if (sid == null) {
+            sendErr(session, "revert", "missing sessionId");
+            return;
+        }
+        boolean success = agentService.revertSession(sid);
+        if (success) {
+            sendAck(session, "revert");
+            log.info("Revert completed for session {}", sid);
+        } else {
+            sendErr(session, "revert", "Revert failed or not allowed in current session state");
+        }
+    }
+
+    // ----------------- team subscription handlers -----------------
+
+    private void handleSubscribeTeam(WebSocketSession session, JsonNode body) {
+        String teamId = text(body, "teamId");
+        if (teamId == null) {
+            sendErr(session, "subscribeTeam", "teamId is required");
+            return;
+        }
+        teamSubscribers.computeIfAbsent(teamId, k -> ConcurrentHashMap.newKeySet()).add(session);
+        sendAck(session, "subscribeTeam");
+        // If lastSeq > 0, replay will be handled by TeamEventBridge (D4) when it's wired
+    }
+
+    private void handleUnsubscribeTeam(WebSocketSession session, JsonNode body) {
+        String teamId = text(body, "teamId");
+        if (teamId != null) {
+            Set<WebSocketSession> subs = teamSubscribers.get(teamId);
+            if (subs != null) {
+                subs.remove(session);
+                if (subs.isEmpty()) {
+                    teamSubscribers.remove(teamId);
+                }
+            }
+        }
+        sendAck(session, "unsubscribeTeam");
+    }
+
+    private void handleRejectStep(WebSocketSession session, JsonNode body) {
+        String teamId = text(body, "teamId");
+        String stepId = text(body, "stepId");
+        String feedback = text(body, "feedback");
+
+        if (teamId == null || stepId == null || feedback == null) {
+            sendErr(session, "rejectStep", "teamId, stepId, and feedback are required");
+            return;
+        }
+
+        // Route user rejection feedback to the step's agent via MessageBus.
+        // The step agent can pick this up on its receive channel to trigger re-generation.
+        Msg feedbackMsg = Msg.of(MsgRole.USER,
+                "User rejected output. Feedback: " + feedback);
+        messageBus.send("user-feedback", stepId, feedbackMsg).subscribe(
+                unused -> {},
+                err -> log.warn("Failed to route reject feedback for team={} step={}",
+                        teamId, stepId, err)
+        );
+
+        log.info("Reject feedback routed: team={} step={}", teamId, stepId);
+        sendAck(session, "rejectStep");
+    }
+
+    private void unsubscribeAllTeams(WebSocketSession session) {
+        teamSubscribers.forEach((teamId, subs) -> {
+            subs.remove(session);
+            if (subs.isEmpty()) {
+                teamSubscribers.remove(teamId);
+            }
+        });
+    }
+
+    /**
+     * Push a pre-serialized team event JSON to all sessions subscribed to the given team.
+     * Called by TeamEventBridge (D4) to stream events to clients.
+     */
+    public void broadcastTeamEvent(String teamId, String jsonPayload) {
+        Set<WebSocketSession> subs = teamSubscribers.get(teamId);
+        if (subs == null || subs.isEmpty()) return;
+        for (WebSocketSession s : subs) {
+            sendText(s, jsonPayload);
+        }
+    }
+
+    /**
+     * Expose subscriber lookup for TeamEventBridge (D4).
+     */
+    public Set<WebSocketSession> getTeamSubscribers(String teamId) {
+        return teamSubscribers.getOrDefault(teamId, Set.of());
     }
 
     // ----------------- subscriber bookkeeping -----------------
@@ -279,6 +392,12 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         } catch (Exception ignored) {}
     }
 
+    private void sendAck(WebSocketSession session, String action) {
+        try {
+            sendJson(session, new AckEnvelope(action));
+        } catch (Exception ignored) {}
+    }
+
     // ----------------- helpers -----------------
 
     private static String text(JsonNode node, String field) {
@@ -307,15 +426,21 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
     // ----------------- envelope records (server → client) -----------------
 
     private record SessionCreatedEnvelope(
-            String type, String sessionId, String workingDir, String model) {
-        SessionCreatedEnvelope(String sessionId, String workingDir, String model) {
-            this("SESSION_CREATED", sessionId, workingDir, model);
+            String type, String sessionId, String workingDir, String model, boolean isGit) {
+        SessionCreatedEnvelope(String sessionId, String workingDir, String model, boolean isGit) {
+            this("SESSION_CREATED", sessionId, workingDir, model, isGit);
         }
     }
 
     private record ErrorEnvelope(String type, boolean ok, String action, String message) {
         ErrorEnvelope(String action, String message) {
             this("ERR", false, action, message);
+        }
+    }
+
+    record AckEnvelope(String type, boolean ok, String action) {
+        AckEnvelope(String action) {
+            this("ACK", true, action);
         }
     }
 }

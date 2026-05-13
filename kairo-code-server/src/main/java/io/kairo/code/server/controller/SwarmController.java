@@ -2,8 +2,6 @@ package io.kairo.code.server.controller;
 
 import io.kairo.code.core.team.SharedTask;
 import io.kairo.code.core.team.SharedTaskList;
-import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.SwarmPhase;
 import io.kairo.code.core.team.Team;
 import io.kairo.code.core.team.TeamManager;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,8 +14,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * REST controller for swarm execution status.
- * Composes team + task state to report swarm progress.
+ * REST controller for team execution status.
+ * Composes team + task state to report progress.
  */
 @RestController
 @RequestMapping("/api/swarms")
@@ -25,9 +23,6 @@ public class SwarmController {
 
     @Autowired
     private TeamManager teamManager;
-
-    @Autowired
-    private SwarmCoordinator swarmCoordinator;
 
     @GetMapping("/{teamId}")
     public ResponseEntity<Map<String, Object>> getSwarmStatus(@PathVariable String teamId) {

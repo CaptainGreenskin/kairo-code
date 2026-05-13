@@ -12,7 +12,9 @@ export type AgentEventType =
     | 'AGENT_THINKING'
     | 'SESSION_RESTORED'
     | 'TODOS_UPDATED'
-    | 'CONTEXT_COMPACTED';
+    | 'CONTEXT_COMPACTED'
+    | 'PLAN_READY'
+    | 'REVERTED';
 
 /**
  * Mirrors {@code io.kairo.api.tool.FailureReason}. Carried on TOOL_RESULT payloads under
@@ -43,7 +45,9 @@ export type AgentEventPayload =
     | AgentThinkingPayload
     | SessionRestoredPayload
     | TodosUpdatedPayload
-    | ContextCompactedPayload;
+    | ContextCompactedPayload
+    | PlanReadyPayload
+    | RevertedPayload;
 
 export interface TextChunkPayload {
     text: string;
@@ -203,6 +207,22 @@ export interface SessionInfo {
     workingDir?: string;
     running?: boolean;
     workspaceId?: string;
+    isGit?: boolean;
+}
+
+/**
+ * Payload for PLAN_READY event — emitted when the agent has finished planning and
+ * is awaiting user confirmation to proceed with execution.
+ */
+export interface PlanReadyPayload {
+    planSummary?: string;
+}
+
+/**
+ * Payload for REVERTED event — emitted after a successful git revert.
+ */
+export interface RevertedPayload {
+    message?: string;
 }
 
 export interface TokenUsage {
@@ -234,6 +254,17 @@ export interface SearchResponse {
     matches: SearchMatch[];
     truncated: boolean;
 }
+
+/**
+ * Plan lifecycle phase for the confirm/revert UI.
+ * - idle: no plan in progress
+ * - PLAN_PENDING: plan is ready, awaiting user confirmation
+ * - EXECUTING: build in progress
+ * - FAILED_EXECUTION: build failed
+ * - COMPLETED: build succeeded
+ * - REVERTED: user reverted changes
+ */
+export type PlanPhase = 'idle' | 'PLAN_PENDING' | 'EXECUTING' | 'FAILED_EXECUTION' | 'COMPLETED' | 'REVERTED';
 
 /** WebSocket connection status for the UI indicator. */
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';

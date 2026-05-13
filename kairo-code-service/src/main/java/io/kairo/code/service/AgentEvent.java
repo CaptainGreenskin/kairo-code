@@ -37,7 +37,15 @@ public record AgentEvent(
         AGENT_ERROR,
         SESSION_RESTORED,
         TODOS_UPDATED,
-        CONTEXT_COMPACTED
+        CONTEXT_COMPACTED,
+        /** Emitted when plan is ready for user confirmation (PLAN_PENDING state). */
+        PLAN_READY,
+        /** Emitted after a successful workspace revert. */
+        REVERTED,
+        /** Tells frontend to clear execution-phase messages from UI. */
+        CLEAR_EXECUTION_MESSAGES,
+        /** Emitted when expert-team triage demotes the request to single-agent ReAct. */
+        MODE_DEMOTED
     }
 
     public static AgentEvent thinking(String sessionId) {
@@ -140,6 +148,46 @@ public record AgentEvent(
                 + ",\"ratio\":" + String.format(java.util.Locale.ROOT, "%.4f", ratio) + "}";
         return new AgentEvent(EventType.CONTEXT_COMPACTED, sessionId, payload, null, null,
                 false, null, null, (long) beforeTokens, null, null, null, null,
+                System.currentTimeMillis());
+    }
+
+    /**
+     * Create a PLAN_READY event signalling that the plan has been generated and awaits
+     * user confirmation. {@code content} holds a JSON object with plan overview.
+     *
+     * @param sessionId the session ID
+     * @param planOverview the plan overview/summary text
+     */
+    public static AgentEvent planReady(String sessionId, String planOverview) {
+        return new AgentEvent(EventType.PLAN_READY, sessionId, planOverview, null, null,
+                false, null, null, null, null, null, null, null,
+                System.currentTimeMillis());
+    }
+
+    /** Create a REVERTED event signalling that the workspace was successfully reverted. */
+    public static AgentEvent reverted(String sessionId) {
+        return new AgentEvent(EventType.REVERTED, sessionId, null, null, null,
+                false, null, null, null, null, null, null, null,
+                System.currentTimeMillis());
+    }
+
+    /** Create a CLEAR_EXECUTION_MESSAGES event telling the frontend to clear execution-phase messages. */
+    public static AgentEvent clearExecutionMessages(String sessionId) {
+        return new AgentEvent(EventType.CLEAR_EXECUTION_MESSAGES, sessionId, null, null, null,
+                false, null, null, null, null, null, null, null,
+                System.currentTimeMillis());
+    }
+
+    /**
+     * Create a MODE_DEMOTED event signalling that the expert-team triage has demoted
+     * the request to a single-agent ReAct loop.
+     *
+     * @param sessionId the session ID
+     * @param reason human-readable explanation of the demotion
+     */
+    public static AgentEvent modeDemoted(String sessionId, String reason) {
+        return new AgentEvent(EventType.MODE_DEMOTED, sessionId, reason, null, null,
+                false, null, null, null, null, null, null, null,
                 System.currentTimeMillis());
     }
 }
