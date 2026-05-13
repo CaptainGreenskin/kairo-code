@@ -3,6 +3,7 @@ import { MessageCircle, Bot, Users, Check, ChevronDown } from 'lucide-react';
 import { useSessionModeStore, type SessionMode } from '@store/sessionModeStore';
 import { useWorkspaceStore } from '@store/workspaceStore';
 import { useExpertTeamStore } from '@store/expertTeamStore';
+import { useSessionStore } from '@store/sessionStore';
 
 interface ModeMeta {
     value: SessionMode;
@@ -52,7 +53,9 @@ export function SessionModeToggle({ dropUp = false }: SessionModeToggleProps) {
     const workspaceId = useWorkspaceStore((s) => s.currentWorkspaceId);
     const getMode = useSessionModeStore((s) => s.getMode);
     const setMode = useSessionModeStore((s) => s.setMode);
+    const requestSessionRestart = useSessionModeStore((s) => s.requestSessionRestart);
     const activeTeam = useExpertTeamStore((s) => s.getActiveTeam());
+    const activeSessionId = useSessionStore((s) => s.activeSessionId);
 
     const mode = workspaceId ? getMode(workspaceId) : 'chat';
     const teamRunning = activeTeam != null
@@ -102,8 +105,14 @@ export function SessionModeToggle({ dropUp = false }: SessionModeToggleProps) {
                                 key={m.value}
                                 onClick={() => {
                                     if (!isDisabled && workspaceId) {
+                                        const prevMode = getMode(workspaceId);
                                         setMode(workspaceId, m.value);
                                         setOpen(false);
+                                        // If mode actually changed and there's an active session,
+                                        // request session restart so App.tsx creates a new session
+                                        if (m.value !== prevMode && activeSessionId) {
+                                            requestSessionRestart(workspaceId);
+                                        }
                                     }
                                 }}
                                 disabled={isDisabled}

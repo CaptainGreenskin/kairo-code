@@ -79,10 +79,23 @@ public class PlanPendingInterceptHook {
     /**
      * Intercept exit_plan_mode before execution. Returns SKIP to veto the tool,
      * transitioning to PLAN_PENDING and emitting PLAN_READY.
+     *
+     * <p>Only intercepts during PLANNING phase. Once the plan is confirmed (EXECUTING),
+     * the hook lets exit_plan_mode proceed normally so the agent actually exits plan mode.
      */
     @HookHandler(HookPhase.PRE_ACTING)
     public HookResult<PreActingEvent> onPreActing(PreActingEvent event) {
         if (!EXIT_PLAN_MODE_TOOL.equals(event.toolName())) {
+            return HookResult.proceed(event);
+        }
+
+        // Only intercept when the agent is still in the PLANNING phase (first time producing
+        // a plan). Once confirmBuild() transitions to EXECUTING, we must let exit_plan_mode
+        // execute so the agent actually leaves plan mode and starts real execution.
+        SessionPhase currentPhase = phaseRef.get();
+        if (currentPhase != SessionPhase.PLANNING && currentPhase != SessionPhase.IDLE) {
+            log.info("exit_plan_mode proceeding normally (phase={}) for session {}",
+                    currentPhase, sessionId);
             return HookResult.proceed(event);
         }
 

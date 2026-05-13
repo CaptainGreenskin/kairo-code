@@ -86,6 +86,7 @@ import { useGlobalShortcuts } from '@hooks/useGlobalShortcuts';
 import { ConfirmBuildChip } from '@components/ConfirmBuildChip';
 import { RevertButton } from '@components/RevertButton';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
+import { useSessionModeStore } from '@store/sessionModeStore';
 import { FileTrackerBadge } from '@components/FileTrackerBadge';
 
 declare const __APP_VERSION__: string;
@@ -443,6 +444,35 @@ function App() {
 
     // Load the list of on-disk session snapshots once on mount.
     useEffect(() => { refreshPersistedSessions(); }, [refreshPersistedSessions]);
+
+    // Mode switch → restart session: when SessionModeToggle signals a restart,
+    // stop the current session and create a new one with the new mode.
+    useEffect(() => {
+        const unsub = useSessionModeStore.subscribe((s, prev) => {
+            if (s.sessionRestartRequested === prev.sessionRestartRequested) return;
+            const wid = s.restartWorkspaceId;
+            if (!wid) return;
+            const sid = useSessionStore.getState().activeSessionId;
+            if (sid) {
+                // Stop the old session
+                stopAgent(sid);
+                // Close tab + clear local state for that session
+                useSessionStore.getState().closeSession(sid);
+            }
+            // Create a new session with the updated mode
+            connect();
+            createSession(wid)
+                .then((newId) => {
+                    useSessionStore.getState().openSession(newId);
+                    assistantMsgRef.current[newId] = null;
+                    switchSession(newId);
+                })
+                .catch((err) => {
+                    addToast('error', `Mode switch failed: ${err instanceof Error ? err.message : String(err)}`);
+                });
+        });
+        return unsub;
+    }, [connect, createSession, stopAgent, switchSession, addToast]);
 
     // Cross-tab sync: when another tab creates or switches a session,
     // refresh the sidebar's persisted session list. Do not switch the
