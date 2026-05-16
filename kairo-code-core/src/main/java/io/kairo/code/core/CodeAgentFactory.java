@@ -13,7 +13,7 @@ import io.kairo.api.memory.MemoryStore;
 import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.mcp.McpConfig;
 import io.kairo.code.core.evolution.LearnedLessonStore;
-import io.kairo.code.core.memory.KairoMdLoader;
+import io.kairo.code.core.memory.KairoMdContextSource;
 import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.prompt.SessionMemoryEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
@@ -93,7 +93,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -564,10 +563,12 @@ public final class CodeAgentFactory {
                     .append(
                             "\nAll file operations and commands should be relative to this"
                                     + " directory.");
-            Optional<String> kairoMd =
-                    KairoMdLoader.findAndLoad(Path.of(config.workingDir()));
-            kairoMd.ifPresent(content ->
-                    prompt.append("\n\n## Project Instructions (KAIRO.md)\n").append(content));
+            KairoMdContextSource kairoMdSource =
+                    new KairoMdContextSource(Path.of(config.workingDir()));
+            String kairoMdContent = kairoMdSource.collect();
+            if (!kairoMdContent.isEmpty()) {
+                prompt.append("\n\n").append(kairoMdContent);
+            }
 
             // Append dynamic Session Context: date + git status.
             prompt.append("\n\n## Session Context");

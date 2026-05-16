@@ -2,6 +2,7 @@ package io.kairo.code.core.skill;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.kairo.api.skill.SkillVisibility;
 import io.kairo.code.core.skill.FsSkillLoader.SkillWithSource;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -302,6 +303,74 @@ class FsSkillLoaderTest {
         List<Path> dirs = loader.getWatchedDirs();
 
         assertThat(dirs).containsExactly(projectDir);
+    }
+
+    @Test
+    void loadAll_parsesVisibilityFromFrontmatter() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        writeFile(globalDir, "hidden-skill.md", """
+                ---
+                name: hidden-skill
+                visibility: HIDDEN
+                ---
+
+                # Hidden Skill
+
+                Should not be auto-triggered.
+                """);
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, null);
+        List<SkillWithSource> result = loader.loadAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).metadata().visibility()).isEqualTo(SkillVisibility.HIDDEN);
+        assertThat(result.get(0).metadata().isUserVisible()).isFalse();
+    }
+
+    @Test
+    void loadAll_parsesDisableModelInvocation() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        writeFile(globalDir, "user-only-skill.md", """
+                ---
+                name: user-only-skill
+                visibility: USER_ONLY
+                disable_model_invocation: true
+                ---
+
+                # User Only Skill
+
+                Only callable via /user-only-skill.
+                """);
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, null);
+        List<SkillWithSource> result = loader.loadAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).metadata().visibility()).isEqualTo(SkillVisibility.USER_ONLY);
+        assertThat(result.get(0).metadata().disableModelInvocation()).isTrue();
+        assertThat(result.get(0).metadata().isModelInvocable()).isFalse();
+    }
+
+    @Test
+    void loadAll_defaultVisibilityIsVisible() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        writeFile(globalDir, "normal.md", """
+                ---
+                name: normal
+                ---
+
+                # Normal Skill
+
+                Standard skill.
+                """);
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, null);
+        List<SkillWithSource> result = loader.loadAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).metadata().visibility()).isEqualTo(SkillVisibility.VISIBLE);
+        assertThat(result.get(0).metadata().disableModelInvocation()).isFalse();
+        assertThat(result.get(0).metadata().isModelInvocable()).isTrue();
     }
 
     private void writeFile(Path dir, String name, String content) throws Exception {

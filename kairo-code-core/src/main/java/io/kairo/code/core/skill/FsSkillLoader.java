@@ -1,6 +1,7 @@
 package io.kairo.code.core.skill;
 
 import io.kairo.api.skill.SkillDefinition;
+import io.kairo.api.skill.SkillMetadata;
 import io.kairo.skill.SkillMarkdownParser;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +23,9 @@ import org.slf4j.LoggerFactory;
  * PROJECT ({@code <workingDir>/.kairo-code/skills/}).
  *
  * <p>Reserved levels (not yet loaded): MCP, BUNDLED, PLUGIN.
+ *
+ * <p>Each skill is parsed with full metadata including visibility and
+ * model-invocation control via {@link SkillMetadata}.
  */
 public class FsSkillLoader {
 
@@ -30,26 +34,44 @@ public class FsSkillLoader {
     private final Path globalSkillsDir;
     private final Path projectSkillsDir;
     private final SkillMarkdownParser parser;
+    private final List<Path> pluginSkillDirs;
 
     /**
      * @param globalSkillsDir  {@code ~/.kairo-code/skills/}, may not exist
      * @param projectSkillsDir {@code <workingDir>/.kairo-code/skills/}, may not exist
      */
     public FsSkillLoader(Path globalSkillsDir, Path projectSkillsDir) {
+        this(globalSkillsDir, projectSkillsDir, List.of());
+    }
+
+    /**
+     * @param globalSkillsDir  {@code ~/.kairo-code/skills/}, may not exist
+     * @param projectSkillsDir {@code <workingDir>/.kairo-code/skills/}, may not exist
+     * @param pluginSkillDirs  skill directories from enabled plugins
+     */
+    public FsSkillLoader(Path globalSkillsDir, Path projectSkillsDir, List<Path> pluginSkillDirs) {
         this.globalSkillsDir = globalSkillsDir;
         this.projectSkillsDir = projectSkillsDir;
+        this.pluginSkillDirs = pluginSkillDirs != null ? pluginSkillDirs : List.of();
         this.parser = new SkillMarkdownParser();
     }
 
     /**
      * Load all filesystem skills in priority order. Higher priority overrides lower by name.
      *
-     * <p>Scan order (ascending priority): USER → MANAGED → PROJECT.
+     * <p>Scan order (ascending priority): PLUGIN -> USER -> MANAGED -> PROJECT.
      *
      * @return list of merged skills with source tags
      */
     public List<SkillWithSource> loadAll() {
         Map<String, SkillWithSource> byName = new LinkedHashMap<>();
+
+        // Priority 3: PLUGIN — skills from enabled plugins
+        for (Path pluginDir : pluginSkillDirs) {
+            if (Files.isDirectory(pluginDir)) {
+                loadDir(pluginDir, SkillPriority.PLUGIN, byName, false);
+            }
+        }
 
         // Priority 5: USER — global skills, skip managed/ subdir
         if (globalSkillsDir != null && Files.isDirectory(globalSkillsDir)) {
@@ -105,16 +127,24 @@ public class FsSkillLoader {
                                   Map<String, SkillWithSource> out) {
         try {
             String content = Files.readString(file, StandardCharsets.UTF_8);
-            SkillDefinition skill = parser.parse(content);
-            out.put(skill.name(), new SkillWithSource(skill, priority));
-            log.debug("Loaded {} skill '{}' from {}", priority.name(), skill.name(), file);
+            SkillMetadata metadata = parser.parseWithMetadata(content);
+            out.put(metadata.name(), new SkillWithSource(metadata, priority));
+            log.debug("Loaded {} skill '{}' (visibility={}) from {}",
+                    priority.name(), metadata.name(),
+                    metadata.visibility(), file);
         } catch (Exception e) {
             log.warn("Failed to parse skill file {}: {}", file, e.getMessage());
         }
     }
 
     /**
-     * A skill definition paired with its priority source.
+     * A skill metadata paired with its priority source.
      */
-    public record SkillWithSource(SkillDefinition skill, SkillPriority priority) {}
+    public record SkillWithSource(SkillMetadata metadata, SkillPriority priority) {
+
+        /** Shorthand access to the underlying SkillDefinition. */
+        public SkillDefinition skill() {
+            return metadata.definition();
+        }
+    }
 }

@@ -31,9 +31,16 @@ public class SessionWriter {
 
     private final Path sessionFile;
     private final ObjectMapper mapper;
+    private final SessionIndex index;
+    private int turnCount;
 
     public SessionWriter(Path sessionFile) {
+        this(sessionFile, new InMemorySessionIndex());
+    }
+
+    public SessionWriter(Path sessionFile, SessionIndex index) {
         this.sessionFile = sessionFile;
+        this.index = index;
         this.mapper = new ObjectMapper();
         this.mapper.registerModule(new JavaTimeModule());
         this.mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -72,6 +79,8 @@ public class SessionWriter {
                     StandardOpenOption.CREATE,
                     StandardOpenOption.APPEND,
                     StandardOpenOption.WRITE);
+            SessionTurn turn = new SessionTurn(role, content != null ? content : "", tokens, timestamp);
+            index.index(turnCount++, turn);
         } catch (IOException e) {
             log.warn("Failed to append turn to session file {}: {}", sessionFile, e.getMessage());
         }
@@ -104,6 +113,29 @@ public class SessionWriter {
             log.warn("Failed to read session file {}: {}", sessionFile, e.getMessage());
         }
         return turns;
+    }
+
+    /**
+     * Search session turns by keyword query.
+     *
+     * @param query the search query (case-insensitive keywords)
+     * @param limit maximum results
+     * @return matching turns ordered by relevance
+     */
+    public List<SessionIndex.SearchResult> search(String query, int limit) {
+        return index.search(query, limit);
+    }
+
+    /**
+     * Rebuild the in-memory index from the session file on disk.
+     * Useful when resuming a session from an existing JSONL file.
+     */
+    public void rebuildIndex() {
+        List<SessionTurn> turns = readSession();
+        turnCount = 0;
+        for (SessionTurn turn : turns) {
+            index.index(turnCount++, turn);
+        }
     }
 
     @SuppressWarnings("unchecked")
