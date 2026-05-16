@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MessageCircle, Bot, Users, Check, ChevronDown } from 'lucide-react';
+import { Bot, Users, Check, ChevronDown } from 'lucide-react';
 import { useSessionModeStore, type SessionMode } from '@store/sessionModeStore';
 import { useWorkspaceStore } from '@store/workspaceStore';
 import { useExpertTeamStore } from '@store/expertTeamStore';
@@ -9,7 +9,7 @@ interface ModeMeta {
     value: SessionMode;
     label: string;
     desc: string;
-    icon: typeof MessageCircle;
+    icon: typeof Bot;
     chip: string;
     chipText: string;
     disabled?: boolean;
@@ -18,22 +18,12 @@ interface ModeMeta {
 
 const MODES: ModeMeta[] = [
     {
-        value: 'chat',
-        label: 'Chat',
-        desc: 'Direct ReAct conversation',
-        icon: MessageCircle,
-        chip: 'bg-sky-500/10',
-        chipText: 'text-sky-400',
-    },
-    {
         value: 'agent',
         label: 'Agent',
-        desc: 'Single-agent autonomous task',
+        desc: 'Single-agent ReAct conversation',
         icon: Bot,
-        chip: 'bg-zinc-500/10',
-        chipText: 'text-zinc-400',
-        disabled: true,
-        badge: '(coming soon)',
+        chip: 'bg-sky-500/10',
+        chipText: 'text-sky-400',
     },
     {
         value: 'experts',
@@ -54,10 +44,17 @@ export function SessionModeToggle({ dropUp = false }: SessionModeToggleProps) {
     const getMode = useSessionModeStore((s) => s.getMode);
     const setMode = useSessionModeStore((s) => s.setMode);
     const requestSessionRestart = useSessionModeStore((s) => s.requestSessionRestart);
+    // Subscribe to the sessionModes map directly so the toggle re-renders when
+    // the active session's mode is recorded (after SESSION_CREATED) or changes.
+    const sessionModes = useSessionModeStore((s) => s.sessionModes);
     const activeTeam = useExpertTeamStore((s) => s.getActiveTeam());
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
 
-    const mode = workspaceId ? getMode(workspaceId) : 'chat';
+    // Display the active session's mode if known; fall back to the workspace's
+    // default mode (used at session create time) when no session is active or
+    // its mode hasn't been recorded yet.
+    const sessionMode = activeSessionId ? sessionModes[activeSessionId] : undefined;
+    const mode: SessionMode = sessionMode ?? (workspaceId ? getMode(workspaceId) : 'agent');
     const teamRunning = activeTeam != null
         && (activeTeam.status === 'planning' || activeTeam.status === 'executing');
 
@@ -105,12 +102,15 @@ export function SessionModeToggle({ dropUp = false }: SessionModeToggleProps) {
                                 key={m.value}
                                 onClick={() => {
                                     if (!isDisabled && workspaceId) {
-                                        const prevMode = getMode(workspaceId);
+                                        // Compare against the *currently displayed* mode (session
+                                        // mode when present, else workspace default). Using only
+                                        // the workspace default would falsely trigger a restart
+                                        // when the user picks the mode their active session is
+                                        // already in.
+                                        const currentMode = sessionMode ?? getMode(workspaceId);
                                         setMode(workspaceId, m.value);
                                         setOpen(false);
-                                        // If mode actually changed and there's an active session,
-                                        // request session restart so App.tsx creates a new session
-                                        if (m.value !== prevMode && activeSessionId) {
+                                        if (m.value !== currentMode && activeSessionId) {
                                             requestSessionRestart(workspaceId);
                                         }
                                     }

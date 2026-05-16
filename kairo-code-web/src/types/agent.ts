@@ -14,7 +14,8 @@ export type AgentEventType =
     | 'TODOS_UPDATED'
     | 'CONTEXT_COMPACTED'
     | 'PLAN_READY'
-    | 'REVERTED';
+    | 'REVERTED'
+    | 'MODE_DEMOTED';
 
 /**
  * Mirrors {@code io.kairo.api.tool.FailureReason}. Carried on TOOL_RESULT payloads under
@@ -47,7 +48,8 @@ export type AgentEventPayload =
     | TodosUpdatedPayload
     | ContextCompactedPayload
     | PlanReadyPayload
-    | RevertedPayload;
+    | RevertedPayload
+    | ModeDemotedPayload;
 
 export interface TextChunkPayload {
     text: string;
@@ -223,6 +225,15 @@ export interface PlanReadyPayload {
  */
 export interface RevertedPayload {
     message?: string;
+}
+
+/**
+ * Payload for MODE_DEMOTED event — emitted when the experts-mode triage gate
+ * decides a message is too short/simple for expert team fanout. The UI should
+ * render this as an info banner (not an error).
+ */
+export interface ModeDemotedPayload {
+    reason: string;
 }
 
 export interface TokenUsage {

@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useCallback, useState, useRef } from 'react';
 import {
   ReactFlow,
   Node,
@@ -10,10 +10,12 @@ import {
   Position,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useExpertTeamStore, StepState, TeamState, DagNode, ToolCallEntry } from '../store/expertTeamStore';
+import { useExpertTeamStore, TeamState, DagNode, ToolCallEntry, deriveToolSummary } from '../store/expertTeamStore';
 import { ExpertTooltip, ExpertTooltipData } from './ExpertTooltip';
 import { RejectFeedbackModal } from './RejectFeedbackModal';
 import { SynthesizerCard } from './SynthesizerCard';
+import { ExpertStepCard } from './ExpertStepCard';
+import { useThinkingTimer } from '../hooks/useThinkingTimer';
 
 // ── Role metadata ────────────────────────────────────────────────────────────
 
@@ -48,19 +50,23 @@ function getStatusColors(status: string) {
 // ── Custom node component ────────────────────────────────────────────────────
 
 function ExpertNode({ data }: NodeProps) {
-  const { roleId, status, label, selected, instruction, stepId: _stepId } = data as {
+  const { roleId, status, label, selected, instruction, stepId: _stepId, thinkingStartedAt, toolCalls, thinkingDuration } = data as {
     roleId: string;
     status: string;
     label: string;
     selected: boolean;
     instruction?: string;
     stepId?: string;
+    thinkingStartedAt?: number | null;
+    toolCalls?: ToolCallEntry[];
+    thinkingDuration?: number | null;
   };
   const meta = getRoleMeta(roleId);
   const colors = getStatusColors(status);
   const isActive = status === 'thinking' || status === 'working' || status === 'assigned';
   const [hovered, setHovered] = useState(false);
   const nodeRef = useRef<HTMLDivElement>(null);
+  const thinkingTime = useThinkingTimer(thinkingStartedAt ?? null, status === 'thinking');
 
   const tooltipData: ExpertTooltipData = {
     roleId,
@@ -68,6 +74,33 @@ function ExpertNode({ data }: NodeProps) {
     instruction,
     status,
   };
+
+  // Build compact status text
+  let statusText: React.ReactNode = null;
+  if (status === 'thinking') {
+    statusText = (
+      <span className="text-[10px] text-blue-300 animate-pulse">
+        Thought · {thinkingTime || '0s'}
+      </span>
+    );
+  } else if (status === 'working' && toolCalls && toolCalls.length > 0) {
+    const summary = deriveToolSummary(toolCalls);
+    const parts: string[] = [];
+    if (summary.filesRead > 0) parts.push(`Read ${summary.filesRead}`);
+    if (summary.filesWritten > 0) parts.push(`Write ${summary.filesWritten}`);
+    if (summary.commandsRun > 0) parts.push(`Cmd ${summary.commandsRun}`);
+    if (summary.searchesPerformed > 0) parts.push(`Search ${summary.searchesPerformed}`);
+    if (parts.length > 0) {
+      statusText = (
+        <span className="text-[10px] text-amber-300">{parts.join(' · ')}</span>
+      );
+    }
+  } else if (status === 'done') {
+    const dur = thinkingDuration ? `${Math.round(thinkingDuration / 1000)}s` : '';
+    statusText = (
+      <span className="text-[10px] text-green-400">✓{dur ? ` ${dur}` : ''}</span>
+    );
+  }
 
   return (
     <div
@@ -85,6 +118,7 @@ function ExpertNode({ data }: NodeProps) {
       <div className="text-lg leading-none mb-1">{meta.icon}</div>
       <div className="text-xs font-medium text-[var(--text-primary)] truncate">{label || meta.label}</div>
       <div className={`text-[10px] mt-0.5 capitalize ${colors.text}`}>{status}</div>
+      {statusText && <div className="mt-0.5">{statusText}</div>}
       <Handle type="source" position={Position.Bottom} className="!bg-[var(--border)]" />
       <ExpertTooltip
         data={tooltipData}
@@ -157,6 +191,9 @@ function buildFlowElements(
           selected: dagNode.stepId === selectedStepId,
           instruction: dagNode.instruction,
           stepId: dagNode.stepId,
+          thinkingStartedAt: step?.thinkingStartedAt ?? null,
+          toolCalls: step?.toolCalls ?? [],
+          thinkingDuration: step?.thinkingDuration ?? null,
         },
       });
     });
@@ -250,205 +287,7 @@ function TopBar({ team }: { team: TeamState | undefined }) {
   );
 }
 
-// ── StepDetail ───────────────────────────────────────────────────────────────
 
-function StepDetail({ step, teamStatus, onReject, readOnly = false }: {
-  step: StepState;
-  teamStatus?: string;
-  onReject?: (stepId: string, roleName: string) => void;
-  readOnly?: boolean;
-}) {
-  const meta = getRoleMeta(step.roleId);
-  const colors = getStatusColors(step.status);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [thinkingOpen, setThinkingOpen] = useState(true);
-  const [toolsOpen, setToolsOpen] = useState(true);
-  const [artifactOpen, setArtifactOpen] = useState(true);
-  const canReject = step.status === 'done' && teamStatus === 'executing' && !!onReject && !readOnly;
-
-  // Auto-scroll thinking chunks
-  useEffect(() => {
-    if (scrollRef.current && thinkingOpen) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [step.thinkingChunks, thinkingOpen]);
-
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)]
-                      bg-[var(--bg-secondary)] shrink-0">
-        <span className="text-base">{meta.icon}</span>
-        <span className="text-xs font-semibold text-[var(--text-primary)]">
-          {meta.label}
-        </span>
-        <span className="text-[10px] text-[var(--text-muted)]">({step.stepId})</span>
-        <span className={`ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full capitalize
-          ${colors.bg} ${colors.text}`}>
-          {step.status}
-        </span>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {/* Thinking */}
-        {step.thinkingChunks.length > 0 && (
-          <CollapsibleSection
-            title="Thinking"
-            open={thinkingOpen}
-            onToggle={() => setThinkingOpen(!thinkingOpen)}
-          >
-            <div ref={scrollRef} className="max-h-40 overflow-y-auto">
-              <p className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap font-mono leading-relaxed">
-                {step.thinkingChunks.join('')}
-              </p>
-            </div>
-          </CollapsibleSection>
-        )}
-
-        {/* Tool Calls */}
-        {step.toolCalls.length > 0 && (
-          <CollapsibleSection
-            title={`Tool Calls (${step.toolCalls.length})`}
-            open={toolsOpen}
-            onToggle={() => setToolsOpen(!toolsOpen)}
-          >
-            <div className="space-y-2">
-              {step.toolCalls.map((tc, i) => (
-                <ToolCallItem key={i} toolCall={tc} />
-              ))}
-            </div>
-          </CollapsibleSection>
-        )}
-
-        {/* Artifact */}
-        {step.artifact && (
-          <CollapsibleSection
-            title="Artifact"
-            open={artifactOpen}
-            onToggle={() => setArtifactOpen(!artifactOpen)}
-          >
-            <pre className="text-xs text-[var(--text-secondary)] bg-[var(--bg-primary)]
-                            rounded p-2 overflow-x-auto max-h-60 overflow-y-auto font-mono
-                            whitespace-pre-wrap break-words">
-              {step.artifact}
-            </pre>
-            {canReject && (
-              <button
-                onClick={() => onReject!(step.stepId, meta.label)}
-                className="mt-2 px-3 py-1 text-[11px] font-medium text-red-400
-                           border border-red-500/50 rounded-md
-                           hover:bg-red-500/10 transition-colors"
-              >
-                Reject
-              </button>
-            )}
-          </CollapsibleSection>
-        )}
-
-        {/* Evaluation */}
-        {step.evaluation && (
-          <div className="border border-[var(--border)] rounded-lg p-2">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-semibold text-[var(--text-secondary)]">Evaluation</span>
-              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                step.evaluation.verdict === 'PASS'
-                  ? 'bg-green-500/20 text-green-400'
-                  : step.evaluation.verdict === 'FAIL'
-                  ? 'bg-red-500/20 text-red-400'
-                  : 'bg-amber-500/20 text-amber-400'
-              }`}>
-                {step.evaluation.verdict}
-              </span>
-              {step.evaluation.round != null && step.evaluation.maxRounds != null && (
-                <span className="text-[10px] text-[var(--text-muted)]">
-                  Round {step.evaluation.round}/{step.evaluation.maxRounds}
-                </span>
-              )}
-            </div>
-            {step.evaluation.feedback && (
-              <p className="text-xs text-[var(--text-muted)] whitespace-pre-wrap">
-                {step.evaluation.feedback}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Empty state within detail */}
-        {step.thinkingChunks.length === 0 && step.toolCalls.length === 0 && !step.artifact && !step.evaluation && (
-          <p className="text-xs text-[var(--text-muted)] text-center py-8">
-            Waiting for activity...
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── CollapsibleSection ───────────────────────────────────────────────────────
-
-function CollapsibleSection({
-  title,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border border-[var(--border)] rounded-lg overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left
-                   hover:bg-[var(--bg-hover)] transition-colors"
-      >
-        <span className="text-[10px] text-[var(--text-muted)]">{open ? '▼' : '▶'}</span>
-        <span className="text-xs font-medium text-[var(--text-secondary)]">{title}</span>
-      </button>
-      {open && <div className="px-2 pb-2">{children}</div>}
-    </div>
-  );
-}
-
-// ── ToolCallItem ─────────────────────────────────────────────────────────────
-
-function ToolCallItem({ toolCall }: { toolCall: ToolCallEntry }) {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div className="border border-[var(--border)] rounded p-1.5 bg-[var(--bg-primary)]">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-1 text-left"
-      >
-        <span className="text-[10px] text-[var(--text-muted)]">{expanded ? '▼' : '▶'}</span>
-        <span className="text-xs font-mono text-amber-400 truncate">{toolCall.toolName}</span>
-        <span className="text-[10px] text-[var(--text-muted)] ml-auto">
-          {toolCall.result ? '✓' : '…'}
-        </span>
-      </button>
-      {expanded && (
-        <div className="mt-1 space-y-1">
-          <pre className="text-[10px] text-[var(--text-muted)] bg-[var(--bg-secondary)]
-                          rounded p-1 overflow-x-auto max-h-20 overflow-y-auto font-mono">
-            {JSON.stringify(toolCall.args, null, 2)}
-          </pre>
-          {toolCall.result && (
-            <pre className="text-[10px] text-[var(--text-secondary)] bg-[var(--bg-secondary)]
-                            rounded p-1 overflow-x-auto max-h-20 overflow-y-auto font-mono">
-              {toolCall.result.length > 500
-                ? toolCall.result.slice(0, 500) + '…'
-                : toolCall.result}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── EmptyState ───────────────────────────────────────────────────────────────
 
@@ -471,7 +310,7 @@ export interface ExpertTeamPanelProps {
   onReplay?: () => void;
 }
 
-export function ExpertTeamPanel({ teamId, readOnly = false, sendAction, onReplay }: ExpertTeamPanelProps) {
+export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendAction, onReplay }: ExpertTeamPanelProps) {
   const team = useExpertTeamStore(state => state.teams[teamId]);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [rejectModal, setRejectModal] = useState<{ visible: boolean; stepId: string; roleName: string }>({
@@ -491,9 +330,10 @@ export function ExpertTeamPanel({ teamId, readOnly = false, sendAction, onReplay
     setSelectedStepId(node.id);
   }, []);
 
-  const handleRejectOpen = useCallback((stepId: string, roleName: string) => {
-    setRejectModal({ visible: true, stepId, roleName });
+  const _handleRejectOpen = useCallback((stepId: string, _roleName: string) => {
+    setRejectModal({ visible: true, stepId, roleName: _roleName });
   }, []);
+  void _handleRejectOpen; // suppress unused warning
 
   const handleRejectSubmit = useCallback((feedback: string) => {
     if (sendAction) {
@@ -563,12 +403,9 @@ export function ExpertTeamPanel({ teamId, readOnly = false, sendAction, onReplay
           {/* Right: Detail panel */}
           <div className="flex-[2] flex flex-col overflow-hidden">
             {selectedStep ? (
-              <StepDetail
-                step={selectedStep}
-                teamStatus={team.status}
-                onReject={readOnly ? undefined : handleRejectOpen}
-                readOnly={readOnly}
-              />
+              <div className="flex flex-col h-full overflow-y-auto p-3">
+                <ExpertStepCard step={selectedStep} defaultExpanded={true} />
+              </div>
             ) : (
               <EmptyState message="Click an expert node to see details" />
             )}

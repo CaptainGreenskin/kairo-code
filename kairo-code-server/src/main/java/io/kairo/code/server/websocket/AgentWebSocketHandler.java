@@ -155,7 +155,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         String provider = text(body, "provider");
         String baseUrl = resolveBaseUrl(provider);
         String model = nonBlank(text(body, "model"), serverProperties.model());
-        String mode = nonBlank(text(body, "mode"), "chat");
+        String mode = nonBlank(text(body, "mode"), "agent");
 
         CodeAgentConfig config = new CodeAgentConfig(
                 apiKey, baseUrl, model, Integer.MAX_VALUE, workspace.workingDir(), null, 0, 0,

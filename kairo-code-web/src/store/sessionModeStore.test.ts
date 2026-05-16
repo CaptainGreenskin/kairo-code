@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useSessionModeStore } from './sessionModeStore';
+import { useSessionModeStore, type SessionMode } from './sessionModeStore';
 
 describe('sessionModeStore', () => {
   beforeEach(() => {
@@ -7,9 +7,9 @@ describe('sessionModeStore', () => {
     useSessionModeStore.setState({ modes: {} });
   });
 
-  it('default mode is chat', () => {
+  it('default mode is agent', () => {
     const mode = useSessionModeStore.getState().getMode('ws-1');
-    expect(mode).toBe('chat');
+    expect(mode).toBe('agent');
   });
 
   it('setMode persists per workspace', () => {
@@ -25,18 +25,24 @@ describe('sessionModeStore', () => {
     expect(useSessionModeStore.getState().getMode('ws-2')).toBe('agent');
   });
 
-  it('getMode returns chat for unknown workspace', () => {
+  it('getMode returns agent for unknown workspace', () => {
     useSessionModeStore.getState().setMode('ws-1', 'experts');
-    expect(useSessionModeStore.getState().getMode('ws-unknown')).toBe('chat');
+    expect(useSessionModeStore.getState().getMode('ws-unknown')).toBe('agent');
   });
 
   it('setMode overwrites previous value', () => {
     useSessionModeStore.getState().setMode('ws-1', 'experts');
-    useSessionModeStore.getState().setMode('ws-1', 'chat');
-    expect(useSessionModeStore.getState().getMode('ws-1')).toBe('chat');
+    useSessionModeStore.getState().setMode('ws-1', 'agent');
+    expect(useSessionModeStore.getState().getMode('ws-1')).toBe('agent');
   });
 
   it('modes map is initially empty', () => {
     expect(useSessionModeStore.getState().modes).toEqual({});
+  });
+
+  it('v2.3 migration: legacy "chat" in storage maps to "agent"', () => {
+    // Simulate a legacy persisted state where mode was stored as 'chat'
+    useSessionModeStore.setState({ modes: { 'ws-legacy': 'chat' as unknown as SessionMode } });
+    expect(useSessionModeStore.getState().getMode('ws-legacy')).toBe('agent');
   });
 });

@@ -55,7 +55,7 @@ class TeamSessionPayloadTriageTest {
 
     @Test
     void chineseKeyword_routesToTeam() {
-        // Ensure >= 20 chars to pass the length gate
+        // Keywords are checked before length thresholds (CJK-aware)
         assertThat(gate.shouldFanOut("请帮我实现一个新的用户登录页面以及完整的注册功能")).isTrue();
         assertThat(gate.shouldFanOut("我想要你帮忙添加一个完整的用户权限管理功能到项目中")).isTrue();
     }

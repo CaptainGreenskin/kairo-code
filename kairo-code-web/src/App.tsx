@@ -445,29 +445,29 @@ function App() {
     // Load the list of on-disk session snapshots once on mount.
     useEffect(() => { refreshPersistedSessions(); }, [refreshPersistedSessions]);
 
-    // Mode switch → restart session: when SessionModeToggle signals a restart,
-    // create a new session first, then close the old one only on success.
+    // Mode switch → spawn new session: when SessionModeToggle signals a restart,
+    // create a fresh session with the new mode and switch to it. The previous
+    // session stays open as a tab so the user can return to its history at any
+    // time. We only stop its in-flight agent run (if any) — we do NOT close it.
     useEffect(() => {
         const unsub = useSessionModeStore.subscribe((s, prev) => {
             if (s.sessionRestartRequested === prev.sessionRestartRequested) return;
             const wid = s.restartWorkspaceId;
             if (!wid) return;
             const oldSid = useSessionStore.getState().activeSessionId;
-            // Create a new session with the updated mode
+            // Stop the old session's running agent (if any) — but KEEP the tab
+            // and message history so the user can switch back.
+            if (oldSid) {
+                stopAgent(oldSid);
+            }
             connect();
             createSession(wid)
                 .then((newId) => {
-                    // Success — now safe to close the old session
-                    if (oldSid) {
-                        stopAgent(oldSid);
-                        useSessionStore.getState().closeSession(oldSid);
-                    }
                     useSessionStore.getState().openSession(newId);
                     assistantMsgRef.current[newId] = null;
                     switchSession(newId);
                 })
                 .catch((err) => {
-                    // Old session preserved — user can still use it
                     addToast('error', `Mode switch failed: ${err instanceof Error ? err.message : String(err)}`);
                 });
         });

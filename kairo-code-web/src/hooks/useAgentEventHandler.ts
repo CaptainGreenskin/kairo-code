@@ -513,6 +513,29 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     // parent handles via phase change observation.
                     break;
                 }
+
+                case 'MODE_DEMOTED': {
+                    // Triage gate decided the message is too short/simple for experts
+                    // fanout. Surface as an info-style assistant message (not error red)
+                    // so the user sees the hint without it polluting the error pipeline.
+                    const payload = event.payload as { reason: string };
+                    addMessageTo(sid, {
+                        id: generateId(),
+                        role: 'assistant',
+                        content: payload.reason,
+                        toolCalls: [],
+                        timestamp: Date.now(),
+                    });
+                    setActiveMsgId(null);
+                    setThinkingFor(sid, false);
+                    setRunningFor(sid, false);
+                    if (isActive) {
+                        setAgentPhase('thinking');
+                        setCurrentToolName(undefined);
+                        setLoadingSessionId(null);
+                    }
+                    break;
+                }
             }
         },
         [

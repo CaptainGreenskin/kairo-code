@@ -13,8 +13,7 @@ import reactor.core.publisher.Sinks;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+
 
 /**
  * Expert-team session payload wrapping a {@link SwarmCoordinator} and {@link TeamConfig}.
@@ -37,31 +36,22 @@ public final class TeamSessionPayload implements SessionPayload {
     private final TeamConfig teamConfig;
     private final String sessionId;
     private final TriageGate triageGate;
-    private final AtomicBoolean running = new AtomicBoolean(false);
-    private final AtomicReference<SessionPhase> phase = new AtomicReference<>(SessionPhase.IDLE);
+    private final AgentRuntimeContext ctx;
+    private final AgentSessionPayload fallback;
     private volatile String pendingTeamId;
-
-    /**
-     * Internal fallback for messages that fail triage (not complex enough for expert-team).
-     */
-    private volatile AgentSessionPayload fallback;
 
     public TeamSessionPayload(SwarmCoordinator coordinator,
                                TeamConfig teamConfig,
                                String sessionId,
-                               TriageGate triageGate) {
+                               TriageGate triageGate,
+                               AgentRuntimeContext ctx,
+                               AgentSessionPayload fallback) {
         this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
         this.teamConfig = Objects.requireNonNull(teamConfig, "teamConfig");
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
         this.triageGate = Objects.requireNonNull(triageGate, "triageGate");
-    }
-
-    /**
-     * Set the fallback single-agent payload for messages that fail triage.
-     * Called during session creation when the triage gate is configured.
-     */
-    public void setFallback(AgentSessionPayload fallback) {
-        this.fallback = fallback;
+        this.ctx = Objects.requireNonNull(ctx, "ctx");
+        this.fallback = Objects.requireNonNull(fallback, "fallback");
     }
 
     /**
@@ -76,23 +66,19 @@ public final class TeamSessionPayload implements SessionPayload {
      */
     @Override
     public Flux<AgentEvent> handleMessage(MessageRequest request) {
-        SessionPhase current = phase.get();
+        SessionPhase current = ctx.phaseRef().get();
 
         switch (current) {
             case IDLE, FAILED_PLANNING -> {
                 if (!triageGate.shouldFanOut(request.text())) {
-                    // Demote to ReAct — message too short/simple for expert team
-                    Sinks.Many<AgentEvent> sink = Sinks.many().multicast().onBackpressureBuffer();
-                    sink.tryEmitNext(AgentEvent.modeDemoted(sessionId,
-                            "Message too simple for experts mode; routing to single-agent"));
-                    sink.tryEmitComplete();
-
-                    AgentSessionPayload fb = this.fallback;
-                    if (fb != null) {
-                        return Flux.concat(sink.asFlux(), fb.handleMessage(request));
-                    }
-                    // No fallback wired — just emit the demotion event
-                    return sink.asFlux();
+                    // Demoted: single-agent fallback. Emit MODE_DEMOTED banner then
+                    // delegate to the fallback AgentSessionPayload for a real LLM response.
+                    AgentEvent demoted = AgentEvent.modeDemoted(sessionId,
+                            "Message too brief for experts mode, single-agent fallback");
+                    return Flux.concat(
+                            Flux.just(demoted),
+                            fallback.handleMessage(request)
+                    );
                 }
                 // Triage passed — start expert team planning
                 return startPlanOnly(request.text());
@@ -117,7 +103,7 @@ public final class TeamSessionPayload implements SessionPayload {
 
             case COMPLETED -> {
                 // Reset and allow new planning
-                phase.set(SessionPhase.IDLE);
+                ctx.phaseRef().set(SessionPhase.IDLE);
                 return handleMessage(request);
             }
 
@@ -142,33 +128,40 @@ public final class TeamSessionPayload implements SessionPayload {
      */
     @Override
     public Flux<AgentEvent> confirmBuild() {
-        if (phase.get() != SessionPhase.PLAN_PENDING) {
+        // CAS-guard the transition so concurrent confirmBuild calls don't double-execute.
+        if (!ctx.phaseRef().compareAndSet(SessionPhase.PLAN_PENDING, SessionPhase.EXECUTING)) {
             return Flux.just(AgentEvent.error(sessionId,
-                    "No plan is pending confirmation. Current phase: " + phase.get(),
+                    "No plan is pending confirmation. Current phase: " + ctx.phaseRef().get(),
                     "INVALID_STATE"));
         }
 
         String teamId = pendingTeamId;
         if (teamId == null) {
+            // Roll back the phase since we won't be executing.
+            ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
             return Flux.just(AgentEvent.error(sessionId,
                     "No pending team ID found.", "INTERNAL_ERROR"));
         }
 
-        phase.set(SessionPhase.EXECUTING);
-        running.set(true);
+        if (!ctx.runningState().compareAndSet(false, true)) {
+            // Another lifecycle already holds the running slot — roll phase back.
+            ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
+            return Flux.just(AgentEvent.error(sessionId,
+                    "Session is already running", "SESSION_BUSY"));
+        }
 
         Sinks.Many<AgentEvent> sink = Sinks.many().multicast().onBackpressureBuffer();
 
         coordinator.confirmAndExecute(teamId)
                 .doOnSuccess(result -> {
-                    running.set(false);
-                    phase.set(SessionPhase.COMPLETED);
+                    ctx.runningState().set(false);
+                    ctx.phaseRef().set(SessionPhase.COMPLETED);
                     sink.tryEmitNext(AgentEvent.done(sessionId, 0, 0));
                     sink.tryEmitComplete();
                 })
                 .doOnError(err -> {
-                    running.set(false);
-                    phase.set(SessionPhase.FAILED_EXECUTION);
+                    ctx.runningState().set(false);
+                    ctx.phaseRef().set(SessionPhase.FAILED_EXECUTION);
                     log.warn("Expert team execution failed (session={}): {}",
                             sessionId, err.getMessage());
                     sink.tryEmitNext(AgentEvent.error(sessionId,
@@ -183,30 +176,26 @@ public final class TeamSessionPayload implements SessionPayload {
 
     @Override
     public void stop() {
-        running.set(false);
-        // Stop fallback if active
-        AgentSessionPayload fb = this.fallback;
-        if (fb != null) {
-            fb.stop();
-        }
+        ctx.runningState().set(false);
+        fallback.stop();
         log.info("TeamSessionPayload stopped (session={})", sessionId);
     }
 
     @Override
     public boolean isRunning() {
-        return running.get();
+        return ctx.runningState().get();
     }
 
     @Override
     public SessionPhase getState() {
-        return phase.get();
+        return ctx.phaseRef().get();
     }
 
     // ── Private helpers ──
 
     private Flux<AgentEvent> startPlanOnly(String goal) {
-        phase.set(SessionPhase.PLANNING);
-        running.set(true);
+        ctx.phaseRef().set(SessionPhase.PLANNING);
+        ctx.runningState().set(true);
 
         Sinks.Many<AgentEvent> sink = Sinks.many().multicast().onBackpressureBuffer();
 
@@ -215,17 +204,17 @@ public final class TeamSessionPayload implements SessionPayload {
 
         coordinator.startExpertTeam(goal, teamConfig, List.<String>of(), true)
                 .doOnSuccess(result -> {
-                    running.set(false);
+                    ctx.runningState().set(false);
                     pendingTeamId = coordinator.lastTeamId();
-                    phase.set(SessionPhase.PLAN_PENDING);
+                    ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
                     // Emit plan-ready with the plan text from finalOutput (the canonical location)
                     sink.tryEmitNext(AgentEvent.planReady(sessionId,
                             extractPlanSummary(result)));
                     sink.tryEmitComplete();
                 })
                 .doOnError(err -> {
-                    running.set(false);
-                    phase.set(SessionPhase.FAILED_PLANNING);
+                    ctx.runningState().set(false);
+                    ctx.phaseRef().set(SessionPhase.FAILED_PLANNING);
                     log.warn("Expert team planning failed (session={}): {}",
                             sessionId, err.getMessage());
                     sink.tryEmitNext(AgentEvent.error(sessionId,
@@ -258,7 +247,7 @@ public final class TeamSessionPayload implements SessionPayload {
         return teamConfig;
     }
 
-    /** The fallback single-agent payload, if configured. */
+    /** The fallback single-agent payload (constructor-injected, never null). */
     public AgentSessionPayload fallback() {
         return fallback;
     }
@@ -270,6 +259,6 @@ public final class TeamSessionPayload implements SessionPayload {
 
     /** Current phase of the team session (string form for backward compat). */
     public String currentPhase() {
-        return phase.get().name().toLowerCase();
+        return ctx.phaseRef().get().name().toLowerCase();
     }
 }

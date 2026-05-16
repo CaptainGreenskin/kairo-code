@@ -1,5 +1,7 @@
 import { useMemo, useCallback } from 'react';
 import { useExpertTeamStore, type TeamState, type StepState, type StepPreview } from '../store/expertTeamStore';
+import { ExpertStepCard } from './ExpertStepCard';
+import { StepProgressBar } from './StepProgressBar';
 
 // ── Role metadata ────────────────────────────────────────────────────────────
 
@@ -40,7 +42,7 @@ function PhaseBadge({ phase }: { phase: TeamPhase }) {
   );
 }
 
-// ── Step status indicator ────────────────────────────────────────────────────
+// ── Step status indicator (used by PreviewStepRow) ──────────────────────────
 
 function StepStatusIcon({ status }: { status: StepState['status'] | 'preview' }) {
   switch (status) {
@@ -58,30 +60,6 @@ function StepStatusIcon({ status }: { status: StepState['status'] | 'preview' })
     default:
       return <span className="text-gray-400">⏳</span>;
   }
-}
-
-// ── Step row (for executing phase) ──────────────────────────────────────────
-
-function StepRow({ step }: { step: StepState }) {
-  const meta = getRoleMeta(step.roleId);
-  const isRunning = step.status === 'thinking' || step.status === 'working' || step.status === 'assigned';
-  const lastThinking = step.thinkingChunks.length > 0
-    ? step.thinkingChunks[step.thinkingChunks.length - 1]
-    : '';
-  const thinkingSummary = lastThinking.length > 80 ? lastThinking.slice(-80) : lastThinking;
-
-  return (
-    <div className="flex items-center gap-2 py-1">
-      <StepStatusIcon status={step.status} />
-      <span className="text-xs">{meta.icon}</span>
-      <span className="text-xs font-medium text-[var(--text-primary)] min-w-[70px]">{meta.label}</span>
-      {isRunning && thinkingSummary && (
-        <span className="text-[10px] text-[var(--text-muted)] truncate flex-1 italic">
-          {thinkingSummary}
-        </span>
-      )}
-    </div>
-  );
 }
 
 // ── Preview step row (for plan-ready phase) ─────────────────────────────────
@@ -152,8 +130,15 @@ export function InlineTeamTaskCard({ teamId, onViewDag, sendAction }: InlineTeam
         <PhaseBadge phase={team.status} />
       </div>
 
+      {/* Step progress bar */}
+      {!isPlanReady && stepList.length > 0 && (
+        <div className="px-3 pt-2">
+          <StepProgressBar steps={stepList} teamPhase={team.status} />
+        </div>
+      )}
+
       {/* Step list */}
-      <div className="px-3 py-2 space-y-0.5 max-h-[200px] overflow-y-auto">
+      <div className="px-3 py-2 space-y-2 max-h-[400px] overflow-y-auto">
         {/* Plan preview steps (plan-ready phase) */}
         {isPlanReady && team.planPreview && team.planPreview.steps.map((step) => (
           <PreviewStepRow key={step.stepId} step={step} />
@@ -161,7 +146,11 @@ export function InlineTeamTaskCard({ teamId, onViewDag, sendAction }: InlineTeam
 
         {/* Executing steps */}
         {!isPlanReady && stepList.length > 0 && stepList.map((step) => (
-          <StepRow key={step.stepId} step={step} />
+          <ExpertStepCard
+            key={step.stepId}
+            step={step}
+            defaultExpanded={step.status === 'thinking' || step.status === 'working'}
+          />
         ))}
 
         {/* Planning placeholder */}

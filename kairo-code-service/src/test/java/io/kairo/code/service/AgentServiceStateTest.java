@@ -61,8 +61,11 @@ class AgentServiceStateTest {
 
     @Test
     void failedExecution_rejectsNewMessages() {
-        // Force phase to FAILED_EXECUTION via crash recovery simulation
+        // Force phase to FAILED_EXECUTION via crash recovery simulation.
+        // Requires snapshot.ref present so recovery preserves FAILED_EXECUTION (instead of
+        // auto-recovering to IDLE — see crashRecovery_*_noSnapshot tests below).
         setPersistedPhase("EXECUTING");
+        setSnapshotRef("stash@{0}");
         String sidWithCrash = service.createSession(configWithWorkDir());
         assertThat(service.getSessionPhase(sidWithCrash)).isEqualTo(SessionPhase.FAILED_EXECUTION);
 
@@ -101,19 +104,42 @@ class AgentServiceStateTest {
     // ── Crash recovery: persisted EXECUTING → force FAILED_EXECUTION on restart ──
 
     @Test
-    void crashRecovery_executingPhase_forcesFailedExecution() throws Exception {
+    void crashRecovery_executingPhase_withSnapshot_forcesFailedExecution() throws Exception {
         setPersistedPhase("EXECUTING");
+        setSnapshotRef("stash@{0}");
 
         String sid = service.createSession(configWithWorkDir());
         assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.FAILED_EXECUTION);
     }
 
     @Test
-    void crashRecovery_planningPhase_forcesFailedExecution() throws Exception {
+    void crashRecovery_planningPhase_withSnapshot_forcesFailedExecution() throws Exception {
         setPersistedPhase("PLANNING");
+        setSnapshotRef("stash@{0}");
 
         String sid = service.createSession(configWithWorkDir());
         assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.FAILED_EXECUTION);
+    }
+
+    @Test
+    void crashRecovery_executingPhase_noSnapshot_recoversToIdle() throws Exception {
+        // No snapshot.ref → revert is impossible, so blocking the user serves no purpose.
+        // Should auto-recover to IDLE and delete the stale phase.txt.
+        setPersistedPhase("EXECUTING");
+
+        String sid = service.createSession(configWithWorkDir());
+        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.IDLE);
+        // phase.txt should be cleared so future restarts don't re-block
+        assertThat(Files.exists(tempDir.resolve(".kairo-session").resolve("phase.txt"))).isFalse();
+    }
+
+    @Test
+    void crashRecovery_planningPhase_noSnapshot_recoversToIdle() throws Exception {
+        setPersistedPhase("PLANNING");
+
+        String sid = service.createSession(configWithWorkDir());
+        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.IDLE);
+        assertThat(Files.exists(tempDir.resolve(".kairo-session").resolve("phase.txt"))).isFalse();
     }
 
     @Test
@@ -125,11 +151,23 @@ class AgentServiceStateTest {
     }
 
     @Test
-    void crashRecovery_failedExecutionPhase_restoresFailedExecution() throws Exception {
+    void crashRecovery_failedExecutionPhase_withSnapshot_restoresFailedExecution() throws Exception {
         setPersistedPhase("FAILED_EXECUTION");
+        setSnapshotRef("stash@{0}");
 
         String sid = service.createSession(configWithWorkDir());
         assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.FAILED_EXECUTION);
+    }
+
+    @Test
+    void crashRecovery_failedExecutionPhase_noSnapshot_recoversToIdle() throws Exception {
+        // The bug scenario: stale FAILED_EXECUTION from a prior session with no
+        // revertible snapshot — user was stuck with no UI escape. Now auto-clears.
+        setPersistedPhase("FAILED_EXECUTION");
+
+        String sid = service.createSession(configWithWorkDir());
+        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.IDLE);
+        assertThat(Files.exists(tempDir.resolve(".kairo-session").resolve("phase.txt"))).isFalse();
     }
 
     @Test
@@ -169,6 +207,28 @@ class AgentServiceStateTest {
         assertThat(service.revertSession(sid)).isFalse();
     }
 
+    @Test
+    void revertSession_failedExecution_noSnapshot_softRevertsToIdle() throws Exception {
+        // Set up: FAILED_EXECUTION restored via crash recovery, then we manually
+        // re-add snapshot.ref + phase.txt to simulate a session that entered
+        // FAILED_EXECUTION at runtime (not via recovery, which would have auto-cleared).
+        // The simplest setup is: recover with snapshot present, then delete snapshot
+        // before calling revert.
+        setPersistedPhase("FAILED_EXECUTION");
+        setSnapshotRef("stash@{0}");
+        String sid = service.createSession(configWithWorkDir());
+        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.FAILED_EXECUTION);
+
+        // Simulate the bug: snapshot.ref gets deleted out from under us
+        Files.deleteIfExists(tempDir.resolve(".kairo-session").resolve("snapshot.ref"));
+
+        // Soft revert should succeed (user gets an escape hatch)
+        assertThat(service.revertSession(sid)).isTrue();
+        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.IDLE);
+        // phase.txt cleared
+        assertThat(Files.exists(tempDir.resolve(".kairo-session").resolve("phase.txt"))).isFalse();
+    }
+
     // ── Helpers ──
 
     private void setPersistedPhase(String phaseName) {
@@ -176,6 +236,16 @@ class AgentServiceStateTest {
             Path sessionDir = tempDir.resolve(".kairo-session");
             Files.createDirectories(sessionDir);
             Files.writeString(sessionDir.resolve("phase.txt"), phaseName);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void setSnapshotRef(String ref) {
+        try {
+            Path sessionDir = tempDir.resolve(".kairo-session");
+            Files.createDirectories(sessionDir);
+            Files.writeString(sessionDir.resolve("snapshot.ref"), ref);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

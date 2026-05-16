@@ -29,6 +29,8 @@ export interface StepState {
   thinkingChunks: string[];
   toolCalls: ToolCallEntry[];
   artifact: string;
+  thinkingStartedAt: number | null;
+  thinkingDuration: number | null;
   evaluation?: {
     verdict: string;
     feedback?: string;
@@ -118,6 +120,31 @@ function createEmptyTeam(teamId: string): TeamState {
 
 // ── Store ───────────────────────────────────────────────────────────────────
 
+// ── Derived tool summary utility ─────────────────────────────────────────────
+
+function isReadTool(name: string): boolean {
+  return ['read', 'read_file', 'cat', 'view'].some((k) => name.toLowerCase().includes(k));
+}
+
+function isWriteTool(name: string): boolean {
+  return ['write', 'edit', 'create', 'patch', 'replace'].some((k) => name.toLowerCase().includes(k));
+}
+
+function isSearchTool(name: string): boolean {
+  return ['search', 'grep', 'find', 'glob', 'explore'].some((k) => name.toLowerCase().includes(k));
+}
+
+export function deriveToolSummary(toolCalls: ToolCallEntry[]) {
+  return {
+    filesRead: toolCalls.filter((t) => isReadTool(t.toolName)).length,
+    filesWritten: toolCalls.filter((t) => isWriteTool(t.toolName)).length,
+    commandsRun: toolCalls.filter((t) => t.toolName === 'bash' || t.toolName === 'terminal').length,
+    searchesPerformed: toolCalls.filter((t) => isSearchTool(t.toolName)).length,
+  };
+}
+
+// ── Store ───────────────────────────────────────────────────────────────────
+
 export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
   teams: {},
   activeTeamId: null,
@@ -180,6 +207,7 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
                 ...step.thinkingChunks,
                 (attributes.text as string) ?? '',
               ],
+              thinkingStartedAt: step.thinkingStartedAt ?? Date.now(),
             };
           } else if (eventType === 'STEP_ARTIFACT_CHUNK' && stepId && updatedSteps[stepId]) {
             const step = updatedSteps[stepId];
@@ -262,6 +290,8 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
               thinkingChunks: [],
               toolCalls: [],
               artifact: '',
+              thinkingStartedAt: null,
+              thinkingDuration: null,
             };
           }
           updatedTeam.status = 'executing';
@@ -269,24 +299,31 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
 
         case 'STEP_THINKING':
           if (stepId && updatedTeam.steps[stepId]) {
+            const thinkStep = updatedTeam.steps[stepId];
             updatedTeam.steps[stepId] = {
-              ...updatedTeam.steps[stepId],
+              ...thinkStep,
               status: 'thinking',
               thinkingChunks: [
-                ...updatedTeam.steps[stepId].thinkingChunks,
+                ...thinkStep.thinkingChunks,
                 (attributes.text as string) ?? '',
               ],
+              thinkingStartedAt: thinkStep.thinkingStartedAt ?? Date.now(),
             };
           }
           break;
 
         case 'STEP_TOOL_CALL':
           if (stepId && updatedTeam.steps[stepId]) {
+            const toolStep = updatedTeam.steps[stepId];
+            const computedDuration =
+              toolStep.thinkingDuration == null && toolStep.thinkingStartedAt != null
+                ? Date.now() - toolStep.thinkingStartedAt
+                : toolStep.thinkingDuration;
             updatedTeam.steps[stepId] = {
-              ...updatedTeam.steps[stepId],
+              ...toolStep,
               status: 'working',
               toolCalls: [
-                ...updatedTeam.steps[stepId].toolCalls,
+                ...toolStep.toolCalls,
                 {
                   toolName: (attributes.toolName as string) ?? '',
                   args: (attributes.args as Record<string, unknown>) ?? {},
@@ -294,6 +331,7 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
                   timestamp,
                 },
               ],
+              thinkingDuration: computedDuration,
             };
           }
           break;
@@ -311,12 +349,17 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
 
         case 'STEP_COMPLETED':
           if (stepId && updatedTeam.steps[stepId]) {
+            const doneStep = updatedTeam.steps[stepId];
+            const finalDuration =
+              doneStep.thinkingDuration == null && doneStep.thinkingStartedAt != null
+                ? Date.now() - doneStep.thinkingStartedAt
+                : doneStep.thinkingDuration;
             updatedTeam.steps[stepId] = {
-              ...updatedTeam.steps[stepId],
+              ...doneStep,
               status: 'done',
               artifact:
-                (attributes.output as string) ??
-                updatedTeam.steps[stepId].artifact,
+                (attributes.output as string) ?? doneStep.artifact,
+              thinkingDuration: finalDuration,
             };
           }
           break;

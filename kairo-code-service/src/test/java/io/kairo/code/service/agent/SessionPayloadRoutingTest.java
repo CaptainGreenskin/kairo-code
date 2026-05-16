@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests that session mode routing defaults to "chat" for null/empty modes.
+ * Tests that session mode routing defaults to "agent" for null/empty modes.
  *
  * <p>Full expert-team routing requires a wired SwarmCoordinator and is covered
  * in integration tests. These unit tests verify the routing logic defaults.
@@ -25,7 +25,7 @@ class SessionPayloadRoutingTest {
     void modeNull_defaultsToChat() {
         String sid = service.createSession(testConfig(), "ws-1", false, null);
         assertThat(sid).isNotBlank();
-        // Session was created successfully in default "chat" mode
+        // Session was created successfully in default "agent" mode
         var sessions = service.listSessions();
         assertThat(sessions).hasSize(1);
     }
@@ -48,7 +48,7 @@ class SessionPayloadRoutingTest {
 
     @Test
     void modeChat_createsAgentSession() {
-        String sid = service.createSession(testConfig(), "ws-1", false, "chat");
+        String sid = service.createSession(testConfig(), "ws-1", false, "agent");
         assertThat(sid).isNotBlank();
         // Session exists and works
         var sessions = service.listSessions();
@@ -58,7 +58,7 @@ class SessionPayloadRoutingTest {
 
     @Test
     void multipleSessionsIndependent() {
-        String sid1 = service.createSession(testConfig(), "ws-1", false, "chat");
+        String sid1 = service.createSession(testConfig(), "ws-1", false, "agent");
         String sid2 = service.createSession(testConfig(), "ws-2", false, null);
         assertThat(sid1).isNotEqualTo(sid2);
         assertThat(service.listSessions()).hasSize(2);

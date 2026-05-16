@@ -117,6 +117,11 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 type: 'REVERTED', sessionId, timestamp: ts,
                 payload: { message: (raw.content as string) ?? '' },
             };
+        case 'MODE_DEMOTED':
+            return {
+                type: 'MODE_DEMOTED', sessionId, timestamp: ts,
+                payload: { reason: (raw.content as string) ?? '' },
+            };
         default:
             return {
                 type: 'AGENT_ERROR', sessionId, timestamp: ts,
@@ -171,6 +176,7 @@ export function useAgentWebSocket(
         resolve: (sid: string) => void;
         reject: (err: Error) => void;
         timer: ReturnType<typeof setTimeout>;
+        mode: import('@store/sessionModeStore').SessionMode;
     } | null>(null);
 
     const onRawMessageRef = useRef(options?.onRawMessage);
@@ -226,6 +232,10 @@ export function useAgentWebSocket(
             if (pending) {
                 clearTimeout(pending.timer);
                 createPendingRef.current = null;
+                // Record the mode this session was created with so the toggle can
+                // reflect the active session's mode even when multiple sessions in
+                // the same workspace use different modes.
+                useSessionModeStore.getState().setSessionMode(sid, pending.mode);
                 pending.resolve(sid);
             }
             return;
@@ -404,8 +414,9 @@ export function useAgentWebSocket(
                                 reject(new Error('[ws] createSession timeout'));
                             }
                         }, 10_000);
-                        createPendingRef.current = { resolve, reject, timer };
-                        send({ action: 'create', workspaceId, mode: useSessionModeStore.getState().getMode(workspaceId) });
+                        const mode = useSessionModeStore.getState().getMode(workspaceId);
+                        createPendingRef.current = { resolve, reject, timer, mode };
+                        send({ action: 'create', workspaceId, mode });
                     } else if (attemptsLeft > 0) {
                         setTimeout(() => tryCreate(attemptsLeft - 1), 200);
                     } else {

@@ -14,19 +14,35 @@ class HeuristicTriageGateTest {
     // Use default keywords (empty override)
     private final HeuristicTriageGate gate = new HeuristicTriageGate("");
 
-    // ── Short messages (< 20 chars) → always false ──
+    // ── Trivial messages (< 10 chars, no keywords) → always false ──
 
     @ParameterizedTest
     @ValueSource(strings = {"hi", "ok", "你好", "help", "yes", "no"})
-    void shortMessage_alwaysFalse(String msg) {
+    void trivialMessage_alwaysFalse(String msg) {
         assertThat(gate.shouldFanOut(msg)).isFalse();
     }
 
+    // ── Keywords take priority over length ──
+
     @Test
-    void shortMessage_withKeyword_stillFalse() {
-        // "plan" is a keyword but length < 20
-        assertThat(gate.shouldFanOut("plan")).isFalse();
-        assertThat(gate.shouldFanOut("refactor")).isFalse();
+    void shortMessage_withKeyword_returnsTrue() {
+        // Keywords are checked BEFORE length thresholds (CJK fix)
+        assertThat(gate.shouldFanOut("plan")).isTrue();
+        assertThat(gate.shouldFanOut("refactor")).isTrue();
+    }
+
+    @Test
+    void chineseMessage_withKeyword_returnsTrue() {
+        // 19 chars Chinese message with keywords "优化", "生成", "计划", "执行"
+        String msg = "你看下项目有什么优化的，生成计划并执行";
+        assertThat(msg.length()).isLessThan(20);
+        assertThat(gate.shouldFanOut(msg)).isTrue();
+    }
+
+    @Test
+    void trivialChinese_noKeyword_returnsFalse() {
+        // "你好" = 2 chars, no keywords → still false
+        assertThat(gate.shouldFanOut("你好")).isFalse();
     }
 
     // ── Long messages (> 120 chars) → always true ──
@@ -96,10 +112,10 @@ class HeuristicTriageGateTest {
     // ── Edge cases ──
 
     @Test
-    void exactly20chars_noKeyword_returnsFalse() {
-        // Exactly 20 chars, no keyword → false (20 is NOT < 20)
-        String msg = "12345678901234567890"; // 20 chars
-        assertThat(msg.length()).isEqualTo(20);
+    void exactly10chars_noKeyword_returnsFalse() {
+        // Exactly 10 chars, no keyword → false (10 is NOT < 10)
+        String msg = "1234567890"; // 10 chars
+        assertThat(msg.length()).isEqualTo(10);
         assertThat(gate.shouldFanOut(msg)).isFalse();
     }
 
