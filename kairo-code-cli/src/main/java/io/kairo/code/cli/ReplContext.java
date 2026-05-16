@@ -14,6 +14,7 @@ import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.ConsoleApprovalHandler;
+import io.kairo.code.core.team.SwarmCoordinator;
 import java.io.PrintWriter;
 import java.time.Instant;
 import java.util.LinkedHashSet;
@@ -46,6 +47,7 @@ public class ReplContext {
     private final Map<String, String> skillSources;
     private final MemoryStore memoryStore;
     private final SessionWriter sessionWriter;
+    private final SwarmCoordinator swarmCoordinator;
     private volatile StreamingAgentRunner runner;
     private boolean running = true;
     private final Instant sessionStartTime;
@@ -127,6 +129,26 @@ public class ReplContext {
             Map<String, String> skillSources,
             MemoryStore memoryStore,
             SessionWriter sessionWriter) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, skillSources, memoryStore,
+                sessionWriter, null);
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig,
+            Map<String, String> skillSources,
+            MemoryStore memoryStore,
+            SessionWriter sessionWriter,
+            SwarmCoordinator swarmCoordinator) {
         this.session = session;
         this.config = config;
         this.lineReader = lineReader;
@@ -141,6 +163,7 @@ public class ReplContext {
         this.skillSources = skillSources != null ? skillSources : java.util.Map.of();
         this.memoryStore = memoryStore;
         this.sessionWriter = sessionWriter;
+        this.swarmCoordinator = swarmCoordinator;
         this.sessionStartTime = Instant.now();
         if (session != null && session.loadedSkills() != null) {
             loadedSkills.addAll(session.loadedSkills());
@@ -206,6 +229,11 @@ public class ReplContext {
     /** The session writer for JSONL turn persistence. May be {@code null}. */
     public SessionWriter sessionWriter() {
         return sessionWriter;
+    }
+
+    /** The expert team coordinator. May be {@code null} if not configured. */
+    public SwarmCoordinator swarmCoordinator() {
+        return swarmCoordinator;
     }
 
     public CodeAgentConfig config() {

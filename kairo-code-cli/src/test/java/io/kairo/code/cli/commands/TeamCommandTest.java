@@ -20,8 +20,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.kairo.code.cli.CommandRegistry;
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.core.CodeAgentConfig;
+import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.expertteam.ExpertTeamCoordinator;
+import io.kairo.expertteam.SimpleEvaluationStrategy;
+import io.kairo.expertteam.internal.DefaultPlanner;
+import io.kairo.expertteam.role.ExpertRoleRegistry;
+import io.kairo.expertteam.tck.NoopMessageBus;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,41 +45,74 @@ class TeamCommandTest {
         registry.register(new TeamCommand());
         outputCapture = new StringWriter();
         writer = new PrintWriter(outputCapture, true);
-        config = new CodeAgentConfig("test-key", "https://api.test.com", "gpt-4o", 50, "/tmp", null, 0, 0, null);
+        config = new CodeAgentConfig(
+                "test-key", "https://api.test.com", "gpt-4o", 50, "/tmp", null, 0, 0, null);
     }
 
     @Test
     void teamCommandRunsWithoutException() {
         ReplContext context = minimalContext();
-
         new TeamCommand().execute("", context);
-
         assertThat(outputCapture.toString()).isNotBlank();
     }
 
     @Test
     void outputContainsTeamHeader() {
         ReplContext context = minimalContext();
-
         new TeamCommand().execute("", context);
-
         assertThat(outputCapture.toString()).contains("Team Status");
-        assertThat(outputCapture.toString()).contains("\u2500".repeat(42));
+        assertThat(outputCapture.toString()).contains("─".repeat(42));
     }
 
     @Test
-    void noTeamShowsHelpMessage() {
+    void noCoordinator_showsHelpMessage() {
         ReplContext context = minimalContext();
-
         new TeamCommand().execute("", context);
-
         String output = outputCapture.toString();
-        assertThat(output).contains("Web UI");
-        assertThat(output).contains("Team panel");
-        assertThat(output).contains("No team API");
+        assertThat(output).contains("No team API available");
+    }
+
+    @Test
+    void withCoordinator_showsReadyStatus() {
+        SwarmCoordinator coordinator = createCoordinator();
+        ReplContext context = contextWithCoordinator(coordinator);
+        new TeamCommand().execute("", context);
+        String output = outputCapture.toString();
+        assertThat(output).contains("Coordinator:   ready");
+        assertThat(output).contains(":expert");
+    }
+
+    @Test
+    void rolesSubcommand_listsRoles() {
+        SwarmCoordinator coordinator = createCoordinator();
+        ReplContext context = contextWithCoordinator(coordinator);
+        new TeamCommand().execute("roles", context);
+        String output = outputCapture.toString();
+        assertThat(output).contains("Registered roles");
+        assertThat(output).contains("expert:coder");
     }
 
     private ReplContext minimalContext() {
         return new ReplContext(null, config, null, registry, writer, null, null, null, null);
+    }
+
+    private ReplContext contextWithCoordinator(SwarmCoordinator coordinator) {
+        return new ReplContext(
+                null, config, null, registry, writer, null, null, null, null, null, null, null,
+                null, coordinator);
+    }
+
+    private static SwarmCoordinator createCoordinator() {
+        ExpertRoleRegistry roleRegistry = new ExpertRoleRegistry();
+        return new SwarmCoordinator(
+                new ExpertTeamCoordinator(
+                        null,
+                        new SimpleEvaluationStrategy(),
+                        null,
+                        new DefaultPlanner(roleRegistry, null, null),
+                        roleRegistry),
+                roleRegistry,
+                new NoopMessageBus(),
+                List.of());
     }
 }

@@ -12,6 +12,7 @@ import io.kairo.code.cli.commands.CtxCommand;
 import io.kairo.code.cli.commands.TeamCommand;
 import io.kairo.code.cli.commands.DoctorCommand;
 import io.kairo.code.cli.commands.EvolveCommand;
+import io.kairo.code.cli.commands.ExpertCommand;
 import io.kairo.code.cli.commands.ExitCommand;
 import io.kairo.code.cli.commands.HelpCommand;
 import io.kairo.code.cli.commands.HistoryCommand;
@@ -19,12 +20,14 @@ import io.kairo.code.cli.commands.HookCommand;
 import io.kairo.code.cli.commands.InitCommand;
 import io.kairo.code.cli.commands.LearnedCommand;
 import io.kairo.code.cli.commands.McpCommand;
+import io.kairo.code.cli.commands.McpServerCommand;
 import io.kairo.code.cli.commands.MemoryCommand;
 import io.kairo.code.cli.commands.ModelCommand;
 import io.kairo.code.cli.commands.PlanCommand;
 import io.kairo.code.cli.commands.ResumeCommand;
 import io.kairo.code.cli.commands.SkillCommand;
 import io.kairo.code.cli.commands.SnapshotCommand;
+import io.kairo.code.cli.commands.PluginCommand;
 import io.kairo.code.cli.commands.StatsCommand;
 import io.kairo.code.cli.commands.MetricsCommand;
 import io.kairo.code.cli.commands.SessionCommand;
@@ -72,6 +75,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jline.reader.EndOfFileException;
@@ -114,6 +118,7 @@ public class ReplLoop {
     private final AgentEventPrinter eventPrinter;
     private SkillHotReloadWatcher hotReloadWatcher;
     private final Map<String, String> skillSources = new ConcurrentHashMap<>();
+    private io.kairo.code.core.plugin.PluginRegistry pluginRegistry;
 
     public ReplLoop(CodeAgentConfig config, List<Object> hooks) {
         this(config, hooks, null, true);
@@ -161,7 +166,10 @@ public class ReplLoop {
 
             SkillRegistry skillRegistry = bootstrapSkillRegistry();
 
-            // Load FS skills (global + project) and register them, overriding classpath by name.
+            // Discover plugins from global + project directories.
+            discoverPlugins();
+
+            // Load FS skills (global + project + plugin) and register them, overriding classpath by name.
             loadFsSkills(skillRegistry);
 
             // Start hot reload watcher for FS skill directories.
@@ -200,7 +208,7 @@ public class ReplLoop {
             // isolation (parent workspace) for any sub-tasks. The merge prompter and child
             // spawner reuse the same approval handler + terminal I/O as the parent.
             TaskToolDependencies taskDeps = buildTaskDependencies(
-                    config, kairoDir, terminalReader, writer, approvalHandler);
+                    config, kairoDir, terminalReader, writer, approvalHandler, skillRegistry);
 
             // Wire shell hooks if configured. ShellHookListener bridges kairo @HookHandler events
             // to user-configured shell commands (~/.kairo-code/hooks.json).
@@ -502,9 +510,12 @@ public class ReplLoop {
         registry.register(new MetricsCommand());
         registry.register(new SessionCommand());
         registry.register(new SwarmCommand());
+        registry.register(new ExpertCommand());
         registry.register(new InitCommand());
         registry.register(new DoctorCommand());
         registry.register(new EvolveCommand());
+        registry.register(new PluginCommand(pluginRegistry));
+        registry.register(new McpServerCommand());
 
         return registry;
     }
@@ -527,7 +538,8 @@ public class ReplLoop {
             Path kairoDir,
             BufferedReader terminalReader,
             PrintWriter writer,
-            ConsoleApprovalHandler approvalHandler) {
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry) {
         Path parentRoot =
                 Path.of(
                         config.workingDir() != null && !config.workingDir().isBlank()
@@ -545,9 +557,13 @@ public class ReplLoop {
             chatPath = fileConfig.getProperty("chat-path");
         }
 
+        Set<String> activeSkills = skillRegistry != null
+                ? Set.copyOf(skillRegistry.list().stream()
+                        .map(s -> s.name()).toList())
+                : null;
         ReplChildSessionSpawner spawner =
                 new ReplChildSessionSpawner(config, approvalHandler, writer, notificationsEnabled,
-                        chatPath);
+                        chatPath, skillRegistry, activeSkills);
         return new TaskToolDependencies(provider, spawner, prompter);
     }
 
@@ -577,9 +593,18 @@ public class ReplLoop {
         writer.flush();
     }
 
+    private void discoverPlugins() {
+        Path globalKairoDir = Path.of(System.getProperty("user.home"), KAIRO_CODE_DIR);
+        Path projectKairoDir = config.workingDir() != null && !config.workingDir().isBlank()
+                ? Path.of(config.workingDir(), KAIRO_CODE_DIR)
+                : Path.of(System.getProperty("user.dir"), KAIRO_CODE_DIR);
+        pluginRegistry = new io.kairo.code.core.plugin.PluginRegistry(projectKairoDir, globalKairoDir);
+        pluginRegistry.discover();
+    }
+
     /**
      * Load skills from global (~/.kairo-code/skills/) and project (.kairo-code/skills/)
-     * directories. FS skills override classpath skills by name.
+     * directories, plus enabled plugin skills. FS skills override classpath skills by name.
      */
     private void loadFsSkills(SkillRegistry registry) {
         Path globalDir = Path.of(System.getProperty("user.home"), KAIRO_CODE_DIR, "skills");
@@ -587,7 +612,9 @@ public class ReplLoop {
                 ? Path.of(config.workingDir(), ".kairo-code", "skills")
                 : Path.of(System.getProperty("user.dir"), ".kairo-code", "skills");
 
-        FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir);
+        java.util.List<Path> pluginSkillDirs = pluginRegistry != null
+                ? pluginRegistry.enabledSkillDirs() : java.util.List.of();
+        FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir, pluginSkillDirs);
         for (SkillWithSource ws : loader.loadAll()) {
             registry.register(ws.skill());
             skillSources.put(ws.skill().name(), ws.priority().name());

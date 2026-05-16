@@ -9,11 +9,18 @@ import io.kairo.code.cli.CommandRegistry;
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
+import io.kairo.code.core.team.SwarmCoordinator;
 import io.kairo.core.tool.DefaultPermissionGuard;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
+import io.kairo.expertteam.ExpertTeamCoordinator;
+import io.kairo.expertteam.SimpleEvaluationStrategy;
+import io.kairo.expertteam.internal.DefaultPlanner;
+import io.kairo.expertteam.role.ExpertRoleRegistry;
+import io.kairo.expertteam.tck.NoopMessageBus;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +37,8 @@ class SwarmCommandTest {
     void setUp() {
         outputCapture = new StringWriter();
         writer = new PrintWriter(outputCapture, true);
-        config = new CodeAgentConfig("test-key", "https://api.test.com", "gpt-4o", 50, "/tmp", null, 0, 0, null);
+        config = new CodeAgentConfig(
+                "test-key", "https://api.test.com", "gpt-4o", 50, "/tmp", null, 0, 0, null);
         registry = new CommandRegistry();
         registry.register(new SwarmCommand());
     }
@@ -50,13 +58,22 @@ class SwarmCommandTest {
     }
 
     @Test
-    void noActiveSwarmShowsHelpMessage() {
+    void noCoordinator_showsHelpMessage() {
         ReplContext context = createContext(stubAgent());
         new SwarmCommand().execute("", context);
         String out = outputCapture.toString();
-        assertThat(out).contains("No active swarm.");
-        assertThat(out).contains("Web UI");
-        assertThat(out).contains("Launch Swarm");
+        assertThat(out).contains("No SwarmCoordinator available");
+    }
+
+    @Test
+    void withCoordinator_showsReadyStatus() {
+        SwarmCoordinator coordinator = createCoordinator();
+        ReplContext context = contextWithCoordinator(coordinator);
+        new SwarmCommand().execute("", context);
+        String out = outputCapture.toString();
+        assertThat(out).contains("Coordinator: ready");
+        assertThat(out).contains("registered");
+        assertThat(out).contains(":expert");
     }
 
     private ReplContext createContext(Agent agent) {
@@ -65,8 +82,27 @@ class SwarmCommandTest {
                 new DefaultToolExecutor(toolRegistry, new DefaultPermissionGuard());
         CodeAgentSession session =
                 new CodeAgentSession(agent, toolExecutor, toolRegistry, Set.of());
+        return new ReplContext(session, config, null, registry, writer, null, null, null, null);
+    }
+
+    private ReplContext contextWithCoordinator(SwarmCoordinator coordinator) {
         return new ReplContext(
-                session, config, null, registry, writer, null, null, null, null);
+                null, config, null, registry, writer, null, null, null, null, null, null, null,
+                null, coordinator);
+    }
+
+    private static SwarmCoordinator createCoordinator() {
+        ExpertRoleRegistry roleRegistry = new ExpertRoleRegistry();
+        return new SwarmCoordinator(
+                new ExpertTeamCoordinator(
+                        null,
+                        new SimpleEvaluationStrategy(),
+                        null,
+                        new DefaultPlanner(roleRegistry, null, null),
+                        roleRegistry),
+                roleRegistry,
+                new NoopMessageBus(),
+                List.of());
     }
 
     private static Agent stubAgent() {

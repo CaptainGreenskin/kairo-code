@@ -17,19 +17,23 @@ package io.kairo.code.cli.commands;
 
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.cli.SlashCommand;
+import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.expertteam.role.ExpertRoleRegistry;
 import java.io.PrintWriter;
+import java.util.Set;
 
 /**
- * Displays team / swarm status when exposed by the REPL context.
+ * Displays team status when a {@link SwarmCoordinator} is exposed by the REPL context.
  *
- * <p>Usage: {@code :team} &mdash; today {@link ReplContext} does not surface {@code Team} or
- * {@code MessageBus}; the Web UI Team panel is the supported place to manage teams.
- *
- * <p>Usage: {@code :team create <name>} &mdash; reserved; creation is not wired in the REPL yet.
+ * <p>Usage:
+ * <ul>
+ *   <li>{@code :team} — show coordinator status and available roles</li>
+ *   <li>{@code :team roles} — list all registered expert roles</li>
+ * </ul>
  */
 public class TeamCommand implements SlashCommand {
 
-    private static final String SEPARATOR = "\u2500".repeat(42);
+    private static final String SEPARATOR = "─".repeat(42);
 
     @Override
     public String name() {
@@ -44,20 +48,37 @@ public class TeamCommand implements SlashCommand {
     @Override
     public void execute(String args, ReplContext context) {
         PrintWriter writer = context.writer();
+        SwarmCoordinator coordinator = context.swarmCoordinator();
         String trimmed = args != null ? args.trim() : "";
 
         writer.println();
         writer.println("Team Status");
         writer.println(SEPARATOR);
 
-        if (trimmed.regionMatches(true, 0, "create", 0, 6)
-                && (trimmed.length() == 6 || Character.isWhitespace(trimmed.charAt(6)))) {
-            writer.println("Creating a team from the REPL is not wired yet (no team API on ReplContext).");
-            writer.println("Use the Web UI (Team panel) to create teams and manage members.");
+        if (coordinator == null) {
+            writer.println("No team API available in this session.");
+            writer.println("Ensure kairo-expert-team is on the classpath, or use the Web UI");
+            writer.println("Team panel to manage teams.");
+        } else if ("roles".equalsIgnoreCase(trimmed)) {
+            ExpertRoleRegistry registry = coordinator.roleRegistry();
+            Set<String> roleIds = registry.registeredRoleIds();
+            writer.println("Registered roles (" + roleIds.size() + "):");
+            for (String roleId : roleIds) {
+                registry.resolve(roleId).ifPresent(profile -> {
+                    String name = profile.roleDefinition() != null
+                            ? profile.roleDefinition().roleName()
+                            : roleId;
+                    writer.println("  " + roleId + " — " + name);
+                });
+            }
         } else {
-            writer.println("No team state is visible from this REPL session.");
-            writer.println("No team API is available in ReplContext — use the Web UI Team panel to");
-            writer.println("view and manage teams, members, tasks, and messages.");
+            String lastTeam = coordinator.lastTeamId();
+            writer.println("Coordinator:   ready");
+            writer.println("Last team:     " + (lastTeam != null ? lastTeam : "(none)"));
+            writer.println();
+            writer.println("Commands:");
+            writer.println("  :team roles      List registered expert roles");
+            writer.println("  :expert <goal>   Start expert team execution");
         }
 
         writer.println();

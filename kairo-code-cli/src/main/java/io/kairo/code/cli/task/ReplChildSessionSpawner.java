@@ -16,6 +16,7 @@
 package io.kairo.code.cli.task;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.api.skill.SkillRegistry;
 import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.code.cli.AgentEventPrinter;
 import io.kairo.code.core.CodeAgentConfig;
@@ -27,6 +28,7 @@ import io.kairo.code.core.task.ChildSessionSpawner;
 import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 /**
  * REPL-side {@link ChildSessionSpawner} that builds child sessions through {@link
@@ -47,6 +49,8 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
     private final PrintWriter writer;
     private final boolean notificationsEnabled;
     private final String chatPath;
+    private final SkillRegistry parentSkillRegistry;
+    private final Set<String> parentActiveSkills;
 
     public ReplChildSessionSpawner(
             CodeAgentConfig parentConfig,
@@ -69,11 +73,24 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
             PrintWriter writer,
             boolean notificationsEnabled,
             String chatPath) {
+        this(parentConfig, approvalHandler, writer, notificationsEnabled, chatPath, null, null);
+    }
+
+    public ReplChildSessionSpawner(
+            CodeAgentConfig parentConfig,
+            UserApprovalHandler approvalHandler,
+            PrintWriter writer,
+            boolean notificationsEnabled,
+            String chatPath,
+            SkillRegistry parentSkillRegistry,
+            Set<String> parentActiveSkills) {
         this.parentConfig = parentConfig;
         this.approvalHandler = approvalHandler;
         this.writer = writer;
         this.notificationsEnabled = notificationsEnabled;
         this.chatPath = chatPath;
+        this.parentSkillRegistry = parentSkillRegistry;
+        this.parentActiveSkills = parentActiveSkills != null ? Set.copyOf(parentActiveSkills) : null;
     }
 
     @Override
@@ -106,6 +123,10 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
                         .withApprovalHandler(approvalHandler)
                         .withHooks(List.of(prefixedPrinter))
                         .asChildSession();
+
+        if (parentSkillRegistry != null && parentActiveSkills != null) {
+            opts = opts.withSkills(parentSkillRegistry, parentActiveSkills);
+        }
 
         CodeAgentSession session = CodeAgentFactory.createSession(childConfig, opts);
         if (notificationsEnabled) {
