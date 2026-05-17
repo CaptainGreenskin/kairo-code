@@ -17,6 +17,7 @@ package io.kairo.code.core.team;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.model.ModelProvider;
+import io.kairo.api.team.TeamConfig;
 import io.kairo.api.team.TeamResult;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
@@ -98,7 +99,22 @@ public final class ExpertTeamFactory {
         stderr.println("[expert-team] Starting expert team execution...");
         stderr.flush();
 
-        Mono<TeamResult> mono = coordinator.startExpertTeam(task);
+        // Use CLI timeout for TeamConfig (not the default 10min) so sub-agents get enough time
+        TeamConfig config;
+        if (timeoutSeconds > 0) {
+            config = new TeamConfig(
+                    io.kairo.api.team.RiskProfile.MEDIUM,
+                    3,
+                    java.time.Duration.ofSeconds(timeoutSeconds),
+                    io.kairo.api.team.EvaluatorPreference.AUTO,
+                    io.kairo.api.team.PlannerFailureMode.FAIL_FAST,
+                    io.kairo.api.team.TeamResourceConstraint.unbounded());
+            stderr.printf("[expert-team] Config: teamTimeout=%ds%n", timeoutSeconds);
+        } else {
+            config = TeamConfig.defaults();
+        }
+
+        Mono<TeamResult> mono = coordinator.startExpertTeam(task, config, List.of());
 
         if (timeoutSeconds > 0) {
             mono = mono.timeout(java.time.Duration.ofSeconds(timeoutSeconds));
