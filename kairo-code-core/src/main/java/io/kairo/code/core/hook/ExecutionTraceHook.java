@@ -165,6 +165,23 @@ public final class ExecutionTraceHook {
         fields.put("has_usage", hasUsage);
         fields.put("has_tool_calls", hasToolCalls);
         fields.put("thinking_chars", thinkingChars);
+
+        // Record tool call names from this reasoning step
+        if (response != null && response.contents() != null) {
+            java.util.List<String> toolNames = new java.util.ArrayList<>();
+            for (Content c : response.contents()) {
+                if (c instanceof Content.ToolUseContent tuc) {
+                    String name = tuc.toolName();
+                    if (name != null && !name.isBlank()) {
+                        toolNames.add(name);
+                    }
+                }
+            }
+            if (!toolNames.isEmpty()) {
+                fields.put("tool_calls", String.join(",", toolNames));
+            }
+        }
+
         fields.put("ts", Instant.now().toString());
 
         writeLine(fields);
