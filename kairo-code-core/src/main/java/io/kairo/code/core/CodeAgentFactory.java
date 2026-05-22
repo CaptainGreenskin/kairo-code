@@ -46,7 +46,8 @@ import io.kairo.core.model.ModelRegistry;
 import java.nio.file.Path;
 import java.time.Duration;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.kairo.core.model.anthropic.AnthropicProvider;
+import io.kairo.api.model.ProviderSpec;
+import io.kairo.core.model.DefaultProviderRegistry;
 import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.TaskTool;
 import io.kairo.code.core.task.TaskToolDependencies;
@@ -232,6 +233,12 @@ public final class CodeAgentFactory {
 
         PermissionGuard guard = new DefaultPermissionGuard();
         DefaultToolExecutor executor = new DefaultToolExecutor(registry, guard);
+        // In one-shot / batch mode (no approval handler), auto-approve all tools
+        // so bash and other SYSTEM_CHANGE tools can execute without blocking.
+        if (options.approvalHandler() == null && !options.isRepl()) {
+            executor.setPermissionMode(
+                    io.kairo.core.tool.permission.PermissionMode.BYPASS);
+        }
 
         // --- M57-002: plan mode tools (require executor) ---
         EnterPlanModeTool enterPlanMode = new EnterPlanModeTool();
@@ -435,21 +442,37 @@ public final class CodeAgentFactory {
      * Find the ToolUsageTracker instance from the hooks list so it can be exposed
      * via CodeAgentSession for the :stats command.
      */
+    /**
+     * Build a {@link ModelProvider} from the (apiKey, baseUrl) pair. Routes through {@link
+     * DefaultProviderRegistry#withBuiltIns()} so adding a provider upstream automatically becomes
+     * available here. The URL-sniffing heuristic stays for two reasons:
+     *
+     * <ul>
+     *   <li>A baseUrl containing {@code "anthropic"} → Anthropic Messages API.
+     *   <li>A baseUrl ending in {@code /v<N>} (e.g. GLM's {@code /api/paas/v4}) → OpenAI-compatible
+     *       with explicit {@code /chat/completions} path (otherwise we'd get
+     *       {@code /v4/v1/chat/completions}).
+     * </ul>
+     *
+     * <p>Everything else flows through the registry's {@code openai-compatible} preset (or the
+     * default {@code openai} when no baseUrl is given).
+     */
     private static ModelProvider buildModelProvider(String apiKey, String baseUrl) {
+        var registry = DefaultProviderRegistry.withBuiltIns();
         if (baseUrl != null && baseUrl.toLowerCase().contains("anthropic")) {
-            return new AnthropicProvider(apiKey, baseUrl);
+            return registry.create("anthropic", ProviderSpec.of(apiKey, baseUrl));
         }
-        return buildOpenAIProvider(apiKey, baseUrl);
-    }
-
-    // URLs already containing a version segment (e.g. /v4) need /chat/completions appended
-    // directly; otherwise the standard /v1/chat/completions path is used.
-    private static OpenAIProvider buildOpenAIProvider(String apiKey, String baseUrl) {
         if (baseUrl != null && baseUrl.matches(".*/v\\d+/?$")) {
-            String url = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+            // Corner case the registry doesn't model directly: URL already includes the version
+            // segment, so we construct the OpenAIProvider 3-arg variant explicitly.
+            String url =
+                    baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
             return new OpenAIProvider(apiKey, url, "/chat/completions");
         }
-        return new OpenAIProvider(apiKey, baseUrl);
+        if (baseUrl != null && !baseUrl.isBlank()) {
+            return registry.create("openai-compatible", ProviderSpec.of(apiKey, baseUrl));
+        }
+        return registry.create("openai", ProviderSpec.of(apiKey));
     }
 
     private static ToolUsageTracker findToolUsageTracker(List<Object> hooks) {
