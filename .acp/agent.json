@@ -1,0 +1,29 @@
+{
+  "$schema": "https://zed.dev/schemas/acp-agent.json",
+  "id": "kairo-code",
+  "name": "Kairo Code",
+  "version": "0.2.0",
+  "description": "Java-based code agent built on Kairo. Implements the Agent Client Protocol over stdio.",
+  "homepage": "https://github.com/CaptainGreenskin/kairo-code",
+  "license": "MIT",
+  "distribution": {
+    "java": {
+      "jar": "kairo-code-cli/target/kairo-code-cli-0.2.0-SNAPSHOT.jar",
+      "args": ["--acp-server"]
+    }
+  },
+  "requires": {
+    "java": ">=17"
+  },
+  "capabilities": {
+    "protocolVersion": 1,
+    "promptCapabilities": {
+      "image": false,
+      "audio": false
+    },
+    "sessionCapabilities": {
+      "load": true,
+      "cancel": true
+    }
+  }
+}
