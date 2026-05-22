@@ -8,6 +8,10 @@ import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.code.core.CheckpointData;
 import io.kairo.code.core.CheckpointLoader;
+import io.kairo.acp.server.AcpStdioServer;
+import io.kairo.acp.server.DefaultAcpAgent;
+import io.kairo.api.acp.AcpCapabilities;
+import io.kairo.api.acp.AcpImplementation;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.mcp.McpConfig;
@@ -117,6 +121,14 @@ public class KairoCodeMain implements Callable<Integer> {
 
     @Option(names = "--plan", description = "Show execution plan and wait for confirmation before acting")
     private boolean planMode;
+
+    @Option(names = "--acp-server",
+            description =
+                    "Run as an Agent Client Protocol stdio server. Reads JSON-RPC 2.0 frames"
+                            + " from stdin, writes responses + session/update notifications to"
+                            + " stdout. Use this when an editor (Zed, OpenCode, ...) spawns"
+                            + " kairo-code as a subprocess.")
+    private boolean acpServer;
 
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -244,7 +256,9 @@ public class KairoCodeMain implements Callable<Integer> {
 
             RetryPolicy retryPolicy = new RetryPolicy(maxRetries);
 
-            if (resolvedTask != null && !resolvedTask.isBlank()) {
+            if (acpServer) {
+                return runAcpServer(config, modelProvider);
+            } else if (resolvedTask != null && !resolvedTask.isBlank()) {
                 final String taskToRun = resolvedTask;
                 return retryPolicy.execute(() -> runOneShot(config, taskToRun, modelProvider, planMode));
             } else {
@@ -275,6 +289,31 @@ public class KairoCodeMain implements Callable<Integer> {
             return new OpenAIProvider(apiKey, baseUrl, chatPath);
         }
         return new OpenAIProvider(apiKey, baseUrl);
+    }
+
+    /**
+     * Serve as an ACP stdio server. The editor is the client; we receive JSON-RPC frames on
+     * stdin, write responses + session/update notifications on stdout. Logging stays on stderr
+     * (configured by SLF4J/Logback) so stdout remains a pure protocol stream.
+     */
+    private int runAcpServer(CodeAgentConfig config, ModelProvider modelProvider) {
+        try {
+            CodeAgentFactory.SessionOptions opts =
+                    CodeAgentFactory.SessionOptions.empty().withModelProvider(modelProvider);
+            Agent agent = CodeAgentFactory.createSession(config, opts).agent();
+
+            DefaultAcpAgent acpAgent =
+                    new DefaultAcpAgent(
+                            agent,
+                            new io.kairo.acp.server.AcpSessionManager(),
+                            new AcpImplementation("kairo-code", "0.2.0"),
+                            AcpCapabilities.textOnly());
+            new AcpStdioServer(acpAgent).serve();
+            return 0;
+        } catch (Exception e) {
+            System.err.println("ACP server failed: " + e.getMessage());
+            return 1;
+        }
     }
 
     private int runOneShot(CodeAgentConfig config, String resolvedTask, ModelProvider modelProvider,
