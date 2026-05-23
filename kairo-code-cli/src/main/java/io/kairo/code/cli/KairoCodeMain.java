@@ -9,6 +9,7 @@ import io.kairo.api.model.ModelProvider;
 import io.kairo.code.core.CheckpointData;
 import io.kairo.code.core.CheckpointLoader;
 import io.kairo.code.core.config.ConfigLoader;
+import io.kairo.code.core.config.ProviderRegistry;
 import io.kairo.acp.server.AcpStdioServer;
 import io.kairo.acp.server.DefaultAcpAgent;
 import io.kairo.api.acp.AcpCapabilities;
@@ -29,7 +30,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 import picocli.CommandLine;
@@ -131,9 +131,9 @@ public class KairoCodeMain implements Callable<Integer> {
                             + " kairo-code as a subprocess.")
     boolean acpServer;
 
-    private static final String DASHSCOPE_BASE_URL =
-            "https://dashscope.aliyuncs.com/compatible-mode/v1";
-    private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen", "glm");
+    // Provider / model / base URL knowledge lives in ProviderRegistry now.
+    // Don't re-declare them here — see core/config/ProviderRegistry for the
+    // canonical list and how to add a new provider.
 
     /** Discipline prefix prepended to one-shot task prompts. */
     static final String ONE_SHOT_DISCIPLINE_PREFIX =
@@ -162,7 +162,9 @@ public class KairoCodeMain implements Callable<Integer> {
             return 1;
         }
 
-        // Resolve provider: CLI arg > env var > config file > default (openai)
+        // Resolve provider: CLI arg > env var > config file > default (openai).
+        // Normalize through ProviderRegistry so aliases (e.g. "zhipu" → "glm")
+        // and case differences don't slip through to downstream code.
         String resolvedProvider = provider;
         String envProvider = System.getenv("KAIRO_CODE_PROVIDER");
         if (envProvider != null && !envProvider.isBlank() && "openai".equals(provider)) {
@@ -170,25 +172,26 @@ public class KairoCodeMain implements Callable<Integer> {
         } else if ("openai".equals(provider) && fileConfig.getProperty("provider") != null) {
             resolvedProvider = fileConfig.getProperty("provider");
         }
-        resolvedProvider = resolvedProvider.toLowerCase();
-        if (!VALID_PROVIDERS.contains(resolvedProvider)) {
-            System.err.printf("Error: unknown provider '%s'. Valid: openai, anthropic, qianwen, glm%n",
-                    resolvedProvider);
+        resolvedProvider = ProviderRegistry.normalizeId(resolvedProvider);
+        if (!ProviderRegistry.isKnown(resolvedProvider)) {
+            System.err.printf("Error: unknown provider '%s'. Valid: %s%n",
+                    resolvedProvider, String.join(", ", ProviderRegistry.knownIds()));
             return 1;
         }
 
-        // Resolve model: CLI arg > env var > config file > default (gpt-4o / qwen-max)
+        // Resolve model: CLI arg > env var > config file > registry default.
         String resolvedModel = model;
         String envModel = System.getenv("KAIRO_CODE_MODEL");
         if (envModel != null && !envModel.isBlank() && "gpt-4o".equals(model)) {
             resolvedModel = envModel;
         } else if ("gpt-4o".equals(model) && fileConfig.getProperty("model") != null) {
             resolvedModel = fileConfig.getProperty("model");
-        } else if ("gpt-4o".equals(model) && "qianwen".equals(resolvedProvider)) {
-            resolvedModel = "qwen-max";
+        } else if ("gpt-4o".equals(model)) {
+            // No explicit model — use the provider's registry default.
+            resolvedModel = ProviderRegistry.defaultModel(resolvedProvider);
         }
 
-        // Resolve base URL: CLI arg > env var > config file > default
+        // Resolve base URL: CLI arg > env var > config file > registry default.
         String resolvedBaseUrl = baseUrl;
         String envBaseUrl = System.getenv("KAIRO_CODE_BASE_URL");
         if (envBaseUrl != null && !envBaseUrl.isBlank()
@@ -197,9 +200,9 @@ public class KairoCodeMain implements Callable<Integer> {
         } else if ("https://api.openai.com".equals(baseUrl)
                 && fileConfig.getProperty("base-url") != null) {
             resolvedBaseUrl = fileConfig.getProperty("base-url");
-        } else if ("https://api.openai.com".equals(baseUrl)
-                && "qianwen".equals(resolvedProvider)) {
-            resolvedBaseUrl = DASHSCOPE_BASE_URL;
+        } else if ("https://api.openai.com".equals(baseUrl)) {
+            // User didn't override and we're on a non-openai provider — use registry default.
+            resolvedBaseUrl = ProviderRegistry.resolveBaseUrl(resolvedProvider);
         }
 
         // Resolve chat path: CLI arg > env var > config file > null (use default)

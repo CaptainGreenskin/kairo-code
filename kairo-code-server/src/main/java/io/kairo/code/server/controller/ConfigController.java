@@ -114,21 +114,34 @@ public class ConfigController {
     }
 
     /**
-     * Return the list of available models.
+     * Return the list of available models. Pulled from {@link io.kairo.code.core.config.ProviderRegistry}
+     * so the web UI's Model picker is always in sync with what the CLI accepts —
+     * was previously a hand-maintained literal list that drifted from the actual
+     * provider registry.
      */
     @GetMapping("/models")
     public List<String> getModels() {
-        return List.of(
-                // OpenAI
-                "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
-                // Anthropic
-                "claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-5-20251001",
-                // Zhipu (GLM)
-                "glm-5.1", "glm-4-plus", "glm-4-flash", "glm-4-long",
-                // Qianwen
-                "qwen-max", "qwen-plus", "qwen-turbo"
-        );
+        return io.kairo.code.core.config.ProviderRegistry.allKnownModels();
     }
+
+    /**
+     * Return the list of supported providers. Web UI's Provider dropdown should
+     * call this instead of hardcoding its own list (which previously drifted —
+     * frontend called Zhipu "zhipu" while CLI / config.properties called it "glm").
+     */
+    @GetMapping("/providers")
+    public List<ProviderInfo> getProviders() {
+        return io.kairo.code.core.config.ProviderRegistry.all().stream()
+                .map(p -> new ProviderInfo(p.id(), p.displayName(), p.defaultBaseUrl(), p.defaultModel(), p.knownModels()))
+                .toList();
+    }
+
+    public record ProviderInfo(
+            String id,
+            String displayName,
+            String defaultBaseUrl,
+            String defaultModel,
+            List<String> knownModels) {}
 
     /**
      * Return the list of active sessions.

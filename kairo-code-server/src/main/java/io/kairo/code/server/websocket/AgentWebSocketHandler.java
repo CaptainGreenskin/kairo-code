@@ -416,11 +416,14 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         if (provider == null || provider.isBlank()) {
             return serverProperties.baseUrl();
         }
-        return switch (provider.toLowerCase()) {
-            case "openai" -> "https://api.openai.com";
-            case "anthropic" -> "https://api.anthropic.com";
-            default -> serverProperties.baseUrl();
-        };
+        // Delegate to ProviderRegistry — was a duplicate of AgentService's switch
+        // that only knew about openai+anthropic. glm / qianwen used to fall
+        // through to whatever serverProperties.baseUrl() was set to (i.e. the
+        // wrong endpoint for their provider id).
+        if (io.kairo.code.core.config.ProviderRegistry.isKnown(provider)) {
+            return io.kairo.code.core.config.ProviderRegistry.resolveBaseUrl(provider);
+        }
+        return serverProperties.baseUrl();
     }
 
     // ----------------- envelope records (server → client) -----------------

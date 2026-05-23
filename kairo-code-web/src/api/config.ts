@@ -22,6 +22,18 @@ export async function getModels(): Promise<string[]> {
     return request<string[]>('/models');
 }
 
+export interface ProviderInfo {
+    id: string;
+    displayName: string;
+    defaultBaseUrl: string;
+    defaultModel: string;
+    knownModels: string[];
+}
+
+export async function getProviders(): Promise<ProviderInfo[]> {
+    return request<ProviderInfo[]>('/providers');
+}
+
 export async function deleteSession(sessionId: string): Promise<void> {
     return request<void>(`/sessions/${sessionId}`, { method: 'DELETE' });
 }

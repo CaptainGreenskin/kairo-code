@@ -117,6 +117,41 @@ git diff --stat | grep -E '\.java$' | grep -v Test
 git diff CHANGELOG.md
 ```
 
+### Public API compatibility (japicmp)
+
+`kairo-code-core` is the public SDK surface — `KairoCodeClient`,
+`KairoCodeSession`, `io.kairo.code.core.config.*`. Breaking changes here
+strand anyone embedding the agent. We use **japicmp** to catch incompatible
+modifications against the last released artifact.
+
+Run locally before opening a PR that touches `kairo-code-core` public API:
+
+```bash
+# Requires a published baseline in the local/CI Maven repo. Pre-release
+# (before the first GitHub Release ships) this is a no-op — the plugin
+# fails gracefully because there's no version to compare against.
+mvn -pl kairo-code-core -Pjapicmp verify
+```
+
+A binary or source-incompatible change fails the build. If the break is
+intentional (semver bump, deliberate rename), update the version + add an
+explicit changelog entry. Internal packages (everything under
+`io.kairo.code.core.{hook,session,task,team,plugin,...}`) are excluded
+from the check — see `kairo-code-core/pom.xml` for the exact exclude list.
+
+### `@SpringBootTest` checklist (mandatory)
+
+If your PR adds or modifies any `@SpringBootTest`, you MUST `@Primary`-override
+every bean whose name or class contains: `PersistenceService`, `Store`,
+`Repository`, `Writer`, `SessionPool`, `Snapshot`, `Cron`, `Curator`,
+`Memory`, or `Workspace`. Point the replacement at a `Files.createTempFile(...)`
+or `@TempDir` path. The default beans all write to `~/.kairo-code/` (or
+`~/.kairo-assistant/`) and **will silently overwrite developer config when
+the test runs**. Reference fix: `ConfigControllerUpdateTest.MockAgentConfig.throwawayConfigPersistence()`.
+
+Why: see [M-X7 follow-up](./CHANGELOG.md). One unisolated test once
+destroyed the maintainer's GLM API key in the middle of a release.
+
 ## Areas we'd love help with
 
 - **IDE plugins** (VS Code / JetBrains) — beyond the current ACP-based

@@ -92,3 +92,15 @@ jobs:
           name: surefire-reports
           path: '**/target/surefire-reports/**/*.txt'
           retention-days: 7
+
+      # Public-API compatibility gate. Activates as soon as a release exists
+      # in the Maven repository (pre-release this no-ops with a soft warning).
+      # See CONTRIBUTING.md → "Public API compatibility (japicmp)".
+      - name: japicmp — kairo-code-core public API compat
+        continue-on-error: true   # remove once first release is published
+        run: |
+          mvn -pl kairo-code-core -Pjapicmp verify -DskipTests --no-transfer-progress 2>&1 | tee japicmp.log
+          if grep -q 'BINARY INCOMPATIBLE\|SOURCE INCOMPATIBLE' japicmp.log; then
+            echo "::error::Public API compatibility break — see japicmp.log"
+            exit 1
+          fi

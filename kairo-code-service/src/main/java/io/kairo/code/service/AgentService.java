@@ -119,11 +119,10 @@ public class AgentService implements DisposableBean {
         if (provider == null || provider.isBlank()) {
             return propsBaseUrl;
         }
-        return switch (provider.toLowerCase()) {
-            case "openai" -> "https://api.openai.com";
-            case "anthropic" -> "https://api.anthropic.com";
-            default -> propsBaseUrl;
-        };
+        // Single source of truth — was duplicating ProviderRegistry's switch and
+        // silently dropping glm / qianwen on the floor (they'd hit propsBaseUrl
+        // null and end up calling whatever default the model client picked).
+        return io.kairo.code.core.config.ProviderRegistry.resolveBaseUrl(provider);
     }
 
     /**

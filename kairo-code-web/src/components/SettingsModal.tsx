@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Eye, EyeOff, Check, Settings2, ChevronRight, KeyRound, Cpu, Plug, Info, ExternalLink } from 'lucide-react';
 import type { ServerConfig } from '@/types/agent';
-import { updateConfig, getModels } from '@api/config';
+import { updateConfig, getModels, getProviders, type ProviderInfo } from '@api/config';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -11,23 +11,16 @@ interface SettingsModalProps {
     onOpenMcpServers?: () => void;
 }
 
-const PROVIDERS = [
-    { value: 'openai', label: 'OpenAI' },
-    { value: 'anthropic', label: 'Anthropic' },
-    { value: 'zhipu', label: '智谱 (GLM)' },
-    { value: 'qianwen', label: '通义千问' },
-    { value: 'custom', label: 'Custom' },
+// Fallback list — shown only on the brief flash before /api/providers responds,
+// or if the server is unreachable. Source of truth is the backend
+// (kairo-code-core/.../ProviderRegistry → /api/providers); hardcoded fallback
+// here is just so a fresh modal isn't empty during the fetch.
+const FALLBACK_PROVIDERS: ProviderInfo[] = [
+    { id: 'openai', displayName: 'OpenAI', defaultBaseUrl: 'https://api.openai.com', defaultModel: 'gpt-4o', knownModels: [] },
+    { id: 'anthropic', displayName: 'Anthropic', defaultBaseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-20250514', knownModels: [] },
+    { id: 'glm', displayName: '智谱 (GLM)', defaultBaseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', defaultModel: 'glm-5.1', knownModels: [] },
+    { id: 'qianwen', displayName: '通义千问', defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-max', knownModels: [] },
 ];
-
-const PROVIDER_BASE_URLS: Record<string, string> = {
-    zhipu: 'https://open.bigmodel.cn/api/coding/paas/v4',
-    qianwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-};
-
-const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
-    zhipu: 'glm-5.1',
-    qianwen: 'qwen-max',
-};
 
 type SectionId = 'account' | 'model' | 'integrations' | 'about';
 
@@ -50,7 +43,21 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [availableModels, setAvailableModels] = useState<string[]>([]);
+    const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
     const overlayRef = useRef<HTMLDivElement>(null);
+
+    // Lookup tables derived from /api/providers — replace the old hardcoded
+    // PROVIDER_BASE_URLS / PROVIDER_DEFAULT_MODELS that drifted from backend.
+    const providerBaseUrls = useMemo(() => {
+        const m: Record<string, string> = {};
+        for (const p of providers) m[p.id] = p.defaultBaseUrl;
+        return m;
+    }, [providers]);
+    const providerDefaultModels = useMemo(() => {
+        const m: Record<string, string> = {};
+        for (const p of providers) m[p.id] = p.defaultModel;
+        return m;
+    }, [providers]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -64,6 +71,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
     useEffect(() => {
         if (!isOpen) return;
         getModels().then(setAvailableModels).catch(() => {});
+        getProviders().then(setProviders).catch(() => {});
     }, [isOpen]);
 
     // Reset section + transient state when modal opens
@@ -84,13 +92,13 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
 
     const handleProviderChange = (p: string) => {
         setProvider(p);
-        if (PROVIDER_BASE_URLS[p]) {
-            setBaseUrl(PROVIDER_BASE_URLS[p]);
-        } else if (!PROVIDER_BASE_URLS[provider]) {
+        if (providerBaseUrls[p]) {
+            setBaseUrl(providerBaseUrls[p]);
+        } else if (!providerBaseUrls[provider]) {
             setBaseUrl('');
         }
-        if (PROVIDER_DEFAULT_MODELS[p] && !model) {
-            setModel(PROVIDER_DEFAULT_MODELS[p]);
+        if (providerDefaultModels[p] && !model) {
+            setModel(providerDefaultModels[p]);
         }
     };
 
@@ -102,7 +110,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
             if (apiKey) req.apiKey = apiKey;
             if (model) req.model = model;
             if (provider) req.provider = provider;
-            if ((provider === 'custom' || PROVIDER_BASE_URLS[provider]) && baseUrl) req.baseUrl = baseUrl;
+            if ((provider === 'custom' || providerBaseUrls[provider]) && baseUrl) req.baseUrl = baseUrl;
             req.thinkingBudget = parseInt(localThinkingBudget) || 0;
 
             const newConfig = await updateConfig(req);
@@ -190,11 +198,12 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
                                         value={provider}
                                         onChange={(e) => handleProviderChange(e.target.value)}
                                     >
-                                        {PROVIDERS.map((p) => (
-                                            <option key={p.value} value={p.value}>
-                                                {p.label}
+                                        {providers.map((p) => (
+                                            <option key={p.id} value={p.id}>
+                                                {p.displayName}
                                             </option>
                                         ))}
+                                        <option value="custom">Custom</option>
                                     </select>
                                 </div>
 
@@ -224,7 +233,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
                                     </div>
                                 </div>
 
-                                {(provider === 'custom' || PROVIDER_BASE_URLS[provider]) && (
+                                {(provider === 'custom' || providerBaseUrls[provider]) && (
                                     <div>
                                         <label className={labelClass}>Base URL</label>
                                         <input
