@@ -26,6 +26,7 @@ import io.kairo.code.service.workspace.WorkspaceSnapshotService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -40,7 +41,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -53,7 +58,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * that any transport layer (STOMP / SSE / CLI) can subscribe to.
  */
 @Component
-public class AgentService implements DisposableBean {
+public class AgentService implements DisposableBean, InitializingBean {
 
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
 
@@ -61,6 +66,34 @@ public class AgentService implements DisposableBean {
     private final Map<String, SessionEntry> sessions = new ConcurrentHashMap<>();
     private final Map<String, AtomicBoolean> runningState = new ConcurrentHashMap<>();
     private final Map<String, ToolProgressTracker> progressTrackers = new ConcurrentHashMap<>();
+    /**
+     * Last-activity timestamp per session (monotonic ns). Touched on
+     * createSession + sendMessage so the idle reaper can tell live work
+     * apart from abandoned tabs. Was added in M-IdleReaper after auditing
+     * surfaced that sessions accumulated indefinitely (only destroySession
+     * removed them) and the documented {@code KAIRO_SESSION_POOL_*} env
+     * vars were read by upstream code paths kairo-code never invoked.
+     */
+    private final Map<String, AtomicLong> lastActivityNs = new ConcurrentHashMap<>();
+
+    /** Background reaper that evicts sessions idle longer than {@link #idleTtlMillis}. */
+    private volatile ScheduledExecutorService idleReaper;
+    /** Idle TTL in millis. Read from {@code KAIRO_CODE_SESSION_IDLE_TTL_MINUTES} env (default 60). */
+    private final long idleTtlMillis = resolveIdleTtlMillis();
+    /** How often the reaper wakes up. 1/10 of TTL, bounded to keep tests reasonable. */
+    private final long reaperPeriodMillis = Math.max(1_000L, Math.min(idleTtlMillis / 10, 60_000L));
+
+    private static long resolveIdleTtlMillis() {
+        String env = System.getenv("KAIRO_CODE_SESSION_IDLE_TTL_MINUTES");
+        if (env == null || env.isBlank()) return TimeUnit.MINUTES.toMillis(60);
+        try {
+            long mins = Long.parseLong(env.trim());
+            if (mins <= 0) return TimeUnit.MINUTES.toMillis(60);
+            return TimeUnit.MINUTES.toMillis(mins);
+        } catch (NumberFormatException ignored) {
+            return TimeUnit.MINUTES.toMillis(60);
+        }
+    }
 
     // ── Plan-pending state machine ──────────────────────────────────────────────
     /** Per-session lifecycle phase. */
@@ -262,6 +295,7 @@ public class AgentService implements DisposableBean {
                     sessionId, workspaceId, normalizedMode, payload,
                     approvalHandler, System.currentTimeMillis());
             sessions.put(sessionId, entry);
+            lastActivityNs.put(sessionId, new AtomicLong(System.nanoTime()));
 
             log.info("Session {} created successfully", sessionId);
             return sessionId;
@@ -308,6 +342,9 @@ public class AgentService implements DisposableBean {
             return Flux.just(AgentEvent.error(sessionId,
                     "Session not found: " + sessionId, "SESSION_NOT_FOUND"));
         }
+        // Bump idle timer — reaper won't evict an actively-used session.
+        AtomicLong activity = lastActivityNs.get(sessionId);
+        if (activity != null) activity.set(System.nanoTime());
         entry = rebuildIfStale(entry);
         return entry.payload().handleMessage(request);
     }
@@ -634,6 +671,7 @@ public class AgentService implements DisposableBean {
         log.info("Destroying session {}", sessionId);
         entry.approvalHandler().cancelAll();
         runningState.remove(sessionId);
+        lastActivityNs.remove(sessionId);
         ToolProgressTracker tracker = progressTrackers.remove(sessionId);
         if (tracker != null) {
             tracker.clear();
@@ -1138,6 +1176,70 @@ public class AgentService implements DisposableBean {
             progressTickSubscription.dispose();
             progressTickSubscription = null;
         }
+        if (idleReaper != null) {
+            idleReaper.shutdownNow();
+            idleReaper = null;
+        }
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        startIdleReaper();
+    }
+
+    void startIdleReaper() {
+        // Single-threaded daemon — reap is cheap (just a map walk + remove).
+        idleReaper = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "kairo-session-reaper");
+            t.setDaemon(true);
+            return t;
+        });
+        idleReaper.scheduleAtFixedRate(
+                this::reapIdleSessions,
+                reaperPeriodMillis,
+                reaperPeriodMillis,
+                TimeUnit.MILLISECONDS);
+        log.info("Idle session reaper started (ttl={}ms, period={}ms)", idleTtlMillis, reaperPeriodMillis);
+    }
+
+    /**
+     * Visible for testing. Walks the session map and removes anything with no
+     * activity for {@link #idleTtlMillis}. Skips sessions still marked running
+     * — a long-running tool call may legitimately not touch the bump for a
+     * while, killing it mid-flight would lose user work.
+     */
+    void reapIdleSessions() {
+        long now = System.nanoTime();
+        long thresholdNs = TimeUnit.MILLISECONDS.toNanos(idleTtlMillis);
+        int reaped = 0;
+        for (String sid : sessions.keySet()) {
+            AtomicLong lastNs = lastActivityNs.get(sid);
+            if (lastNs == null) {
+                // Defensive: a session without a tracked activity time is bogus.
+                lastActivityNs.put(sid, new AtomicLong(now));
+                continue;
+            }
+            if (now - lastNs.get() < thresholdNs) continue;
+            AtomicBoolean running = runningState.get(sid);
+            if (running != null && running.get()) continue;
+            try {
+                destroySession(sid);
+                reaped++;
+            } catch (RuntimeException e) {
+                log.warn("Idle reaper: failed to destroy session {} — {}", sid, e.getMessage());
+            }
+        }
+        if (reaped > 0) log.info("Idle reaper evicted {} session(s)", reaped);
+    }
+
+    /** Visible for testing — bypass the @PostConstruct so tests can drive reap manually. */
+    long idleTtlMillis() {
+        return idleTtlMillis;
+    }
+
+    /** Visible for testing — register an entry in the activity tracker. */
+    void touchActivity(String sessionId) {
+        lastActivityNs.computeIfAbsent(sessionId, k -> new AtomicLong()).set(System.nanoTime());
     }
 
     /**
