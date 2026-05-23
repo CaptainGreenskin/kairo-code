@@ -1,0 +1,57 @@
+name: 💡 Feature request
+description: Suggest a new capability or improvement
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Skip "I want feature X" — describe the underlying need.
+      placeholder: |
+        When I run kairo-code in CI on a large monorepo, the model takes 15 minutes
+        to converge on simple edits because it re-reads the same files every turn.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work?
+      placeholder: |
+        Add a `:read-cache` REPL command + corresponding flag that caches the most
+        recent read result and returns it instantly if the file hasn't changed
+        (via fsmtime or content hash).
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds did you try / reject? Why?
+      placeholder: |
+        - Setting --max-iterations 10 — too aggressive, lots of real tasks need more
+        - Pre-warming with a `:read` of every file — still re-reads on each tool call
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Where should this live? (Best guess — we'll triage)
+      options:
+        - kairo-code (CLI / REPL / SDK)
+        - kairo-code-web (frontend)
+        - kairo-code-server (REST / WebSocket)
+        - kairo upstream (this is a generic agent capability)
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Are you willing to help?
+      options:
+        - label: I'd be willing to send a PR for this
+        - label: I'd be willing to test it on my workload

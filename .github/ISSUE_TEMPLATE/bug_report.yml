@@ -1,0 +1,111 @@
+name: 🐛 Bug report
+description: Something doesn't work the way the docs say it should
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Before submitting, please:
+        1. Search [existing issues](https://github.com/captaingreenskin/kairo-code/issues?q=is%3Aissue) — there's a fair chance someone else already saw this
+        2. Check the [troubleshooting guide](https://github.com/captaingreenskin/kairo-code/blob/main/docs/guide/troubleshooting.md) — covers the common pitfalls
+        3. **Do not paste your API key.** Redact `sk-...` values to `sk-redacted` before submitting.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear, concise description of the bug. Include the exact error message if any.
+      placeholder: |
+        When I run `kairo-code --task "..."`, the agent hangs at iteration 3 with no output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      placeholder: |
+        The agent should call the write tool once and exit with the file created.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Exact command(s), and any input files. Make it as short as possible.
+      placeholder: |
+        ```bash
+        export KAIRO_CODE_API_KEY=sk-redacted
+        rm -rf /tmp/repro && mkdir /tmp/repro
+        kairo-code --task "create hello.txt with 'hi'" --working-dir /tmp/repro
+        ```
+      render: bash
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: kairo-code version
+      placeholder: e.g. 0.2.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install?
+      options:
+        - npm (@kairo/code)
+        - Homebrew
+        - Direct jar (java -jar)
+        - Built from source
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: java-version
+    attributes:
+      label: Java version
+      description: Output of `java -version` (first line)
+      placeholder: openjdk version "21.0.4" 2024-07-16
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / arch
+      placeholder: macOS 14.5 (arm64) / Ubuntu 24.04 (x86_64) / etc.
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Model provider + model
+      placeholder: OpenAI gpt-4o / MiniMax M2 / Anthropic Claude 3.5 / Zhipu GLM-5.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / trace
+      description: |
+        Contents of `<working-dir>/.kairo-trace/session-*.jsonl` if relevant.
+        For server bugs, attach the kairo-code-server stdout.
+        For UI bugs, attach browser console errors.
+      render: shell
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I have searched existing issues
+          required: true
+        - label: I have redacted my API key from all pasted snippets
+          required: true

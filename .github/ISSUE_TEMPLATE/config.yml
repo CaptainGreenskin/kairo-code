@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🛡 Security vulnerability
+    url: https://github.com/captaingreenskin/kairo-code/blob/main/SECURITY.md
+    about: Do NOT file public issues for security bugs. See SECURITY.md.
+  - name: ❓ Question / discussion
+    url: https://github.com/captaingreenskin/kairo-code/discussions
+    about: For usage questions / "how do I do X" / general help.
+  - name: 📚 Documentation
+    url: https://github.com/captaingreenskin/kairo-code/tree/main/docs
+    about: Check the docs first — many questions are already answered there.

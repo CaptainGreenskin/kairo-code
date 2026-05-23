@@ -70,6 +70,11 @@ KAIRO_SESSION_RESULT.json
 .dispatcher/eval/
 .dispatcher/_archive/
 .dispatcher/ata/
+.dispatcher/bench/swe-bench/.work/
+.dispatcher/bench/swe-bench/.venv/
+.dispatcher/bench/swe-bench/.splits/
+.dispatcher/bench/swe-bench/logs/
+results-v*/
 
 # Node.js
 node_modules/
