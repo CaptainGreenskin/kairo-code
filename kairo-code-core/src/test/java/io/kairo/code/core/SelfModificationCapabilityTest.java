@@ -38,17 +38,21 @@ class SelfModificationCapabilityTest {
     }
 
     @Test
-    void editToolIsRegistered() {
+    void searchReplaceToolIsRegistered() {
+        // Was previously "edit" — renamed when targeted-edit was split into
+        // search_replace (in-file string substitution) and patch_apply (unified diff).
         CodeAgentSession session = CodeAgentFactory.createSession(CONFIG, sessionOptions());
 
-        assertThat(registeredToolNames(session)).contains("edit");
+        assertThat(registeredToolNames(session)).contains("search_replace");
     }
 
     @Test
-    void writeToolIsRegistered() {
+    void batchWriteToolIsRegistered() {
+        // Was previously "write" — renamed to make explicit that the tool now
+        // accepts batched multi-file writes, not just single-file overwrites.
         CodeAgentSession session = CodeAgentFactory.createSession(CONFIG, sessionOptions());
 
-        assertThat(registeredToolNames(session)).contains("write");
+        assertThat(registeredToolNames(session)).contains("batch_write");
     }
 
     @Test
@@ -70,7 +74,8 @@ class SelfModificationCapabilityTest {
         CodeAgentSession session = CodeAgentFactory.createSession(CONFIG, sessionOptions());
         Set<String> toolNames = registeredToolNames(session);
 
-        assertThat(toolNames).containsAll(Set.of("bash", "read", "write", "edit", "glob", "grep"));
+        assertThat(toolNames).containsAll(
+                Set.of("bash", "read", "batch_write", "search_replace", "patch_apply", "glob", "grep"));
     }
 
     @Test

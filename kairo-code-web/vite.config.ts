@@ -90,6 +90,23 @@ export default defineConfig(({ mode }) => {
             environment: 'jsdom',
             globals: true,
             setupFiles: ['src/test/setup.ts'],
+            // Exclude Playwright e2e specs from vitest discovery — they're
+            // run via `npm run test:e2e` which uses Playwright's own runner.
+            // Without this exclude, vitest tries to import them, fails on
+            // the Playwright runtime, and reports "0 tests" + non-zero exit.
+            exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**'],
+            // Stub CSS imports so tests pulling in Monaco / xterm don't
+            // explode on .css files vitest's transformer can't parse.
+            css: false,
+            // Some tests pull in components that transitively import
+            // Monaco's internal .css files (e.g. standalone-tokens.css) —
+            // vitest's node loader can't parse those. Force them through
+            // an inline stub.
+            server: {
+                deps: {
+                    inline: ['monaco-editor', /^@codingame\//],
+                },
+            },
         },
     };
 });

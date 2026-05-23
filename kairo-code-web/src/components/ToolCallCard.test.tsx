@@ -14,6 +14,17 @@ function makeToolCall(overrides: Partial<ToolCall> = {}): ToolCall {
     };
 }
 
+/**
+ * Completed cards auto-collapse to a single-line header — the result body and
+ * inline diff are hidden behind a click. Tests that assert on body content
+ * (pre, "Show N more lines", inline diff) must expand the card first.
+ */
+function expandCompletedCard(container: HTMLElement) {
+    // The header row is the first child with cursor-pointer when isComplete.
+    const header = container.querySelector('[class*="cursor-pointer"]') as HTMLElement | null;
+    if (header) fireEvent.click(header);
+}
+
 describe('ToolCallCard result expand/collapse (line-based)', () => {
     it('does not show result when toolCall has no result', () => {
         const toolCall = makeToolCall({ result: undefined });
@@ -31,14 +42,16 @@ describe('ToolCallCard result expand/collapse (line-based)', () => {
     it('shows "Show N more lines" button when result exceeds 5 lines', () => {
         const longResult = Array.from({ length: 10 }, (_, i) => `line${i + 1}`).join('\n');
         const toolCall = makeToolCall({ result: longResult });
-        render(<ToolCallCard toolCall={toolCall} />);
+        const { container } = render(<ToolCallCard toolCall={toolCall} />);
+        expandCompletedCard(container);
         expect(screen.getByText(/Show 5 more lines/i)).toBeInTheDocument();
     });
 
     it('expands result when "Show N more lines" is clicked', () => {
         const longResult = Array.from({ length: 10 }, (_, i) => `line${i + 1}`).join('\n');
         const toolCall = makeToolCall({ result: longResult });
-        render(<ToolCallCard toolCall={toolCall} />);
+        const { container } = render(<ToolCallCard toolCall={toolCall} />);
+        expandCompletedCard(container);
 
         // Initially collapsed
         expect(screen.getByText(/Show 5 more lines/i)).toBeInTheDocument();
@@ -51,7 +64,8 @@ describe('ToolCallCard result expand/collapse (line-based)', () => {
     it('collapses result when "Collapse" is clicked', () => {
         const longResult = Array.from({ length: 10 }, (_, i) => `line${i + 1}`).join('\n');
         const toolCall = makeToolCall({ result: longResult });
-        render(<ToolCallCard toolCall={toolCall} />);
+        const { container } = render(<ToolCallCard toolCall={toolCall} />);
+        expandCompletedCard(container);
 
         // Expand
         fireEvent.click(screen.getByText(/Show 5 more lines/i));
@@ -66,6 +80,7 @@ describe('ToolCallCard result expand/collapse (line-based)', () => {
         const longResult = Array.from({ length: 10 }, (_, i) => `line_${i + 1}`).join('\n');
         const toolCall = makeToolCall({ result: longResult });
         const { container } = render(<ToolCallCard toolCall={toolCall} />);
+        expandCompletedCard(container);
         const pre = container.querySelector('pre');
         expect(pre?.textContent).toContain('line_1');
         expect(pre?.textContent).toContain('line_5');
@@ -76,6 +91,7 @@ describe('ToolCallCard result expand/collapse (line-based)', () => {
         const longResult = Array.from({ length: 10 }, (_, i) => `line_${i + 1}`).join('\n');
         const toolCall = makeToolCall({ result: longResult });
         const { container } = render(<ToolCallCard toolCall={toolCall} />);
+        expandCompletedCard(container);
 
         fireEvent.click(screen.getByText(/Show 5 more lines/i));
         const pre = container.querySelector('pre');
@@ -150,7 +166,8 @@ describe('ToolCallCard inline diff detection', () => {
             input: { path: 'src/main.ts' },
             result: 'File written successfully',
         });
-        render(<ToolCallCard toolCall={toolCall} />);
+        const { container } = render(<ToolCallCard toolCall={toolCall} />);
+        expandCompletedCard(container);
         expect(screen.getByText('src/main.ts')).toBeInTheDocument();
     });
 
@@ -160,7 +177,8 @@ describe('ToolCallCard inline diff detection', () => {
             input: { path: 'lib/utils.py' },
             result: 'Patch applied',
         });
-        render(<ToolCallCard toolCall={toolCall} />);
+        const { container } = render(<ToolCallCard toolCall={toolCall} />);
+        expandCompletedCard(container);
         expect(screen.getByText('lib/utils.py')).toBeInTheDocument();
     });
 
@@ -170,8 +188,13 @@ describe('ToolCallCard inline diff detection', () => {
             input: { path: 'src/index.ts' },
             result: unifiedDiff,
         });
-        render(<ToolCallCard toolCall={toolCall} />);
-        // Should show the diff file path extracted from diff header
-        expect(screen.getByText('src/index.ts')).toBeInTheDocument();
+        const { container } = render(<ToolCallCard toolCall={toolCall} />);
+        expandCompletedCard(container);
+        // FileDiffView (Monaco) is mocked in tests — we only assert the diff
+        // body block was rendered (raw unified-diff text appears in the inline
+        // preview above the FileDiffView mount point).
+        const diffPreview = container.querySelector('.whitespace-pre-wrap.break-all');
+        expect(diffPreview?.textContent).toContain('--- a/src/index.ts');
+        expect(diffPreview?.textContent).toContain('+++ b/src/index.ts');
     });
 });

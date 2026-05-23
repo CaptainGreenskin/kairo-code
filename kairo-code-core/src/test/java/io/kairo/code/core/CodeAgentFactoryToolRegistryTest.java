@@ -57,9 +57,11 @@ class CodeAgentFactoryToolRegistryTest {
     @Test
     void standardToolsAreRegistered() {
         List<String> names = toolNames();
-        // Baseline tools that were already registered before M57
-        assertThat(names).contains("bash", "read", "write", "edit", "grep", "glob",
-                "web_fetch", "git", "ask_user", "todo_read", "todo_write", "tree");
+        // Baseline tools that the agent expects to always be present. Writes/edits
+        // are exposed under their actual registered names: batch_write covers full-file
+        // writes, search_replace / patch_apply cover edits.
+        assertThat(names).contains("bash", "read", "batch_write", "search_replace", "patch_apply",
+                "grep", "glob", "web_fetch", "git", "ask_user", "todo_read", "todo_write", "tree");
     }
 
     @Test

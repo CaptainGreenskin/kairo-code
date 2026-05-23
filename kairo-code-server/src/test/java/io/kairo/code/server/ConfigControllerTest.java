@@ -158,9 +158,11 @@ class ConfigControllerTest {
 
     @Test
     void getFileContent_rejectsTooLarge() throws IOException {
-        // Create a file larger than 100KB
+        // Cap was lifted from 100KB → 5MB so the editor can open larger source files
+        // (the chat sidebar's @mention flow was hitting 413 on real-world repos). The
+        // test needs to cross the actual cap to assert the 413 still fires.
         Path largeFile = tempDir.resolve("large.bin");
-        byte[] data = new byte[100_001];
+        byte[] data = new byte[5 * 1024 * 1024 + 1];
         Files.write(largeFile, data);
 
         assertThatThrownBy(() -> controller.getFileContent("large.bin", null))
