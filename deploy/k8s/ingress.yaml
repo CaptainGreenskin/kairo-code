@@ -1,0 +1,30 @@
+# Optional Ingress for exposing kairo-code-server outside the cluster.
+# Adapt the host + TLS issuer for your environment.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kairo-code
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # WebSocket needs idle-timeout > model max response time. 10 min is generous.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - kairo-code.example.com
+      secretName: kairo-code-tls
+  rules:
+    - host: kairo-code.example.com
+      http:
+        paths:
+          # WebSocket + REST both terminate on the same Service. Front-end
+          # static assets typically live elsewhere (kairo-code-web container
+          # or an S3 bucket); only the API/WS path is here.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kairo-code-server
+                port: { number: 8080 }

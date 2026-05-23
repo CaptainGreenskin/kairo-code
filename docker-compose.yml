@@ -1,7 +1,13 @@
-# Kairo Code — 本地一键部署
+# Kairo Code — local one-command deploy.
+#
 # Usage:
-#   cp .env.example .env   # 填入 API key
-#   docker compose up -d
+#   cp .env.example .env   # fill in api key + pick provider
+#   docker compose up -d --build
+#   open http://localhost:3000
+#
+# Defaults below pick GLM (智谱) since most users in CN can sign up there
+# without a credit card. Switch by editing .env. ProviderRegistry inside
+# kairo-code-server knows about openai / anthropic / glm / qianwen.
 
 services:
   kairo-server:
@@ -13,21 +19,38 @@ services:
     restart: unless-stopped
     environment:
       KAIRO_CODE_API_KEY: ${KAIRO_CODE_API_KEY}
-      KAIRO_MODEL: ${KAIRO_MODEL:-glm-4-flash}
-      KAIRO_PROVIDER: ${KAIRO_PROVIDER:-openai}
-      KAIRO_BASE_URL: ${KAIRO_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      # provider + base-url + model now move together. Defaults match the
+      # GLM coding endpoint. Override all three in .env when switching.
+      KAIRO_PROVIDER: ${KAIRO_PROVIDER:-glm}
+      KAIRO_BASE_URL: ${KAIRO_BASE_URL:-https://open.bigmodel.cn/api/coding/paas/v4}
+      KAIRO_MODEL:    ${KAIRO_MODEL:-glm-5.1}
       KAIRO_WORKING_DIR: /workspace
+      # JVM heap defaults: 75% of container limit (G1GC). Override via .env
+      # if you give the container more/less memory.
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -XX:+UseG1GC}
     volumes:
-      - kairo-workspace:/workspace
-      - kairo-sessions:/workspace/.kairo-code/sessions
+      # User-edit area — sessions, snapshots, cron state, curator telemetry.
+      # The container's $HOME is /data, so ~/.kairo-code/ ends up here and
+      # survives `docker compose down`. Was previously bound to a
+      # /workspace/.kairo-code subdir, which the app never wrote to.
+      - kairo-data:/data
+      # Working directory the agent operates on. Bind-mount your repo here
+      # in .env (KAIRO_WORKSPACE_HOST) for the agent to see real code.
+      - ${KAIRO_WORKSPACE_HOST:-kairo-workspace}:/workspace
     expose:
       - "8080"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/config"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/healthz"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
   kairo-web:
     build:
@@ -41,7 +64,11 @@ services:
     depends_on:
       kairo-server:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
 volumes:
+  kairo-data:
   kairo-workspace:
-  kairo-sessions:

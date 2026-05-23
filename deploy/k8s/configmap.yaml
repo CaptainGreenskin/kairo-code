@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kairo-code-config
+data:
+  # All four must move together when switching provider — ProviderRegistry
+  # picks defaults if you leave any blank, but explicit is clearer for ops.
+  # Known providers: openai / anthropic / glm / qianwen.
+  KAIRO_PROVIDER: "glm"
+  KAIRO_BASE_URL: "https://open.bigmodel.cn/api/coding/paas/v4"
+  KAIRO_MODEL: "glm-5.1"
+  # Session-pool tuning. Defaults are 64/60min — bump if you saturate.
+  KAIRO_SESSION_POOL_SIZE: "64"
+  KAIRO_SESSION_IDLE_TTL_MINUTES: "60"

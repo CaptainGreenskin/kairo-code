@@ -81,6 +81,52 @@ public class ConfigController {
     }
 
     /**
+     * Kubernetes / docker-compose health probe. Returns 200 only when:
+     * (a) an API key is configured (caller has something to authenticate with), and
+     * (b) the working directory is writeable (the agent has somewhere to put files).
+     *
+     * <p>Deliberately does NOT make a model call — that would burn quota on every probe
+     * and could rate-limit real chat. Use this for liveness + readiness probes; use
+     * {@code /actuator/health} for the lower-level "JVM up?" check.
+     */
+    @GetMapping("/healthz")
+    public ResponseEntity<HealthResponse> healthz() {
+        boolean apiKeySet = serverProperties.apiKey() != null && !serverProperties.apiKey().isBlank();
+        String workingDir = serverProperties.workingDir();
+        boolean workingDirWriteable = false;
+        String workingDirError = null;
+        try {
+            Path wd = Paths.get(workingDir);
+            if (!Files.exists(wd)) {
+                Files.createDirectories(wd);
+            }
+            Path probe = wd.resolve(".kairo-health-probe");
+            Files.writeString(probe, "ok");
+            Files.deleteIfExists(probe);
+            workingDirWriteable = true;
+        } catch (IOException e) {
+            workingDirError = e.getMessage();
+        }
+        boolean ok = apiKeySet && workingDirWriteable;
+        HealthResponse body = new HealthResponse(
+                ok ? "UP" : "DOWN",
+                apiKeySet,
+                workingDirWriteable,
+                workingDir,
+                workingDirError);
+        return ok
+                ? ResponseEntity.ok(body)
+                : ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+    }
+
+    public record HealthResponse(
+            String status,
+            boolean apiKeySet,
+            boolean workingDirWriteable,
+            String workingDir,
+            String workingDirError) {}
+
+    /**
      * Update server configuration (partial update, persisted + hot-updated).
      */
     @PostMapping("/config")

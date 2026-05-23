@@ -1,0 +1,65 @@
+# systemd unit for running kairo-code-server on a bare host.
+#
+# Install:
+#   sudo useradd --system --home-dir /var/lib/kairo-code --create-home kairo-code
+#   sudo cp kairo-code-cli/target/kairo-code-server-*.jar /opt/kairo-code/server.jar
+#   sudo cp deploy/systemd/kairo-code-server.service /etc/systemd/system/
+#   sudo cp deploy/systemd/kairo-code-server.env.example /etc/default/kairo-code-server
+#   # edit /etc/default/kairo-code-server to set KAIRO_CODE_API_KEY etc.
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kairo-code-server
+#
+# Verify:
+#   curl http://localhost:8080/api/healthz
+#   journalctl -u kairo-code-server -f
+
+[Unit]
+Description=Kairo Code Server (Spring Boot)
+Documentation=https://github.com/captaingreenskin/kairo-code
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kairo-code
+Group=kairo-code
+WorkingDirectory=/var/lib/kairo-code
+EnvironmentFile=/etc/default/kairo-code-server
+
+Environment="JAVA_HOME=/usr/lib/jvm/temurin-21-jdk"
+Environment="JAVA_OPTS=-XX:MaxRAMPercentage=75 -XX:+UseG1GC"
+
+ExecStart=/usr/lib/jvm/temurin-21-jdk/bin/java $JAVA_OPTS -jar /opt/kairo-code/server.jar
+
+# Restart policy: always restart unless we hit the rate-limit (10 in 60s).
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=10
+
+# Resource caps. Bump for large workloads.
+MemoryMax=2G
+CPUQuota=200%
+
+# Sandbox. /var/lib/kairo-code holds ~/.kairo-code (sessions etc.);
+# /var/lib/kairo-code/workspace is the writeable area for agent tools.
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kairo-code
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Graceful shutdown — Spring honors SIGTERM within ~30s for in-flight chats.
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+
+# Append stdout/stderr to journald with structured tag.
+SyslogIdentifier=kairo-code-server
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,113 @@
+# Kairo Code — Kubernetes Deployment + Service.
+#
+# Apply order:
+#   kubectl apply -f deploy/k8s/configmap.yaml
+#   kubectl apply -f deploy/k8s/secret.yaml      # contains KAIRO_CODE_API_KEY
+#   kubectl apply -f deploy/k8s/deployment.yaml
+#   kubectl apply -f deploy/k8s/ingress.yaml     # optional
+#
+# Single-replica by design — sessions live on a PVC and aren't shared across
+# pods. For HA, you'll need to swap the kairo-data PVC for a shared store
+# (S3-backed snapshots — kairo-core ships a SnapshotStore SPI) and bump
+# replicas. The session map is currently in-process; multi-replica needs
+# the M-MultiNode milestone.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kairo-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kairo-workspace
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kairo-code-server
+  labels:
+    app: kairo-code-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # PVC is RWO; can't roll two pods sharing it.
+  selector:
+    matchLabels:
+      app: kairo-code-server
+  template:
+    metadata:
+      labels:
+        app: kairo-code-server
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: kairo-code-server
+          image: ghcr.io/captaingreenskin/kairo-code-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef: { name: kairo-code-config }
+            - secretRef:    { name: kairo-code-secret }
+          env:
+            - name: KAIRO_WORKING_DIR
+              value: /workspace
+            - name: JAVA_OPTS
+              value: "-XX:MaxRAMPercentage=75 -XX:+UseG1GC"
+          volumeMounts:
+            - { name: data,      mountPath: /data }
+            - { name: workspace, mountPath: /workspace }
+          # /api/healthz validates working-dir writeable + api-key set,
+          # without burning model quota. /actuator/health is the JVM-up check.
+          readinessProbe:
+            httpGet: { path: /api/healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: kairo-data }
+        - name: workspace
+          persistentVolumeClaim: { claimName: kairo-workspace }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kairo-code-server
+spec:
+  type: ClusterIP
+  selector:
+    app: kairo-code-server
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http
