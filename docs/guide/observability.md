@@ -9,7 +9,7 @@ by default — the cost is only paid when you opt in via environment variables.
 |---|---|
 | Local Grafana stack (Tempo + Prometheus + Loki) | `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` + `docker compose -f deploy/observability/docker-compose.otel.yml up -d` |
 | Honeycomb | `OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io` + `OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=YOUR_KEY"` |
-| Langfuse (LLM-focused) | `OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel` + `OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic $(echo -n pk:sk \| base64)"` |
+| Langfuse (LLM-focused, **session-grouped**) | `OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel` + `OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic $(echo -n pk:sk \| base64)"` |
 
 Add `OTEL_SERVICE_NAME=kairo-code-prod` and `OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod` to either of the cloud setups before going live so trace search isn't a mess.
 
@@ -60,6 +60,32 @@ backend:
 LLM-focused backends (Langfuse, Helicone) read the `gen_ai.*` attributes per
 OpenTelemetry's GenAI semconv — you get input/output/usage/cost grouped per
 agent call automatically.
+
+### Langfuse — what you should actually see
+
+Once OTLP is pointed at Langfuse and you run a turn:
+
+- **Traces view** — every chat turn becomes one trace (root span `agent.run`,
+  with `langfuse.trace.input` holding the user's message). Cost/usage/latency
+  show up at the trace level via the `gen_ai.usage.*` attributes that the
+  Spring-AI bridge stamps on the model spans.
+- **Sessions view** — every turn from the same chat is grouped under one
+  Session, keyed by the kairo session id (REST/WS) or REPL invocation UUID
+  (CLI). The wrapping `SessionAwareTracer` writes `langfuse.session.id` on
+  every span. Web users see their workspace id under `langfuse.user.id`;
+  CLI users see the OS user.
+- **Observation panel for tool calls** — `agent.tool` spans render with
+  Input / Output panels populated: `langfuse.observation.input` carries
+  the tool args JSON; `langfuse.observation.output` carries the tool
+  result. Failures get `error` events with the exception message.
+- **Score panel** — empty by default. Hook scoring via the
+  `kairo-observability` event bus if you want to push automated evals
+  (lesson quality, plan acceptance, etc.) as Langfuse Scores.
+
+If the Sessions view is empty even after a turn, double-check
+`langfuse.session.id` appears in the trace's attribute panel — that's the
+attribute Langfuse groups on. Missing means the tracer wasn't wrapped (see
+`AgentService.createSession` / `ReplLoop` bootstrap).
 
 ### Verifying the spans are flowing
 

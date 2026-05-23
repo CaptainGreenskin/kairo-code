@@ -300,6 +300,32 @@ public class ReplLoop {
                 writer.print(delta);
                 writer.flush();
             };
+            // M-Langfuse: opt-in OTLP wiring. Done BEFORE createSession so the
+            // resulting tracer can stamp every span with this REPL invocation's
+            // session id — without it, Langfuse displays each chat turn as an
+            // unrelated trace and has no way to roll them up.
+            io.kairo.api.tracing.Tracer cliTracer = null;
+            String cliSessionId = "repl-" + java.util.UUID.randomUUID();
+            if (System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != null) {
+                try {
+                    if (System.getenv("OTEL_SERVICE_NAME") == null) {
+                        System.setProperty("otel.service.name", "kairo-code");
+                    }
+                    io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk
+                            .initialize();
+                    cliTracer = new io.kairo.code.core.observability.SessionAwareTracer(
+                            io.kairo.observability.OTelTracerFactory.create(),
+                            cliSessionId,
+                            System.getProperty("user.name"));
+                    log.info(
+                            "OTLP exporter initialized → {} (session={})",
+                            System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+                            cliSessionId);
+                } catch (Throwable t) {
+                    log.warn("Failed to initialize OTLP SDK: {}", t.getMessage());
+                }
+            }
+
             CodeAgentFactory.SessionOptions baseOpts =
                     CodeAgentFactory.SessionOptions.empty()
                             .withApprovalHandler(approvalHandler)
@@ -310,6 +336,9 @@ public class ReplLoop {
                             .withTurnMetricsCollector(turnMetrics)
                             .withMemoryStore(memoryStore)
                             .asReplSession();
+            if (cliTracer != null) {
+                baseOpts = baseOpts.withTracer(cliTracer);
+            }
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
             // Build SwarmCoordinator on demand for :expert / :team / :swarm. Wired here at
@@ -337,24 +366,10 @@ public class ReplLoop {
                 log.warn("Failed to wire AgentMetrics: {}", t.getMessage());
             }
 
-            // M-GA5: opt-in OTLP export. When OTEL_EXPORTER_OTLP_ENDPOINT is set, the SDK
-            // auto-configures and registers as GlobalOpenTelemetry; OTelTracerFactory.create()
-            // picks it up. Without the env var, returns NoopTracer — zero cost. Service name
-            // defaults to "kairo-code" if OTEL_SERVICE_NAME is unset.
-            if (System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != null) {
-                try {
-                    if (System.getenv("OTEL_SERVICE_NAME") == null) {
-                        System.setProperty("otel.service.name", "kairo-code");
-                    }
-                    io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk
-                            .initialize();
-                    log.info(
-                            "OTLP exporter initialized → {}",
-                            System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"));
-                } catch (Throwable t) {
-                    log.warn("Failed to initialize OTLP SDK: {}", t.getMessage());
-                }
-            }
+            // (OTLP exporter init moved above createSession so the resulting
+            //  Tracer can be wrapped in SessionAwareTracer + passed via
+            //  withTracer. Tools / iterations / agent.run now all carry
+            //  langfuse.session.id pointing at the REPL invocation.)
 
             // Bootstrap upstream kairo-evolution LifecycleCuratorDaemon. Non-destructive
             // skill curation: ACTIVE → STALE → ARCHIVED based on usage telemetry. Lazy-start —

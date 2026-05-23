@@ -269,7 +269,13 @@ public class AgentService implements DisposableBean, InitializingBean {
                     .withApprovalHandler(approvalHandler)
                     .withHooks(List.of(bridgeHook, compactionHook, planHook));
             if (tracer != null) {
-                opts = opts.withTracer(tracer);
+                // Wrap so every span carries session.id + langfuse.session.id +
+                // langfuse.user.id. Without this Langfuse can't group multi-turn
+                // chats into one Session view — was the #1 user pain on the
+                // existing OTLP integration.
+                opts = opts.withTracer(
+                        new io.kairo.code.core.observability.SessionAwareTracer(
+                                tracer, sessionId, workspaceId));
             }
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts);
 
@@ -916,7 +922,14 @@ public class AgentService implements DisposableBean, InitializingBean {
         }
         boolean stale = !java.util.Objects.equals(current.apiKey(), defaults.apiKey())
                 || !java.util.Objects.equals(current.baseUrl(), defaults.baseUrl())
-                || !java.util.Objects.equals(current.modelName(), defaults.modelName());
+                || !java.util.Objects.equals(current.modelName(), defaults.modelName())
+                // thinkingBudget moves through CodeAgentConfig into the
+                // AnthropicProvider extended-thinking request param. Without
+                // it in the staleness check, changing thinkingBudget alone
+                // silently no-ops (Settings save persists fine but next chat
+                // still uses the old budget). Including it here pulls in the
+                // rebuild path so the new budget actually wires through.
+                || !java.util.Objects.equals(current.thinkingBudget(), defaults.thinkingBudget());
         if (!stale) {
             return entry;
         }
@@ -949,23 +962,39 @@ public class AgentService implements DisposableBean, InitializingBean {
     
         Sinks.Many<AgentEvent> sink = eventSinks.get(entry.sessionId());
         WebSocketApprovalHandler approvalHandler = entry.approvalHandler();
+        String sid = entry.sessionId();
+        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sid);
+        if (phaseRef == null) {
+            phaseRef = new AtomicReference<>(SessionPhase.IDLE);
+            sessionPhases.put(sid, phaseRef);
+        }
+
         AgentEventBridgeHook bridgeHook = new AgentEventBridgeHook(
-                sink, entry.sessionId(), approvalHandler.announcedToolCallIds(), rebuilt.workingDir(),
-                progressTrackers.get(entry.sessionId()), diagnosticsTrackerFor(entry.sessionId()));
-        ContextCompactionHook compactionHook = buildCompactionHook(sink, entry.sessionId());
-    
+                sink, sid, approvalHandler.announcedToolCallIds(), rebuilt.workingDir(),
+                progressTrackers.get(sid), diagnosticsTrackerFor(sid));
+        ContextCompactionHook compactionHook = buildCompactionHook(sink, sid);
+        // Plan-pending intercept hook MUST be on the rebuilt session too. Without it,
+        // exit_plan_mode tool calls don't transition the session into PLAN_PENDING —
+        // the user loses the second-pass approval gate and the agent free-runs after
+        // any post-rebuild plan. Tracked as P1-5 follow-up to the chat-path audit.
+        PlanPendingInterceptHook planHook = new PlanPendingInterceptHook(
+                sink, sid, rebuilt.workingDir(), phaseRef,
+                overview -> planOverviews.put(sid, overview),
+                () -> persistPhase(rebuilt.workingDir(), SessionPhase.PLAN_PENDING));
+
         SessionOptions opts = SessionOptions.empty()
                 .asReplSession()
                 .withApprovalHandler(approvalHandler)
-                .withHooks(List.of(bridgeHook, compactionHook));
+                .withHooks(List.of(bridgeHook, compactionHook, planHook));
         if (tracer != null) {
-            opts = opts.withTracer(tracer);
+            // Same session-id stamping as createSession — see Langfuse rationale there.
+            opts = opts.withTracer(
+                    new io.kairo.code.core.observability.SessionAwareTracer(
+                            tracer, sid, entry.workspaceId()));
         }
-    
+
         try {
             CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts);
-            String sid = entry.sessionId();
-            AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sid);
             Consumer<SessionPhase> persistPhaseFn = "experts".equals(entry.sessionMode())
                     ? p -> persistPhase(rebuilt.workingDir(), p)
                     : p -> {};
