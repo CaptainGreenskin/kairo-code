@@ -12,5 +12,8 @@ data:
   # Session reaper TTL — sessions with no chat activity for this many minutes
   # get evicted by the background reaper. Default 60 min.
   KAIRO_CODE_SESSION_IDLE_TTL_MINUTES: "60"
-  # Note: KAIRO_SESSION_POOL_SIZE (max concurrent sessions) is NOT yet enforced
-  # — see issue #M-SessionPool. The reaper does TTL eviction only.
+  # Max concurrent sessions. Past this cap, createSession evicts the
+  # least-recently-active idle session before accepting the new one
+  # (LRU). Running sessions are never evicted — overflow is preferred
+  # over killing in-flight tool calls. Default 64.
+  KAIRO_CODE_SESSION_POOL_SIZE: "64"

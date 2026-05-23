@@ -81,6 +81,9 @@ class IdleSessionReaperTest {
 
     @Test
     void stressOneHundredSessionsThenReapAll() throws Exception {
+        // Bump cap above the test load — capacity LRU eviction would otherwise
+        // truncate to the default 64 before we get a chance to reap.
+        setPoolCap(200);
         for (int i = 0; i < 100; i++) {
             String id = service.createSession(config("s-" + i));
             backdate(id, TimeUnit.HOURS.toNanos(1));
@@ -121,6 +124,53 @@ class IdleSessionReaperTest {
 
         service.destroySession(sid);
         assertThat(activity).doesNotContainKey(sid);
+    }
+
+    @Test
+    void poolCapEvictsLruWhenAtCapacity() throws Exception {
+        // Set cap to 3 via reflection on the final field — cleaner than fooling
+        // with env vars in the test JVM. The static reaper threads aren't
+        // affected (this test uses manual reap, not the scheduled tick).
+        setPoolCap(3);
+
+        String a = service.createSession(config("a"));
+        backdate(a, java.util.concurrent.TimeUnit.MINUTES.toNanos(10));
+        String b = service.createSession(config("b"));
+        backdate(b, java.util.concurrent.TimeUnit.MINUTES.toNanos(5));
+        String c = service.createSession(config("c"));   // most recent
+        assertThat(service.listSessions()).hasSize(3);
+
+        // Cap is 3 — next createSession should evict the LRU (which is 'a').
+        String d = service.createSession(config("d"));
+        assertThat(service.listSessions())
+                .as("'a' (oldest activity) should have been evicted to fit 'd'")
+                .extracting(SessionInfo::sessionId)
+                .containsExactlyInAnyOrder(b, c, d);
+    }
+
+    @Test
+    void poolCapSkipsRunningSessions() throws Exception {
+        // When every candidate eviction target is running, the cap becomes
+        // best-effort — we don't kill an in-flight tool call to make room.
+        setPoolCap(2);
+
+        String r1 = service.createSession(config("r1"));
+        backdate(r1, java.util.concurrent.TimeUnit.MINUTES.toNanos(10));
+        markRunning(r1);
+        String r2 = service.createSession(config("r2"));
+        backdate(r2, java.util.concurrent.TimeUnit.MINUTES.toNanos(5));
+        markRunning(r2);
+
+        // Cap=2, both at cap, both running. New session should still slip in
+        // (we'd rather temporarily overflow than kill in-flight work).
+        String r3 = service.createSession(config("r3"));
+        assertThat(service.listSessions())
+                .as("no eviction when every candidate is running")
+                .hasSize(3);
+    }
+
+    private void setPoolCap(int cap) {
+        service.setSessionPoolSizeForTesting(cap);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

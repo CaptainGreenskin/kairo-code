@@ -82,6 +82,21 @@ public class AgentService implements DisposableBean, InitializingBean {
     private final long idleTtlMillis = resolveIdleTtlMillis();
     /** How often the reaper wakes up. 1/10 of TTL, bounded to keep tests reasonable. */
     private final long reaperPeriodMillis = Math.max(1_000L, Math.min(idleTtlMillis / 10, 60_000L));
+    /**
+     * Max concurrent sessions. Reads {@code KAIRO_CODE_SESSION_POOL_SIZE} (default 64).
+     * Past this cap, createSession evicts the least-recently-active session before
+     * accepting the new one — mirrors the LRU policy the upstream AgentSessionPool
+     * uses. The active session itself is always safe (touched on the same call).
+     *
+     * <p>Non-final so tests can override via {@link #setSessionPoolSizeForTesting(int)}.
+     * Production code never mutates it after construction.
+     */
+    private volatile int sessionPoolSize = resolveSessionPoolSize();
+
+    /** Test-only — production should not call this. */
+    void setSessionPoolSizeForTesting(int cap) {
+        this.sessionPoolSize = cap;
+    }
 
     private static long resolveIdleTtlMillis() {
         String env = System.getenv("KAIRO_CODE_SESSION_IDLE_TTL_MINUTES");
@@ -92,6 +107,17 @@ public class AgentService implements DisposableBean, InitializingBean {
             return TimeUnit.MINUTES.toMillis(mins);
         } catch (NumberFormatException ignored) {
             return TimeUnit.MINUTES.toMillis(60);
+        }
+    }
+
+    private static int resolveSessionPoolSize() {
+        String env = System.getenv("KAIRO_CODE_SESSION_POOL_SIZE");
+        if (env == null || env.isBlank()) return 64;
+        try {
+            int v = Integer.parseInt(env.trim());
+            return v > 0 ? v : 64;
+        } catch (NumberFormatException ignored) {
+            return 64;
         }
     }
 
@@ -193,6 +219,11 @@ public class AgentService implements DisposableBean, InitializingBean {
         if ("chat".equals(normalizedMode)) {
             normalizedMode = "agent";
         }
+
+        // Enforce the LRU cap BEFORE we allocate a new sessionId — bursty
+        // traffic (50 users hitting the server at once) used to grow the map
+        // unboundedly because TTL eviction is asynchronous.
+        evictLruIfFull();
 
         String sessionId = UUID.randomUUID().toString();
 
@@ -1264,6 +1295,39 @@ public class AgentService implements DisposableBean, InitializingBean {
     /** Visible for testing — bypass the @PostConstruct so tests can drive reap manually. */
     long idleTtlMillis() {
         return idleTtlMillis;
+    }
+
+    /** Visible for testing. */
+    int sessionPoolSize() {
+        return sessionPoolSize;
+    }
+
+    /**
+     * If the session map is at capacity, evict the least-recently-active idle
+     * session to make room. Running sessions are never evicted — a long bash
+     * tool needs to finish even if it pushes us over the cap. If every session
+     * is running, this becomes a no-op and createSession continues; the
+     * pool-size guarantee is best-effort under contention.
+     *
+     * <p>Visible for testing.
+     */
+    void evictLruIfFull() {
+        if (sessions.size() < sessionPoolSize) return;
+        String victim = null;
+        long victimNs = Long.MAX_VALUE;
+        for (Map.Entry<String, AtomicLong> e : lastActivityNs.entrySet()) {
+            AtomicBoolean running = runningState.get(e.getKey());
+            if (running != null && running.get()) continue;
+            long ts = e.getValue().get();
+            if (ts < victimNs) {
+                victimNs = ts;
+                victim = e.getKey();
+            }
+        }
+        if (victim != null) {
+            log.info("Session pool at cap ({}), evicting LRU session {}", sessionPoolSize, victim);
+            destroySession(victim);
+        }
     }
 
     /** Visible for testing — register an entry in the activity tracker. */
