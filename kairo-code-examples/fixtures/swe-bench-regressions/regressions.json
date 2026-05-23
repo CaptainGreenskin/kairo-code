@@ -1,0 +1,28 @@
+{
+  "$schema": "./regressions.schema.json",
+  "description": "Stable SWE-bench Verified instances where kairo-code currently produces NO patch. Tracked as known-failures so we can: (a) prove a regression introduced after a fix, (b) measure when a future model / hook change converts them to passing.",
+  "source_eval_run": "kairo-code-eval results-v10-10 (2026-05-23)",
+  "as_of": "2026-05-23",
+  "fixtures": [
+    {
+      "instance_id": "pytest-dev__pytest-5787",
+      "repo": "pytest-dev/pytest",
+      "subset": "SWE-bench_Verified",
+      "current_status": "completed",
+      "current_patch_lines": 0,
+      "elapsed_seconds_last_run": 38,
+      "failure_mode": "agent exited cleanly after ~38s but produced no diff. Short elapsed time suggests early-stop in plan/exploration phase without ever calling a write tool — the no_progress / repeating_action loop detector (RichLoopDetectorHook) added in M-EV6 should catch this on the next eval run.",
+      "expected_resolution": "RichLoopDetectorHook → injected coaching hint at turn 10 → agent attempts a fix"
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-8548",
+      "repo": "sphinx-doc/sphinx",
+      "subset": "SWE-bench_Verified",
+      "current_status": "completed",
+      "current_patch_lines": 0,
+      "elapsed_seconds_last_run": 3077,
+      "failure_mode": "ran for ~51 min before clean exit with no diff. Classic long-loop case — agent explored extensively (likely repeating_action or context_explosion) and never committed to a fix. The 5-pattern detector should intervene well before the 3000s mark.",
+      "expected_resolution": "RichLoopDetectorHook fires within first ~20 turns (well under 51 min) → forces agent to attempt the smallest viable fix"
+    }
+  ]
+}

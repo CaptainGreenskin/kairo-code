@@ -62,6 +62,29 @@ public final class SessionMetricsCollector {
         hookInterventions.computeIfAbsent(hookName, k -> new AtomicInteger(0)).incrementAndGet();
     }
 
+    /** Immutable snapshot of tool-call counts. */
+    public Map<String, Integer> toolCallCountsSnapshot() {
+        Map<String, Integer> out = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, AtomicInteger> e : toolCallCounts.entrySet()) {
+            out.put(e.getKey(), e.getValue().get());
+        }
+        return out;
+    }
+
+    /** Iterations where the model produced no tool calls. */
+    public int iterationsWithoutToolsCount() {
+        return iterationsWithoutTools.get();
+    }
+
+    /** Immutable snapshot of hook intervention counts. */
+    public Map<String, Integer> hookInterventionsSnapshot() {
+        Map<String, Integer> out = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, AtomicInteger> e : hookInterventions.entrySet()) {
+            out.put(e.getKey(), e.getValue().get());
+        }
+        return out;
+    }
+
     /**
      * Returns file reads that occurred >= 2 times, sorted by count descending.
      */

@@ -42,4 +42,24 @@ public class SessionController {
         agentService.stopAgent(sessionId);
         return ResponseEntity.noContent().build();
     }
+
+    /**
+     * Live mid-session metrics — schema mirrors {@code KAIRO_SESSION_RESULT.json}
+     * so {@code kairo-code-eval} (the external-runner harness) and any other
+     * REST client speak the same shape regardless of CLI vs web mode.
+     *
+     * <p>404 when the session id is unknown. 200 with empty maps when the
+     * session exists but didn't auto-register a SessionMetricsCollector
+     * (legacy REPL paths only — production WS / HTTP sessions always do).
+     *
+     * GET /api/sessions/{sessionId}/metrics
+     */
+    @GetMapping("/{sessionId}/metrics")
+    public ResponseEntity<AgentService.SessionMetricsSnapshot> metrics(@PathVariable String sessionId) {
+        AgentService.SessionMetricsSnapshot snapshot = agentService.getSessionMetrics(sessionId);
+        if (snapshot == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(snapshot);
+    }
 }

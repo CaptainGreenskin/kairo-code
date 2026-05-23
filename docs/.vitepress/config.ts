@@ -58,6 +58,7 @@ export default defineConfig({
         { text: 'Commands reference', link: '/reference/commands' },
         { text: 'Tools reference', link: '/reference/tools' },
         { text: 'Environment variables', link: '/reference/env' },
+        { text: 'External runner protocol', link: '/reference/external-runner-protocol' },
         { text: 'M3 Task tool demo', link: '/m3-task-tool-demo' },
       ],
     },

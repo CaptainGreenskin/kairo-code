@@ -1438,6 +1438,73 @@ public class AgentService implements DisposableBean, InitializingBean {
     }
 
     /**
+     * Mid-session metrics snapshot: tool call counts, redundant file reads,
+     * iterations without tools, hook interventions, plus best-effort
+     * {@code tokensUsed} / {@code iterations} / {@code durationMillis}.
+     *
+     * <p>Returns {@code null} when the session is unknown. Returns an
+     * "empty" snapshot when the session exists but had no
+     * {@code SessionMetricsCollector} registered (e.g. legacy REPL paths
+     * — see {@link CodeAgentFactory}: collector is auto-registered only
+     * for non-REPL sessions, i.e. all WebSocket / HTTP sessions).
+     *
+     * <p>Mirrors the schema written to {@code KAIRO_SESSION_RESULT.json}
+     * by {@code SessionResultWriterHook} so the external-runner protocol
+     * (CLI batch mode) and REST polling (web mode) speak the same shape.
+     */
+    public SessionMetricsSnapshot getSessionMetrics(String sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) {
+            return null;
+        }
+        io.kairo.code.core.hook.SessionMetricsCollector collector = null;
+        try {
+            collector = entry.session().sessionMetricsCollector();
+        } catch (RuntimeException ignored) {
+            // sessionMetricsCollector() may throw if the agent isn't a CodeAgentSession-backed payload.
+        }
+
+        Map<String, Integer> toolCallCounts = Map.of();
+        List<Map<String, Object>> redundantReads = List.of();
+        int iterationsNoTool = 0;
+        if (collector != null) {
+            toolCallCounts = collector.toolCallCountsSnapshot();
+            redundantReads = collector.redundantReads().stream()
+                    .map(e -> Map.<String, Object>of("file", e.getKey(), "count", e.getValue()))
+                    .toList();
+            iterationsNoTool = collector.iterationsWithoutToolsCount();
+        }
+
+        // tokensUsed / iterations are owned by the agent runtime. AgentDiagnostics
+        // doesn't yet expose those, so we report 0 mid-session until the runtime
+        // surfaces them — KAIRO_SESSION_RESULT.json fills them on SESSION_END.
+        long durationMs = Math.max(0, System.currentTimeMillis() - entry.createdAt());
+
+        return new SessionMetricsSnapshot(
+                sessionId,
+                /*tokensUsed=*/ 0,
+                /*iterations=*/ 0,
+                durationMs,
+                iterationsNoTool,
+                toolCallCounts,
+                redundantReads);
+    }
+
+    /**
+     * Per-session metrics snapshot. Schema mirrors {@code KAIRO_SESSION_RESULT.json}
+     * so {@code kairo-code-eval}'s {@code AgentRunner.read_session_result} can
+     * consume either source interchangeably.
+     */
+    public record SessionMetricsSnapshot(
+            String sessionId,
+            long tokensUsed,
+            int iterations,
+            long durationMillis,
+            int iterationsWithoutTools,
+            Map<String, Integer> toolCallCounts,
+            List<Map<String, Object>> redundantReads) {}
+
+    /**
      * Get-or-create the diagnostics tracker for a session. Used by {@link AgentEventBridgeHook}
      * via the wiring layer so each emitted event can update its counters.
      */

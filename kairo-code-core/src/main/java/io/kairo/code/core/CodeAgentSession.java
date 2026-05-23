@@ -1,6 +1,7 @@
 package io.kairo.code.core;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.code.core.hook.SessionMetricsCollector;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.core.tool.DefaultToolExecutor;
@@ -23,6 +24,9 @@ import java.util.Set;
  * @param mcpRegistry MCP client registry for querying server info (null if no MCP servers configured)
  * @param toolUsageTracker tracks per-tool call counts, success rates, and durations
  * @param turnMetricsCollector tracks per-turn tool call counts, success rates, and durations
+ * @param sessionMetricsCollector mid-session tool/file/iteration counters (powers
+ *     {@code KAIRO_SESSION_RESULT.json} and the {@code /api/sessions/{id}/metrics}
+ *     endpoint); null only for legacy REPL-construction paths that pre-date metrics
  */
 public record CodeAgentSession(
         Agent agent,
@@ -31,7 +35,8 @@ public record CodeAgentSession(
         Set<String> loadedSkills,
         McpClientRegistry mcpRegistry,
         ToolUsageTracker toolUsageTracker,
-        TurnMetricsCollector turnMetricsCollector) {
+        TurnMetricsCollector turnMetricsCollector,
+        SessionMetricsCollector sessionMetricsCollector) {
 
     public CodeAgentSession(
             Agent agent,
@@ -39,7 +44,7 @@ public record CodeAgentSession(
             DefaultToolRegistry toolRegistry,
             Set<String> loadedSkills) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, null,
-                new ToolUsageTracker(), new TurnMetricsCollector());
+                new ToolUsageTracker(), new TurnMetricsCollector(), null);
     }
 
     public CodeAgentSession(
@@ -49,7 +54,20 @@ public record CodeAgentSession(
             Set<String> loadedSkills,
             McpClientRegistry mcpRegistry) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
-                new ToolUsageTracker(), new TurnMetricsCollector());
+                new ToolUsageTracker(), new TurnMetricsCollector(), null);
+    }
+
+    /** Legacy 7-arg constructor (pre-sessionMetricsCollector) preserved for callers. */
+    public CodeAgentSession(
+            Agent agent,
+            DefaultToolExecutor toolExecutor,
+            DefaultToolRegistry toolRegistry,
+            Set<String> loadedSkills,
+            McpClientRegistry mcpRegistry,
+            ToolUsageTracker toolUsageTracker,
+            TurnMetricsCollector turnMetricsCollector) {
+        this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
+                toolUsageTracker, turnMetricsCollector, null);
     }
 
     public CodeAgentSession {
@@ -59,5 +77,6 @@ public record CodeAgentSession(
         loadedSkills = loadedSkills == null ? Set.of() : Set.copyOf(loadedSkills);
         if (toolUsageTracker == null) toolUsageTracker = new ToolUsageTracker();
         if (turnMetricsCollector == null) turnMetricsCollector = new TurnMetricsCollector();
+        // sessionMetricsCollector intentionally nullable — REPL paths don't auto-register it
     }
 }

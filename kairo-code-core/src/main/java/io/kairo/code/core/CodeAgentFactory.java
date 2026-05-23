@@ -28,6 +28,7 @@ import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.MissingTestHintHook;
 import io.kairo.code.core.hook.NoWriteDetectedHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
+import io.kairo.code.core.hook.RichLoopDetectorHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
 import io.kairo.code.core.hook.RepetitiveToolHook;
@@ -368,6 +369,10 @@ public final class CodeAgentFactory {
 
         // Auto-register PlanWithoutActionHook: detects plan-only responses (todo_write without
         // implementation tools) and injects a corrective message. Disabled in REPL mode.
+        // Survives the non-REPL block so the constructor at the bottom can pass it
+        // into CodeAgentSession. Null for REPL sessions (no SessionMetricsHook registered).
+        SessionMetricsCollector sessionMetrics = null;
+
         if (!options.isRepl()) {
             TurnMetricsCollector metrics = findTurnMetricsCollector(hooks);
             if (metrics != null) {
@@ -404,6 +409,13 @@ public final class CodeAgentFactory {
             // and reminds the agent to run the full mvn test suite. Non-REPL only.
             builder.hook(new FullTestSuiteHook());
 
+            // Auto-register RichLoopDetectorHook: 5-pattern OpenHands-style detector
+            // (repeating-action / alternating / no-progress / context-explosion).
+            // Ported from kairo-code-eval after watching eval runs burn budgets on
+            // doom loops the existing RepetitiveToolHook didn't catch. Fires ONE
+            // coaching message per session; KAIRO_CODE_LOOP_DETECTOR=off disables.
+            builder.hook(new RichLoopDetectorHook(false));
+
             // Auto-register UnfulfilledInstructionHook: scans task for "Create ...Test.java"
             // requirements and injects a reminder if the files don't exist yet. Non-REPL only.
             String wd = config.workingDir();
@@ -414,8 +426,12 @@ public final class CodeAgentFactory {
             // Auto-register SessionMetricsCollector + SessionMetricsHook: tracks tool call
             // distribution, redundant file reads, idle iterations, and hook interventions.
             // Non-REPL only.
-            SessionMetricsCollector metricsCollector = new SessionMetricsCollector();
-            builder.hook(new SessionMetricsHook(metricsCollector));
+            // Renamed from local `metricsCollector` so it doesn't shadow the
+            // TurnMetricsCollector lookup at the end of this method. The reference is
+            // also passed to CodeAgentSession so AgentService / REST / dispatcher can
+            // read live mid-session metrics without waiting for SESSION_END.
+            sessionMetrics = new SessionMetricsCollector();
+            builder.hook(new SessionMetricsHook(sessionMetrics));
 
             // Auto-register ExecutionTraceHook: writes per-phase JSONL events to
             // .kairo-trace/session-{ts}.jsonl for agent self-reflection. Non-REPL only.
@@ -426,7 +442,7 @@ public final class CodeAgentFactory {
             // Auto-register SessionResultWriterHook: writes KAIRO_SESSION_RESULT.json on session
             // end so the dispatcher can machine-read the outcome. Enriched with metrics.
             if (wd != null && !wd.isBlank()) {
-                builder.hook(new SessionResultWriterHook(Path.of(wd), metricsCollector));
+                builder.hook(new SessionResultWriterHook(Path.of(wd), sessionMetrics));
             }
 
             // Auto-register CheckpointWriterHook: persists conversation history to
@@ -468,8 +484,10 @@ public final class CodeAgentFactory {
 
         Agent agent = builder.build();
         ToolUsageTracker tracker = findToolUsageTracker(hooks);
-        TurnMetricsCollector metricsCollector = findTurnMetricsCollector(hooks);
-        return new CodeAgentSession(agent, executor, registry, activeSkills, mcpRegistry, tracker, metricsCollector);
+        TurnMetricsCollector turnMetrics = findTurnMetricsCollector(hooks);
+        return new CodeAgentSession(
+                agent, executor, registry, activeSkills, mcpRegistry,
+                tracker, turnMetrics, sessionMetrics);
     }
 
     /**
