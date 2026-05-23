@@ -15,19 +15,26 @@ public class ServerConfig {
 
     private static final Logger log = LoggerFactory.getLogger(ServerConfig.class);
 
+    // Built-in defaults — only applied if neither env nor config.properties set a value.
+    // Default sentinels live here (not in @Value) so resolve() can tell "user set it" apart
+    // from "Spring filled in the fallback".
+    private static final String DEFAULT_PROVIDER = "openai";
+    private static final String DEFAULT_MODEL = "gpt-4o";
+    private static final String DEFAULT_BASE_URL = "https://api.openai.com";
+
     @Value("${kairo.code.working-dir}")
     private String workingDir;
 
     @Value("${kairo.code.api-key:}")
     private String apiKey;
 
-    @Value("${kairo.code.model:gpt-4o}")
+    @Value("${kairo.code.model:}")
     private String model;
 
-    @Value("${kairo.code.provider:openai}")
+    @Value("${kairo.code.provider:}")
     private String provider;
 
-    @Value("${kairo.code.base-url:https://api.openai.com}")
+    @Value("${kairo.code.base-url:}")
     private String baseUrl;
 
     @Value("${kairo.code.thinking-budget:#{null}}")
@@ -62,13 +69,12 @@ public class ServerConfig {
     public ServerProperties serverProperties() {
         Map<String, String> persisted = configPersistenceService.load();
 
-        // Env vars (from @Value) take precedence over persisted config.
-        // For each field: if the @Value resolved to a non-default/non-empty value, use it.
-        // Otherwise, fall back to persisted value.
-        String resolvedApiKey = resolve("apiKey", apiKey, persisted);
-        String resolvedModel = resolve("model", model, persisted);
-        String resolvedProvider = resolve("provider", provider, persisted);
-        String resolvedBaseUrl = resolve("baseUrl", baseUrl, persisted);
+        // Precedence: env (@Value) > config.properties > built-in default.
+        // @Value defaults are empty so a missing env var falls through to persisted.
+        String resolvedApiKey = orDefault(resolve("apiKey", apiKey, persisted), "");
+        String resolvedModel = orDefault(resolve("model", model, persisted), DEFAULT_MODEL);
+        String resolvedProvider = orDefault(resolve("provider", provider, persisted), DEFAULT_PROVIDER);
+        String resolvedBaseUrl = orDefault(resolve("baseUrl", baseUrl, persisted), DEFAULT_BASE_URL);
         String resolvedWorkingDir = resolve("workingDir", workingDir, persisted);
         Integer resolvedThinkingBudget = resolveThinkingBudget(thinkingBudget, persisted);
 
@@ -98,6 +104,10 @@ public class ServerConfig {
         }
         String persistedValue = persisted.get(key);
         return persistedValue != null ? persistedValue : "";
+    }
+
+    private String orDefault(String value, String fallback) {
+        return StringUtils.hasText(value) ? value : fallback;
     }
 
     private Integer resolveThinkingBudget(Integer envValue, Map<String, String> persisted) {

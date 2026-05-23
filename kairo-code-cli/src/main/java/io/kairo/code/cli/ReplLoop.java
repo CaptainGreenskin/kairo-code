@@ -5,6 +5,7 @@ import io.kairo.api.agent.SnapshotStore;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.skill.SkillRegistry;
+import io.kairo.code.core.config.ConfigLoader;
 import io.kairo.code.cli.commands.ClearCommand;
 import io.kairo.code.cli.commands.CompactCommand;
 import io.kairo.code.cli.commands.CostCommand;
@@ -50,7 +51,19 @@ import io.kairo.code.cli.hooks.ShellHookListener;
 import io.kairo.code.cli.task.ConsoleWorktreeMergePrompter;
 import io.kairo.code.cli.task.ReplChildSessionSpawner;
 import io.kairo.code.core.CodeAgentConfig;
+import io.kairo.api.cron.CronScheduler;
 import io.kairo.code.core.CodeAgentFactory;
+import io.kairo.code.core.team.ExpertTeamFactory;
+import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.api.lsp.LspService;
+import io.kairo.core.health.AgentCallObserver;
+import io.kairo.evolution.curator.FileSkillTelemetryStore;
+import io.kairo.evolution.curator.LifecycleCuratorDaemon;
+import io.kairo.lsp.DefaultLspService;
+import io.kairo.lsp.registry.DefaultLanguageServerRegistry;
+import io.kairo.observability.AgentMetrics;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.ConsoleApprovalHandler;
 import io.kairo.code.core.task.TaskToolDependencies;
@@ -118,7 +131,7 @@ public class ReplLoop {
     private final AgentEventPrinter eventPrinter;
     private SkillHotReloadWatcher hotReloadWatcher;
     private final Map<String, String> skillSources = new ConcurrentHashMap<>();
-    private io.kairo.code.core.plugin.PluginRegistry pluginRegistry;
+    private io.kairo.api.plugin.PluginManager pluginManager;
 
     public ReplLoop(CodeAgentConfig config, List<Object> hooks) {
         this(config, hooks, null, true);
@@ -299,6 +312,67 @@ public class ReplLoop {
                             .asReplSession();
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
+            // Build SwarmCoordinator on demand for :expert / :team / :swarm. Wired here at
+            // REPL bootstrap so the commands aren't dead — without this every team command
+            // reports "kairo-expert-team not on classpath" even though the jar IS resolved.
+            // Build failures are non-fatal: the commands fall back to the same "unavailable"
+            // message they showed before.
+            SwarmCoordinator swarmCoordinator = buildSwarmCoordinator(config);
+
+            // Bootstrap kairo-cron. Scheduler is created lazily-started: tasks survive across
+            // restarts via the on-disk store, but the tick loop only runs after :cron start so a
+            // bare REPL session doesn't fire reminders unexpectedly. Fire callback is a stub
+            // logger for now — wiring fires into the agent loop is M-A4 follow-on.
+            CronScheduler cronScheduler = buildCronScheduler(kairoDir, writer);
+
+            // Bootstrap kairo-observability. SimpleMeterRegistry is in-process only (no exporter)
+            // — sufficient for CLI :metrics introspection. AgentMetrics registers Micrometer
+            // counters/timers and installs itself as the global AgentCallObserver so every
+            // agent.call() in the session is instrumented automatically.
+            MeterRegistry meterRegistry = new SimpleMeterRegistry();
+            try {
+                AgentMetrics agentMetrics = new AgentMetrics(meterRegistry);
+                AgentCallObserver.setGlobal(agentMetrics);
+            } catch (Throwable t) {
+                log.warn("Failed to wire AgentMetrics: {}", t.getMessage());
+            }
+
+            // M-GA5: opt-in OTLP export. When OTEL_EXPORTER_OTLP_ENDPOINT is set, the SDK
+            // auto-configures and registers as GlobalOpenTelemetry; OTelTracerFactory.create()
+            // picks it up. Without the env var, returns NoopTracer — zero cost. Service name
+            // defaults to "kairo-code" if OTEL_SERVICE_NAME is unset.
+            if (System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != null) {
+                try {
+                    if (System.getenv("OTEL_SERVICE_NAME") == null) {
+                        System.setProperty("otel.service.name", "kairo-code");
+                    }
+                    io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk
+                            .initialize();
+                    log.info(
+                            "OTLP exporter initialized → {}",
+                            System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"));
+                } catch (Throwable t) {
+                    log.warn("Failed to initialize OTLP SDK: {}", t.getMessage());
+                }
+            }
+
+            // Bootstrap upstream kairo-evolution LifecycleCuratorDaemon. Non-destructive
+            // skill curation: ACTIVE → STALE → ARCHIVED based on usage telemetry. Lazy-start —
+            // user opts in with :evolve curator start, mirroring the cron pattern. Self-built
+            // ReflectionPipeline / LearnedLessonStore continue to handle the strike-3 lesson
+            // workflow (different concern: post-failure lesson generation, not skill quality).
+            LifecycleCuratorDaemon curatorDaemon = buildCuratorDaemon(kairoDir);
+
+            // Bootstrap kairo-lsp. Lazy: subprocesses spawn only when a tool actually queries
+            // diagnostics for a file with a registered language server (Pyright, JDT_LS, gopls,
+            // etc). Wired here so :lsp commands AND WriteTool/EditTool's post-edit diagnostic
+            // callout (M-D1') have access. The JDT_LS server entry is the upstream
+            // contribution we pushed in M-D1.
+            LspService lspService = buildLspService();
+            // M-D1': install into LspServiceHolder so CodeAgentFactory's tool registry picks
+            // up the instance-form WriteTool/EditTool with LSP wiring.
+            io.kairo.code.core.LspServiceHolder.setGlobal(lspService);
+
             StreamingAgentRunner runner = new StreamingAgentRunner(writer, shellHookListener, hookExecutor);
             ReplContext context = new ReplContext(
                     session, config, lineReader, registry, writer,
@@ -315,7 +389,12 @@ public class ReplLoop {
                     hooksConfig,
                     skillSources,
                     memoryStore,
-                    sessionWriter);
+                    sessionWriter,
+                    swarmCoordinator,
+                    cronScheduler,
+                    meterRegistry,
+                    curatorDaemon,
+                    lspService);
             context.setRunner(runner);
 
             // Wire Ctrl+C signal handler: cancel agent if running, else no-op
@@ -514,8 +593,10 @@ public class ReplLoop {
         registry.register(new InitCommand());
         registry.register(new DoctorCommand());
         registry.register(new EvolveCommand());
-        registry.register(new PluginCommand(pluginRegistry));
+        registry.register(new PluginCommand(pluginManager));
         registry.register(new McpServerCommand());
+        registry.register(new io.kairo.code.cli.commands.CronCommand());
+        registry.register(new io.kairo.code.cli.commands.LspCommand());
 
         return registry;
     }
@@ -594,12 +675,16 @@ public class ReplLoop {
     }
 
     private void discoverPlugins() {
+        // M-C2 migration: self-built PluginRegistry replaced by upstream
+        // io.kairo.plugin.DefaultPluginManager (gains GitHub / NPM / Git source fetchers,
+        // Claude-Code-compatible plugin.json format, atomic component registration).
         Path globalKairoDir = Path.of(System.getProperty("user.home"), KAIRO_CODE_DIR);
-        Path projectKairoDir = config.workingDir() != null && !config.workingDir().isBlank()
-                ? Path.of(config.workingDir(), KAIRO_CODE_DIR)
-                : Path.of(System.getProperty("user.dir"), KAIRO_CODE_DIR);
-        pluginRegistry = new io.kairo.code.core.plugin.PluginRegistry(projectKairoDir, globalKairoDir);
-        pluginRegistry.discover();
+        try {
+            pluginManager = io.kairo.code.core.plugin.PluginManagerFactory.create(globalKairoDir);
+        } catch (Exception e) {
+            log.warn("Failed to bootstrap upstream PluginManager: {}", e.getMessage());
+            pluginManager = null;
+        }
     }
 
     /**
@@ -612,8 +697,8 @@ public class ReplLoop {
                 ? Path.of(config.workingDir(), ".kairo-code", "skills")
                 : Path.of(System.getProperty("user.dir"), ".kairo-code", "skills");
 
-        java.util.List<Path> pluginSkillDirs = pluginRegistry != null
-                ? pluginRegistry.enabledSkillDirs() : java.util.List.of();
+        java.util.List<Path> pluginSkillDirs =
+                io.kairo.code.core.plugin.PluginManagerFactory.enabledSkillDirs(pluginManager);
         FsSkillLoader loader = new FsSkillLoader(globalDir, projectDir, pluginSkillDirs);
         for (SkillWithSource ws : loader.loadAll()) {
             registry.register(ws.skill());
@@ -671,5 +756,79 @@ public class ReplLoop {
             log.warn("Could not create {} directory: {}", dir, e.getMessage());
         }
         return dir;
+    }
+
+    /**
+     * Build a {@link SwarmCoordinator} for the :expert / :team / :swarm commands. Returns null
+     * if construction fails — the commands handle null gracefully by showing an unavailable
+     * message. Default worker pool size is 3, matching ExpertTeamFactory's intended use.
+     */
+    /**
+     * Bootstrap a {@link CronScheduler} backed by an on-disk task store under
+     * {@code <kairoDir>/cron/}. The scheduler is NOT started — users opt-in with {@code :cron
+     * start}, otherwise a fresh REPL session won't unexpectedly fire reminders left over from
+     * previous sessions. Returns null on failure so {@link commands.CronCommand} can fall back
+     * to an unavailable message.
+     */
+    private static CronScheduler buildCronScheduler(Path kairoDir, PrintWriter writer) {
+        try {
+            Path cronDir = kairoDir.resolve("cron");
+            Files.createDirectories(cronDir);
+            var store = new io.kairo.cron.CronTaskStore(cronDir);
+            io.kairo.api.cron.CronFireCallback callback = task -> {
+                // Stub: log fires until the agent-bridge lands (see M-A4 follow-on).
+                writer.println("[cron] fired task=" + task.id() + " prompt=" + task.prompt());
+                writer.flush();
+            };
+            return new io.kairo.cron.DefaultCronScheduler(
+                    store, callback, java.time.ZoneId.systemDefault());
+        } catch (Throwable t) {
+            log.warn("Failed to bootstrap CronScheduler: {}", t.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Bootstrap the upstream {@link LifecycleCuratorDaemon} backed by a file telemetry store
+     * under {@code <kairoDir>/curator/}. Daemon is NOT auto-started — user opts in with {@code
+     * :evolve curator start}.
+     */
+    /**
+     * Build a {@link LspService} pre-registered with the upstream built-in language servers
+     * (Pyright, TypeScript, gopls, rust-analyzer, clangd, jdtls). Subprocesses are NOT spawned
+     * here — the service lazily starts a server only when a tool first calls
+     * {@code snapshotBaseline}/{@code currentDiagnostics} on a file the registry can route.
+     */
+    private static LspService buildLspService() {
+        try {
+            var registry = new DefaultLanguageServerRegistry().registerBuiltIns();
+            return DefaultLspService.builder(registry).build();
+        } catch (Throwable t) {
+            log.warn("Failed to bootstrap LspService: {}", t.getMessage());
+            return null;
+        }
+    }
+
+    private static LifecycleCuratorDaemon buildCuratorDaemon(Path kairoDir) {
+        try {
+            Path curatorDir = kairoDir.resolve("curator");
+            Files.createDirectories(curatorDir);
+            FileSkillTelemetryStore store = new FileSkillTelemetryStore(curatorDir);
+            return new LifecycleCuratorDaemon(store);
+        } catch (Throwable t) {
+            log.warn("Failed to bootstrap LifecycleCuratorDaemon: {}", t.getMessage());
+            return null;
+        }
+    }
+
+    private static SwarmCoordinator buildSwarmCoordinator(CodeAgentConfig config) {
+        try {
+            var modelProvider =
+                    CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+            return ExpertTeamFactory.create(config, modelProvider, 3);
+        } catch (Throwable t) {
+            log.warn("Failed to bootstrap SwarmCoordinator: {}", t.getMessage());
+            return null;
+        }
     }
 }

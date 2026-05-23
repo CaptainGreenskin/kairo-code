@@ -16,11 +16,16 @@ kairo:
       tool-activity-lookback: 3
       min-tool-calls: 2
   code:
+    # Leave model/provider/base-url empty when no env var is set so the resolve
+    # chain in ServerConfig (env > ~/.kairo-code/config.properties > built-in default)
+    # actually sees "user didn't set this" and falls through to the config file.
+    # Filling in inline defaults here would make Spring hand ServerConfig a non-empty
+    # @Value, masking whatever the user wrote in config.properties.
     working-dir: ${KAIRO_WORKING_DIR:${user.home}/kairo-workspace}
     api-key: ${KAIRO_CODE_API_KEY:}
-    model: ${KAIRO_MODEL:gpt-4o}
-    provider: ${KAIRO_PROVIDER:openai}
-    base-url: ${KAIRO_BASE_URL:https://api.openai.com}
+    model: ${KAIRO_MODEL:}
+    provider: ${KAIRO_PROVIDER:}
+    base-url: ${KAIRO_BASE_URL:}
     # thinking-budget: ${KAIRO_THINKING_BUDGET:0}   # 0 = disabled; 8000+ for claude-3.7+
 
 management:

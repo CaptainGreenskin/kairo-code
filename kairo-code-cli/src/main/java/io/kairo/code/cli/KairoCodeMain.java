@@ -8,6 +8,7 @@ import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.code.core.CheckpointData;
 import io.kairo.code.core.CheckpointLoader;
+import io.kairo.code.core.config.ConfigLoader;
 import io.kairo.acp.server.AcpStdioServer;
 import io.kairo.acp.server.DefaultAcpAgent;
 import io.kairo.api.acp.AcpCapabilities;
@@ -83,7 +84,7 @@ public class KairoCodeMain implements Callable<Integer> {
     private boolean verbose;
 
     @Option(names = "--provider",
-            description = "Model API provider: openai (default), anthropic, qianwen",
+            description = "Model API provider: openai (default), anthropic, qianwen, glm",
             defaultValue = "openai")
     private String provider;
 
@@ -128,11 +129,11 @@ public class KairoCodeMain implements Callable<Integer> {
                             + " from stdin, writes responses + session/update notifications to"
                             + " stdout. Use this when an editor (Zed, OpenCode, ...) spawns"
                             + " kairo-code as a subprocess.")
-    private boolean acpServer;
+    boolean acpServer;
 
     private static final String DASHSCOPE_BASE_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1";
-    private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen");
+    private static final Set<String> VALID_PROVIDERS = Set.of("openai", "anthropic", "qianwen", "glm");
 
     /** Discipline prefix prepended to one-shot task prompts. */
     static final String ONE_SHOT_DISCIPLINE_PREFIX =
@@ -171,7 +172,7 @@ public class KairoCodeMain implements Callable<Integer> {
         }
         resolvedProvider = resolvedProvider.toLowerCase();
         if (!VALID_PROVIDERS.contains(resolvedProvider)) {
-            System.err.printf("Error: unknown provider '%s'. Valid: openai, anthropic, qianwen%n",
+            System.err.printf("Error: unknown provider '%s'. Valid: openai, anthropic, qianwen, glm%n",
                     resolvedProvider);
             return 1;
         }
@@ -302,6 +303,11 @@ public class KairoCodeMain implements Callable<Integer> {
      * (configured by SLF4J/Logback) so stdout remains a pure protocol stream.
      */
     private int runAcpServer(CodeAgentConfig config, ModelProvider modelProvider) {
+        // Fast-exit for test/validation: serve() blocks on stdin reading JSON-RPC frames forever
+        // and would hang surefire. Same dryrun gate that runOneShot uses.
+        if (Boolean.getBoolean("kairo.code.dryrun")) {
+            return 0;
+        }
         try {
             CodeAgentFactory.SessionOptions opts =
                     CodeAgentFactory.SessionOptions.empty().withModelProvider(modelProvider);

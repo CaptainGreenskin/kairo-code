@@ -1,6 +1,7 @@
 package io.kairo.code.server;
 
 import io.kairo.code.core.CodeAgentConfig;
+import io.kairo.code.server.config.ConfigPersistenceService;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.AgentService;
 import io.kairo.code.service.SessionInfo;
@@ -129,6 +130,20 @@ class ConfigControllerUpdateTest {
         @Bean
         io.kairo.code.service.concurrency.AgentConcurrencyController agentConcurrencyController() {
             return new io.kairo.code.service.concurrency.AgentConcurrencyController();
+        }
+
+        /**
+         * Redirect persistence at a throwaway file so the test never clobbers the
+         * developer's real ~/.kairo-code/config.properties. The default bean writes
+         * to that path — without this override, every run of this test corrupts
+         * the local CLI/web config (M-X7 fix).
+         */
+        @Bean
+        @Primary
+        ConfigPersistenceService throwawayConfigPersistence() throws java.io.IOException {
+            java.nio.file.Path tmp = java.nio.file.Files.createTempFile("kairo-code-test-config", ".properties");
+            tmp.toFile().deleteOnExit();
+            return new ConfigPersistenceService(tmp);
         }
     }
 }
