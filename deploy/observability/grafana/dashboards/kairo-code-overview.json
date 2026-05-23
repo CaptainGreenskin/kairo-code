@@ -1,0 +1,98 @@
+{
+  "title": "Kairo Code — Overview",
+  "uid": "kairo-code-overview",
+  "schemaVersion": 39,
+  "tags": ["kairo-code"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active sessions",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "kairo_session_active", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Sessions created (5m)",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "increase(kairo_session_created_total[5m])", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Tool errors (5m)",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(increase(kairo_tool_errors_total[5m]))", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Guardrail blocks (5m)",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(increase(kairo_guardrail_block_total[5m]))", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent call latency (p50/p95/p99)",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(kairo_agent_call_duration_seconds_bucket[5m])) by (le))", "refId": "p50", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(kairo_agent_call_duration_seconds_bucket[5m])) by (le))", "refId": "p95", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(kairo_agent_call_duration_seconds_bucket[5m])) by (le))", "refId": "p99", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool invocations per second (by tool)",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (tool_name) (rate(kairo_tool_invoke_duration_seconds_count[1m]))", "refId": "A", "legendFormat": "{{tool_name}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Idle-reaper evictions",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "increase(kairo_session_idle_evicted_total[5m])", "refId": "A" }
+      ],
+      "description": "Sessions removed by the background TTL reaper. Spikes correlate with users closing tabs after long-running tasks."
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool error rate by tool",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (tool_name) (rate(kairo_tool_errors_total[5m]))", "refId": "A", "legendFormat": "{{tool_name}}" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+# Local Grafana stack for observing kairo-code-server / kairo-code-cli.
+#
+# Usage:
+#   docker compose -f deploy/observability/docker-compose.otel.yml up -d
+#   export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+#   export OTEL_SERVICE_NAME=kairo-code-dev
+#   # run kairo-code as usual
+#   open http://localhost:3001   # Grafana, admin/admin
+#
+# Stop: `docker compose -f deploy/observability/docker-compose.otel.yml down`
+# Wipe volumes: append `-v`.
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    container_name: kairo-otel-collector
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+    ports:
+      - "4318:4318"   # OTLP HTTP — what kairo-code sends to
+      - "4317:4317"   # OTLP gRPC (optional)
+    depends_on: [tempo, prometheus]
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: kairo-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: kairo-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      # Lets prometheus scrape kairo-code-server running on the host
+      # (outside Docker) via host.docker.internal:8080.
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: kairo-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3001:3000"   # 3001 on host to avoid clashing with kairo-code-web
+    depends_on: [tempo, prometheus]
+
+volumes:
+  tempo-data:
+  prometheus-data:
+  grafana-data:

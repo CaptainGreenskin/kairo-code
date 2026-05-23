@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: kairo-code
+    orgId: 1
+    folder: Kairo Code
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
