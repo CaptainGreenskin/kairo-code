@@ -15,12 +15,16 @@ public class ServerConfig {
 
     private static final Logger log = LoggerFactory.getLogger(ServerConfig.class);
 
-    // Built-in defaults — only applied if neither env nor config.properties set a value.
-    // Default sentinels live here (not in @Value) so resolve() can tell "user set it" apart
-    // from "Spring filled in the fallback".
+    // Built-in default = the first provider in ProviderRegistry (openai). Defaults
+    // live in the registry so changing the canonical default (e.g. gpt-4o → gpt-5
+    // when OpenAI ships it) doesn't need a code change here. Sentinel lives here
+    // (not in @Value) so resolve() can tell "user set it" apart from "Spring
+    // filled in the fallback".
     private static final String DEFAULT_PROVIDER = "openai";
-    private static final String DEFAULT_MODEL = "gpt-4o";
-    private static final String DEFAULT_BASE_URL = "https://api.openai.com";
+    private static final String DEFAULT_MODEL =
+            io.kairo.code.core.config.ProviderRegistry.defaultModel(DEFAULT_PROVIDER);
+    private static final String DEFAULT_BASE_URL =
+            io.kairo.code.core.config.ProviderRegistry.resolveBaseUrl(DEFAULT_PROVIDER);
 
     @Value("${kairo.code.working-dir}")
     private String workingDir;

@@ -664,12 +664,10 @@ public final class CodeAgentFactory {
         if (envOverride != null && !envOverride.isBlank()) {
             return envOverride.trim();
         }
-        if (modelProvider != null) {
-            String providerClass = modelProvider.getClass().getName().toLowerCase();
-            if (providerClass.contains("anthropic")) {
-                return SYSTEM_PROMPT_CLAUDE_RESOURCE;
-            }
-        }
+        // Check modelName FIRST — model is the most specific signal of what
+        // capabilities the agent actually has. The previous order made
+        // AnthropicProvider class beat a glm-* modelName, so wrapping GLM
+        // behind an Anthropic-compatible proxy got the Claude prompt.
         if (config != null && config.modelName() != null) {
             String model = config.modelName().toLowerCase();
             if (model.contains("claude")) {
@@ -677,6 +675,12 @@ public final class CodeAgentFactory {
             }
             if (model.contains("glm")) {
                 return SYSTEM_PROMPT_GLM_RESOURCE;
+            }
+        }
+        if (modelProvider != null) {
+            String providerClass = modelProvider.getClass().getName().toLowerCase();
+            if (providerClass.contains("anthropic")) {
+                return SYSTEM_PROMPT_CLAUDE_RESOURCE;
             }
         }
         return SYSTEM_PROMPT_RESOURCE;

@@ -87,17 +87,44 @@ public class ConfigController {
     public ServerConfigResponse updateConfig(@RequestBody UpdateConfigRequest request) throws IOException {
         Map<String, String> current = new HashMap<>(persistenceService.load());
 
+        // Normalize provider on the way in. Frontend may have sent "zhipu"
+        // (legacy id) or "OpenAI" (display case); turn both into the canonical
+        // lowercase ProviderRegistry id before anything else touches it.
+        // Reject unknown providers as 400 instead of persisting garbage.
+        String normalizedProvider = null;
+        if (request.provider() != null) {
+            normalizedProvider = io.kairo.code.core.config.ProviderRegistry.normalizeId(request.provider());
+            if (!io.kairo.code.core.config.ProviderRegistry.isKnown(normalizedProvider)
+                    && !"custom".equals(normalizedProvider)) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.BAD_REQUEST,
+                        "Unknown provider: " + request.provider()
+                                + " (known: " + io.kairo.code.core.config.ProviderRegistry.knownIds() + ")");
+            }
+        }
+
+        // If provider changed and the caller didn't also supply a baseUrl, the
+        // old baseUrl is stale — it belongs to the previous provider. Recompute
+        // from the registry. Without this, switching openai → anthropic in the
+        // Settings UI would keep firing requests at api.openai.com.
+        String effectiveBaseUrl = request.baseUrl();
+        if (normalizedProvider != null
+                && !normalizedProvider.equals(serverProperties.provider())
+                && (request.baseUrl() == null || request.baseUrl().isBlank())) {
+            effectiveBaseUrl = io.kairo.code.core.config.ProviderRegistry.resolveBaseUrl(normalizedProvider);
+        }
+
         if (request.apiKey() != null) current.put("apiKey", request.apiKey());
         if (request.model() != null) current.put("model", request.model());
-        if (request.provider() != null) current.put("provider", request.provider());
-        if (request.baseUrl() != null) current.put("baseUrl", request.baseUrl());
+        if (normalizedProvider != null) current.put("provider", normalizedProvider);
+        if (effectiveBaseUrl != null) current.put("baseUrl", effectiveBaseUrl);
         if (request.thinkingBudget() != null) current.put("thinkingBudget", String.valueOf(request.thinkingBudget()));
 
         persistenceService.save(current);
 
-        if (request.provider() != null) serverProperties.setProvider(request.provider());
+        if (normalizedProvider != null) serverProperties.setProvider(normalizedProvider);
         if (request.model() != null) serverProperties.setModel(request.model());
-        if (request.baseUrl() != null) serverProperties.setBaseUrl(request.baseUrl());
+        if (effectiveBaseUrl != null) serverProperties.setBaseUrl(effectiveBaseUrl);
         if (request.apiKey() != null) serverProperties.setApiKey(request.apiKey());
         if (request.thinkingBudget() != null) serverProperties.setThinkingBudget(request.thinkingBudget());
 
