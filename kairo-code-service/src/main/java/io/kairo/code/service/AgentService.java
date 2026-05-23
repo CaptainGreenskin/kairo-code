@@ -1475,15 +1475,27 @@ public class AgentService implements DisposableBean, InitializingBean {
             iterationsNoTool = collector.iterationsWithoutToolsCount();
         }
 
-        // tokensUsed / iterations are owned by the agent runtime. AgentDiagnostics
-        // doesn't yet expose those, so we report 0 mid-session until the runtime
-        // surfaces them — KAIRO_SESSION_RESULT.json fills them on SESSION_END.
+        // tokensUsed + iterations come from AgentDiagnostics, which DefaultReActAgent
+        // now wires to its own atomics (kairo upstream M-EV10 fix). Pre-fix this was
+        // always 0; if the agent doesn't surface diagnostics we still return 0 rather
+        // than fail.
+        long tokensUsed = 0L;
+        int iterations = 0;
+        try {
+            io.kairo.api.agent.AgentDiagnostics agentDiag = entry.session().agent().diagnostics();
+            if (agentDiag != null) {
+                tokensUsed = agentDiag.totalTokensConsumed();
+                iterations = agentDiag.currentIteration();
+            }
+        } catch (RuntimeException ignored) {
+            // Same defensive pattern as the SessionMetricsCollector lookup above.
+        }
         long durationMs = Math.max(0, System.currentTimeMillis() - entry.createdAt());
 
         return new SessionMetricsSnapshot(
                 sessionId,
-                /*tokensUsed=*/ 0,
-                /*iterations=*/ 0,
+                tokensUsed,
+                iterations,
                 durationMs,
                 iterationsNoTool,
                 toolCallCounts,
