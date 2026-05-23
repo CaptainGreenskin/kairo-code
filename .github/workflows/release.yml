@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.2.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            kairo-code-web/package-lock.json
+            docs/package-lock.json
+
+      - name: Build Maven artifacts
+        run: ./mvnw -B -ntp -DskipTests package
+
+      - name: Build web bundle
+        working-directory: kairo-code-web
+        run: |
+          npm ci || npm install
+          npm run build
+          tar -czf "../kairo-code-web-${{ steps.tag.outputs.tag }}.tar.gz" -C dist .
+
+      - name: Collect release artifacts
+        id: artifacts
+        run: |
+          mkdir -p release-staging
+          TAG="${{ steps.tag.outputs.tag }}"
+          CLI_JAR=$(ls kairo-code-cli/target/kairo-code-cli-*.jar | grep -v sources | grep -v javadoc | head -1)
+          SERVER_JAR=$(ls kairo-code-server/target/kairo-code-server-*.jar | grep -v sources | grep -v javadoc | head -1)
+          cp "$CLI_JAR" "release-staging/kairo-code-cli-${TAG#v}.jar"
+          cp "$SERVER_JAR" "release-staging/kairo-code-server-${TAG#v}.jar"
+          cp "kairo-code-web-${TAG}.tar.gz" release-staging/
+          cd release-staging
+          shasum -a 256 * > SHA256SUMS
+          ls -la
+          echo "dir=$(pwd)" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          VER="${TAG#v}"
+          # Changelog headings are `## [0.2.0] — 2026-…` (Keep-a-Changelog style),
+          # so match `## [<ver>` rather than `## <ver>`. Bracket is the unambiguous
+          # marker — bare numbers can appear in body text.
+          awk -v v="$VER" '
+            $0 ~ "^## \\[" v "(-|\\])" { flag=1; print; next }
+            /^## \[/ && flag { exit }
+            flag
+          ' docs/changelog.md > release-notes.md || true
+          if [ ! -s release-notes.md ]; then
+            echo "See [CHANGELOG](https://github.com/${{ github.repository }}/blob/${TAG}/docs/changelog.md)" > release-notes.md
+          fi
+          echo "--- release-notes.md preview ---"
+          head -20 release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            release-staging/*.jar
+            release-staging/*.tar.gz
+            release-staging/SHA256SUMS

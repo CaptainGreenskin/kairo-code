@@ -1,0 +1,39 @@
+{
+  "name": "@kairo/code",
+  "version": "0.2.0",
+  "description": "Same Models. Governable. — A Java Code Agent built on Kairo. npm wrapper that downloads the runtime jar on first run.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/captaingreenskin/kairo-code",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/captaingreenskin/kairo-code.git"
+  },
+  "bin": {
+    "kairo-code": "bin/kairo-code.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "code-agent",
+    "java",
+    "kairo",
+    "llm",
+    "openai",
+    "anthropic",
+    "minimax",
+    "glm"
+  ]
+}

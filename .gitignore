@@ -32,6 +32,8 @@ out/
 .project
 .settings/
 bin/
+# …but the npm wrapper's bin/ is a real source dir, not an Eclipse build artifact.
+!install/npm/bin/
 
 # IDE - VS Code
 .vscode/
@@ -79,3 +81,7 @@ results-v*/
 # Node.js
 node_modules/
 package-lock.json
+
+# VitePress build output
+docs/.vitepress/dist/
+docs/.vitepress/cache/
