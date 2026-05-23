@@ -173,8 +173,13 @@ public final class CodeAgentFactory {
         DefaultToolRegistry registry = new DefaultToolRegistry();
         registry.registerTool(BashTool.class);
         registry.registerTool(ReadTool.class);
-        registry.registerTool(WriteTool.class);
-        registry.registerTool(EditTool.class);
+        // M-D1': WriteTool / EditTool gain LSP post-edit diagnostics when an LspService is
+        // wired via LspServiceHolder.setGlobal(). The instance form bypasses the no-arg
+        // ctor that the class form would pick. When no LSP is wired (childSession spawns,
+        // tests), the LspService is null and the tools fall back to the original behavior.
+        var lspForTools = io.kairo.code.core.LspServiceHolder.global();
+        registry.registerInstance("write", new WriteTool(null, lspForTools));
+        registry.registerInstance("edit", new EditTool(null, lspForTools));
         registry.registerTool(GrepTool.class);
         registry.registerTool(GlobTool.class);
         registry.registerTool(WebFetchTool.class);
@@ -317,8 +322,17 @@ public final class CodeAgentFactory {
             builder.tracer(options.tracer());
         }
 
-        // Always enable streaming so per-token output works even without hooks.
-        builder.streaming(true);
+        // Streaming enables per-token output AND eager tool dispatch via
+        // StreamingToolDetector. M-A4 found that MiniMax M2 emits tool_calls in a single
+        // SSE chunk with finish_reason already set; the detector pipeline still routes the
+        // call to the executor (the file actually gets written), but the final synthetic
+        // ModelResponse that flows to PostReasoning sometimes loses the ToolUseContent —
+        // checkpoint then has only the model's `<think>` text. Until that root cause is
+        // fixed (see follow-on task), `KAIRO_STREAMING=off` falls back to the non-streaming
+        // call() path which uses OpenAIResponseParser and reliably surfaces tool_calls in
+        // every PostReasoning event.
+        boolean streamingEnabled = !"off".equalsIgnoreCase(System.getenv("KAIRO_STREAMING"));
+        builder.streaming(streamingEnabled);
         List<Object> hooks = options.hooks();
         for (Object hook : hooks) {
             builder.hook(hook);
@@ -431,6 +445,27 @@ public final class CodeAgentFactory {
             builder.restoreFrom(options.restoreFrom());
         }
 
+        // Full guardrail chain — the Governable promise on the README is hollow without it.
+        //   - PiiRedactionPolicy (M-B1): redacts secrets in model + tool output
+        //   - DangerousCommandPolicy (M-F5a, upstream): blocks rm -rf / / mkfs / shutdown etc
+        //   - PathTraversalPolicy (M-F5a, upstream): blocks `../` and writes to /etc/passwd
+        //   - ToolLoopDetectionPolicy (M-F5a, upstream): warns/denies same (tool, args) loops
+        // KAIRO_PII_REDACTION=off skips the PII step (debugging) — the dangerous-command /
+        // path-traversal / loop policies stay on regardless.
+        try {
+            var policies = new java.util.ArrayList<io.kairo.api.guardrail.GuardrailPolicy>();
+            if (!"off".equalsIgnoreCase(System.getenv("KAIRO_PII_REDACTION"))) {
+                policies.add(new io.kairo.security.pii.PiiRedactionPolicy());
+            }
+            policies.add(new io.kairo.core.guardrail.policy.DangerousCommandPolicy());
+            policies.add(new io.kairo.core.guardrail.policy.PathTraversalPolicy());
+            policies.add(new io.kairo.core.guardrail.policy.ToolLoopDetectionPolicy());
+            builder.guardrailChain(new io.kairo.core.guardrail.DefaultGuardrailChain(policies));
+        } catch (Throwable t) {
+            LoggerFactory.getLogger(CodeAgentFactory.class)
+                    .warn("Failed to wire guardrail chain: {}", t.getMessage());
+        }
+
         Agent agent = builder.build();
         ToolUsageTracker tracker = findToolUsageTracker(hooks);
         TurnMetricsCollector metricsCollector = findTurnMetricsCollector(hooks);
@@ -456,7 +491,13 @@ public final class CodeAgentFactory {
      * <p>Everything else flows through the registry's {@code openai-compatible} preset (or the
      * default {@code openai} when no baseUrl is given).
      */
-    private static ModelProvider buildModelProvider(String apiKey, String baseUrl) {
+    /**
+     * Build a {@link ModelProvider} from raw config without going through a full
+     * {@link #createSession}. Exposed so CLI bootstrap (e.g. {@code ReplLoop}) can construct
+     * auxiliary subsystems — Expert Team coordinator, evaluation harnesses — that need the same
+     * provider wiring as the session agent but don't need the tool registry / hooks pipeline.
+     */
+    public static ModelProvider buildModelProvider(String apiKey, String baseUrl) {
         var registry = DefaultProviderRegistry.withBuiltIns();
         if (baseUrl != null && baseUrl.toLowerCase().contains("anthropic")) {
             return registry.create("anthropic", ProviderSpec.of(apiKey, baseUrl));

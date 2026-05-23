@@ -21,10 +21,14 @@ import io.kairo.api.hook.HookHandler;
 import io.kairo.api.hook.HookPhase;
 import io.kairo.api.hook.HookResult;
 import io.kairo.api.hook.PostReasoningEvent;
+import io.kairo.api.hook.ToolResultEvent;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelResponse;
+import io.kairo.api.tool.ToolOutcome;
+import io.kairo.api.tool.ToolOutput;
+import io.kairo.api.tool.ToolResult;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -99,25 +103,52 @@ public final class CheckpointWriterHook {
         iteration++;
         ModelResponse response = event.response();
 
-        // Convert the model response to an assistant Msg and accumulate it.
+        // Preserve the assistant message verbatim — text, thinking AND tool_use content all need
+        // to survive into the checkpoint so :resume can restore the full tool history and so
+        // evolution / snapshot consumers see what tools the model invoked. Previously only
+        // text/thinking were extracted, dropping every ToolUseContent on the floor.
         if (response != null && response.contents() != null && !response.contents().isEmpty()) {
-            // Build a text representation of the response for the checkpoint.
-            StringBuilder text = new StringBuilder();
+            Msg.Builder builder = Msg.builder().role(MsgRole.ASSISTANT);
             for (Content c : response.contents()) {
-                if (c instanceof Content.TextContent tc) {
-                    text.append(tc.text());
-                } else if (c instanceof Content.ThinkingContent tc) {
-                    text.append(tc.thinking());
-                }
+                builder.addContent(c);
             }
-            if (text.length() > 0) {
-                Msg assistantMsg = Msg.of(MsgRole.ASSISTANT, text.toString());
+            Msg assistantMsg = builder.build();
+            if (!assistantMsg.contents().isEmpty()) {
                 messages.add(assistantMsg);
             }
         }
 
         writeCheckpoint();
         return HookResult.proceed(event);
+    }
+
+    @HookHandler(HookPhase.TOOL_RESULT)
+    public HookResult<ToolResultEvent> onToolResult(ToolResultEvent event) {
+        if (workingDir == null || event == null) {
+            return HookResult.proceed(event);
+        }
+        ToolResult result = event.result();
+        if (result == null) {
+            return HookResult.proceed(event);
+        }
+        String text = renderOutput(result.output());
+        boolean isError = result.outcome() != ToolOutcome.SUCCESS;
+        Msg toolMsg = Msg.builder()
+                .role(MsgRole.TOOL)
+                .addContent(new Content.ToolResultContent(result.toolUseId(), text, isError))
+                .build();
+        messages.add(toolMsg);
+        writeCheckpoint();
+        return HookResult.proceed(event);
+    }
+
+    private static String renderOutput(ToolOutput output) {
+        if (output == null) return "";
+        if (output instanceof ToolOutput.Text t) return t.content();
+        if (output instanceof ToolOutput.Truncated t) return t.visible();
+        if (output instanceof ToolOutput.Structured s) return String.valueOf(s.data());
+        if (output instanceof ToolOutput.Binary b) return "<binary " + b.mime() + ">";
+        return output.toString();
     }
 
     private void writeCheckpoint() {
@@ -193,11 +224,39 @@ public final class CheckpointWriterHook {
                 Map<String, Object> call = new LinkedHashMap<>();
                 call.put("id", tc.toolId());
                 call.put("name", tc.toolName());
-                call.put("input", tc.input());
+                call.put("input", redactToolInput(tc.input()));
                 toolCalls.add(call);
             }
         }
         return toolCalls;
+    }
+
+    /**
+     * M-B4: streaming-tool path stuffs the raw tool result into a ToolUseContent's input map
+     * under the {@code _streaming_result} key (see ReasoningPhase.buildSyntheticStreamingResponse).
+     * That bypasses the agent's GuardrailChain — the value reaches checkpoint persistence raw.
+     * Apply the same default PII redaction here before serializing so emails / API keys / SSNs
+     * inside streaming-result snapshots get the same {@code <redacted:*>} treatment as model
+     * output text. No-op when {@code KAIRO_PII_REDACTION=off}.
+     */
+    private static Map<String, Object> redactToolInput(Map<String, Object> input) {
+        if (input == null || input.isEmpty()) return input;
+        if ("off".equalsIgnoreCase(System.getenv("KAIRO_PII_REDACTION"))) return input;
+        var redacted = new LinkedHashMap<String, Object>(input);
+        Object streamingResult = redacted.get("_streaming_result");
+        if (streamingResult instanceof String s) {
+            redacted.put("_streaming_result", redactString(s));
+        }
+        return redacted;
+    }
+
+    private static String redactString(String s) {
+        if (s == null || s.isEmpty()) return s;
+        String result = s;
+        for (var pattern : io.kairo.security.pii.PiiPattern.values()) {
+            result = pattern.pattern().matcher(result).replaceAll(pattern.replacement());
+        }
+        return result;
     }
 
     private String extractToolCallId(Msg msg) {

@@ -38,6 +38,43 @@
             <artifactId>kairo-expert-team</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-observability</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-security-pii</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-plugin</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-evolution</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-lsp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+        <!-- M-GA5: OTel auto-config + OTLP exporter. The CLI bootstrap calls
+             AutoConfiguredOpenTelemetrySdk so OTEL_EXPORTER_OTLP_ENDPOINT,
+             OTEL_SERVICE_NAME etc are picked up automatically. No-op when
+             those env vars are unset (default behavior preserved). -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-extension-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <version>1.61.0</version>
+        </dependency>
+        <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
         </dependency>

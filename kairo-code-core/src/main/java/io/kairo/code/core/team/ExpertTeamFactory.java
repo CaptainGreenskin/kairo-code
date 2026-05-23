@@ -53,36 +53,25 @@ public final class ExpertTeamFactory {
      */
     public static SwarmCoordinator create(
             CodeAgentConfig config, ModelProvider modelProvider, int agentCount) {
-        ExpertRoleRegistry roleRegistry = new ExpertRoleRegistry();
-
-        // Build worker agents from the same config
-        List<Agent> agents = new ArrayList<>(agentCount);
-        for (int i = 0; i < agentCount; i++) {
-            CodeAgentFactory.SessionOptions opts = CodeAgentFactory.SessionOptions.empty()
-                    .withModelProvider(modelProvider)
-                    .asChildSession();
-            agents.add(CodeAgentFactory.createSession(config, opts).agent());
-        }
-
-        ExpertTeamCoordinator coordinator = new ExpertTeamCoordinator(null);
-        io.kairo.api.team.MessageBus apiMessageBus = new io.kairo.api.team.MessageBus() {
-            @Override
-            public reactor.core.publisher.Mono<Void> send(String fromAgentId, String toAgentId, io.kairo.api.message.Msg msg) {
-                return reactor.core.publisher.Mono.empty();
-            }
-
-            @Override
-            public reactor.core.publisher.Flux<io.kairo.api.message.Msg> receive(String agentId) {
-                return reactor.core.publisher.Flux.empty();
-            }
-
-            @Override
-            public reactor.core.publisher.Mono<Void> broadcast(String fromAgentId, io.kairo.api.message.Msg msg) {
-                return reactor.core.publisher.Mono.empty();
-            }
-        };
-
-        return new SwarmCoordinator(coordinator, roleRegistry, apiMessageBus, agents);
+        // M-F6a: delegate the boilerplate composition (coordinator + role registry + no-op
+        // message bus + agent loop) to the upstream ExpertTeamComposer, only supplying the
+        // kairo-code-specific worker factory. This is what made kairo-assistant unable to
+        // reuse the original method — it hardcoded CodeAgentFactory.
+        var composition =
+                io.kairo.expertteam.ExpertTeamComposer.create(
+                        agentCount,
+                        () ->
+                                CodeAgentFactory.createSession(
+                                                config,
+                                                CodeAgentFactory.SessionOptions.empty()
+                                                        .withModelProvider(modelProvider)
+                                                        .asChildSession())
+                                        .agent());
+        return new SwarmCoordinator(
+                composition.coordinator(),
+                composition.roleRegistry(),
+                composition.messageBus(),
+                composition.agents());
     }
 
     /**

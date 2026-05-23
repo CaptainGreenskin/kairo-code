@@ -39,6 +39,18 @@
             <groupId>io.github.captaingreenskin</groupId>
             <artifactId>kairo-multi-agent</artifactId>
         </dependency>
+        <!-- M-D3: SSE event streaming for the web UI. Adds the abstract event-stream
+             SPI + the concrete SSE handler. Wiring an EventStreamService bean +
+             RestController is the consumer's job (see kairo-code-server's web layer)
+             — the deps make those classes available on classpath. -->
+        <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-event-stream</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-event-stream-sse</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

@@ -4,6 +4,118 @@ All notable changes to Kairo Code are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0-SNAPSHOT] — 2026-05-23
+
+Full-stack Kairo SPI integration milestone. Kairo Code stops being a thin
+shell over `kairo-core` and becomes a real consumer of seven upstream
+modules. Three upstream contributions were pushed back during this work
+(see "Upstream contributions" below).
+
+### Phase A — Stabilization
+
+- **Session checkpoint preserves tool history** — `CheckpointWriterHook`
+  used to drop every `ToolUseContent` on the floor when building the
+  assistant message, and never recorded `tool_result` at all. Both are
+  now persisted via the existing `Msg.Builder.addContent(...)` path plus
+  a new `@HookHandler(HookPhase.TOOL_RESULT)` handler. Without this fix
+  `:resume`, snapshot replay, and any evolution consumer that walked the
+  checkpoint saw `<think>`-only assistants and nothing else.
+- **`KairoCodeMain.acpServer` is package-private** so `KairoCodeAcpServerTest`
+  can compile against it without reflection.
+- **Expert team / swarm / team commands work** — `ReplLoop` now wires a
+  `SwarmCoordinator` via `ExpertTeamFactory.create(config, modelProvider, 3)`.
+  Before this, `:expert` / `:team` / `:swarm` all reported "kairo-expert-team
+  not on classpath" even when the jar was resolved.
+
+### Phase B — Governance baseline (the README's "Same Models. Governable." promise)
+
+- **PII redaction** wired through `kairo-security-pii`'s `PiiRedactionPolicy`
+  on a `DefaultGuardrailChain`, attached at session build. POST_MODEL +
+  POST_TOOL phases redact email / phone / SSN / API keys / JWT / Chinese ID
+  and CN phone / IPv4 / IBAN / credit cards before they leave the model. Set
+  `KAIRO_PII_REDACTION=off` to disable for debugging.
+- **Observability** via `kairo-observability` + Micrometer. A
+  `SimpleMeterRegistry` is built at REPL start, `AgentMetrics` registers
+  Micrometer counters / timers for `kairo.agent.calls.total` /
+  `kairo.agent.call.duration`, and gauges for `kairo.agents.active|running|idle`.
+  `:metrics` was extended to print the kairo.* meters alongside per-turn data.
+- **Cron** integrated through `kairo-cron`. New `:cron` command with
+  `list / add <m h dom mon dow> <prompt> / delete <id> / start / stop`. Tasks
+  persist under `~/.kairo-code/cron/` and survive restarts. Fire callback
+  currently logs only — `M-A4`-related agent-bridge wiring is the follow-on.
+
+### Phase C — Self-built → upstream migration
+
+- **Plugin system rewritten on `kairo-plugin`**. The 240-line self-built
+  `PluginRegistry` + `PluginManifest` (yaml-based, local-only) was deleted.
+  Replaced with a `DefaultPluginManager` factory wired to all upstream source
+  fetchers (LocalPath / GitHub / Npm / GitUrl / GitSubdir). New `:plugin install
+  <source>` syntax: `github:owner/repo[#ref]`, `npm:pkg[@ver]`, `git:<url>[#ref]`,
+  `path:./local`. The Claude-Code-compatible `plugin.json` schema replaces the
+  old `plugin.yaml` format.
+- **Evolution gains the upstream curator**. `kairo-evolution`'s
+  `LifecycleCuratorDaemon` is wired with a `FileSkillTelemetryStore` under
+  `~/.kairo-code/curator/`. New `:evolve curator [start|stop|status|run]`
+  manages the non-destructive `ACTIVE → STALE → ARCHIVED` skill lifecycle.
+  The self-built `ReflectionPipeline` + `LearnedLessonStore` are kept — they
+  handle the strike-3 lesson-generation flow which is a different concern
+  from skill quality curation.
+
+### Phase D — Capability expansion
+
+- **LSP integration** via `kairo-lsp`. `DefaultLspService` is wired with the
+  built-in language server registry; subprocesses are lazy — only spawn when
+  a tool first calls `currentDiagnostics(path)`. New `:lsp [status |
+  diagnostics <file> | shutdown]` command.
+
+### Phase E — Documentation
+
+- CHANGELOG updated to cover the M4 → 0.2.0-SNAPSHOT gap (M3 was the last
+  recorded entry — five months of M4 ~ M-Curator / M-UserModel / M-Plugin /
+  M-McpServer / M-SubSkill / M-SessionSearch / M-KairoMd / M-SkillVis work
+  was historically captured only in memory files).
+
+### Upstream contributions (kairo)
+
+This milestone followed the principle: when an integration uncovers a
+generic capability gap, fix it upstream rather than patching kairo-code.
+
+1. **`kairo-core/OpenAISseSubscriber`**: emit aggregated `ModelResponse` on
+   `finish_reason` even when the provider omits the trailing `data: [DONE]`
+   marker. MiniMax M2 and Zhipu GLM both do this, and without the fix every
+   non-streaming consumer of those providers silently dropped `tool_calls`.
+   Includes 2 regression tests (`toolCallDelta_emitsOnFinishReason_…`,
+   `emitFinalResponse_isIdempotent_…`).
+2. **`kairo-core/CodeAgentFactory.buildModelProvider` made public** so CLI
+   bootstrap (e.g. `ReplLoop`) can build auxiliary subsystems — Expert Team
+   coordinator, evaluation harnesses — that need the same provider wiring as
+   the session agent without going through a full `createSession`.
+3. **`kairo-lsp/BuiltInServers` adds `JDT_LS`** for Eclipse JDT Language
+   Server with Maven / Gradle / `.project` workspace markers. Without this
+   any kairo agent that touches Java files (kairo-code obviously included)
+   has no built-in route to a Java LSP. Includes regression test
+   `jdtlsResolvesJavaFileFromMavenWorkspace`.
+
+### Open follow-ups
+
+See task IDs in the dispatch tracker for these:
+
+- **M-A4** — MiniMax M2 tool-execution observability gap. Files get created
+  (tool runs), but `has_tool_calls=false` in trace and the ModelResponse
+  reaching `PostReasoning` lacks `ToolUseContent`. Likely a hidden tool-
+  dispatch path that bypasses the standard `OpenAIResponseParser`.
+- **M-A6** — `kairo-code-cli` surefire parallel deadlock under multi-core
+  load (`<parallel>methods</parallel>` + `<forkCount>1.5C</forkCount>`).
+  All test classes pass individually; the parallel pool hangs at scale.
+- **M-B4** — extend PII redaction to `_streaming_result` (the streaming
+  bridge's tool-result snapshot embedded in `ToolUseContent` args).
+- **M-D1'** — wire LSP `snapshotBaseline → notifyChange → diagnosticsSince`
+  into `WriteTool` / `EditTool` so tool results report "did this edit
+  introduce new compile errors?".
+- **M-D2'** — true multi-model fallback at the `ModelProvider` SPI layer
+  (note: `kairo-gateway` is multi-Channel orchestration, not multi-Model).
+- **M-D3** — `kairo-event-stream-sse` for `kairo-code-server` web UI.
+
 ## [0.1.0-M3] — 2026-04-26
 
 Third milestone — kairo-code grows a `task` tool that spawns sub-agents in

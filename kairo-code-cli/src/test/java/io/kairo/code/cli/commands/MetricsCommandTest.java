@@ -62,7 +62,9 @@ class MetricsCommandTest {
 
         new MetricsCommand().execute("", context);
 
-        assertThat(outputCapture.toString()).contains("No metrics yet.");
+        // M-B2: ":metrics" now also shows the kairo-observability section, so the empty-state
+        // line was renamed to "No turn metrics yet." to disambiguate from "no Micrometer data".
+        assertThat(outputCapture.toString()).contains("No turn metrics yet.");
     }
 
     @Test

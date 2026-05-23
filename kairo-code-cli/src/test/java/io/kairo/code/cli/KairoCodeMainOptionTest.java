@@ -31,6 +31,29 @@ class KairoCodeMainOptionTest {
     }
 
     @TempDir
+    static Path isolatedHome;
+
+    private static String originalHome;
+
+    @BeforeAll
+    static void isolateUserHome() {
+        // ConfigLoader reads ~/.kairo-code/config.properties — on dev machines that file
+        // typically contains a real api-key (so smoke / interactive use works). Tests that
+        // assert "missing api-key fails" therefore see a defaulted key and false-pass to
+        // exit 0. Isolate user.home to a clean temp dir for the whole class so tests are
+        // deterministic regardless of dev workstation state.
+        originalHome = System.getProperty("user.home");
+        System.setProperty("user.home", isolatedHome.toString());
+    }
+
+    @AfterAll
+    static void restoreUserHome() {
+        if (originalHome != null) {
+            System.setProperty("user.home", originalHome);
+        }
+    }
+
+    @TempDir
     Path tempDir;
 
     private final PrintStream originalErr = System.err;

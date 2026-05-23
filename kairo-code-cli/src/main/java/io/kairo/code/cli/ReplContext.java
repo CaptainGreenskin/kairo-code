@@ -14,7 +14,11 @@ import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.ConsoleApprovalHandler;
+import io.kairo.api.cron.CronScheduler;
+import io.kairo.api.lsp.LspService;
 import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.evolution.curator.LifecycleCuratorDaemon;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.io.PrintWriter;
 import java.time.Instant;
 import java.util.LinkedHashSet;
@@ -48,6 +52,10 @@ public class ReplContext {
     private final MemoryStore memoryStore;
     private final SessionWriter sessionWriter;
     private final SwarmCoordinator swarmCoordinator;
+    private final CronScheduler cronScheduler;
+    private final MeterRegistry meterRegistry;
+    private final LifecycleCuratorDaemon curatorDaemon;
+    private final LspService lspService;
     private volatile StreamingAgentRunner runner;
     private boolean running = true;
     private final Instant sessionStartTime;
@@ -131,7 +139,7 @@ public class ReplContext {
             SessionWriter sessionWriter) {
         this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
                 approvalHandler, skillRegistry, snapshotStore, hooksConfig, skillSources, memoryStore,
-                sessionWriter, null);
+                sessionWriter, null, null);
     }
 
     public ReplContext(
@@ -149,6 +157,96 @@ public class ReplContext {
             MemoryStore memoryStore,
             SessionWriter sessionWriter,
             SwarmCoordinator swarmCoordinator) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, skillSources, memoryStore,
+                sessionWriter, swarmCoordinator, null);
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig,
+            Map<String, String> skillSources,
+            MemoryStore memoryStore,
+            SessionWriter sessionWriter,
+            SwarmCoordinator swarmCoordinator,
+            CronScheduler cronScheduler) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, skillSources, memoryStore,
+                sessionWriter, swarmCoordinator, cronScheduler, null, null);
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig,
+            Map<String, String> skillSources,
+            MemoryStore memoryStore,
+            SessionWriter sessionWriter,
+            SwarmCoordinator swarmCoordinator,
+            CronScheduler cronScheduler,
+            MeterRegistry meterRegistry) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, skillSources, memoryStore,
+                sessionWriter, swarmCoordinator, cronScheduler, meterRegistry, null, null);
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig,
+            Map<String, String> skillSources,
+            MemoryStore memoryStore,
+            SessionWriter sessionWriter,
+            SwarmCoordinator swarmCoordinator,
+            CronScheduler cronScheduler,
+            MeterRegistry meterRegistry,
+            LifecycleCuratorDaemon curatorDaemon) {
+        this(session, config, lineReader, commandRegistry, writer, sessionOptionsCustomizer,
+                approvalHandler, skillRegistry, snapshotStore, hooksConfig, skillSources, memoryStore,
+                sessionWriter, swarmCoordinator, cronScheduler, meterRegistry, curatorDaemon, null);
+    }
+
+    public ReplContext(
+            CodeAgentSession session,
+            CodeAgentConfig config,
+            LineReader lineReader,
+            CommandRegistry commandRegistry,
+            PrintWriter writer,
+            UnaryOperator<CodeAgentFactory.SessionOptions> sessionOptionsCustomizer,
+            ConsoleApprovalHandler approvalHandler,
+            SkillRegistry skillRegistry,
+            SnapshotStore snapshotStore,
+            HooksConfig hooksConfig,
+            Map<String, String> skillSources,
+            MemoryStore memoryStore,
+            SessionWriter sessionWriter,
+            SwarmCoordinator swarmCoordinator,
+            CronScheduler cronScheduler,
+            MeterRegistry meterRegistry,
+            LifecycleCuratorDaemon curatorDaemon,
+            LspService lspService) {
         this.session = session;
         this.config = config;
         this.lineReader = lineReader;
@@ -164,6 +262,10 @@ public class ReplContext {
         this.memoryStore = memoryStore;
         this.sessionWriter = sessionWriter;
         this.swarmCoordinator = swarmCoordinator;
+        this.cronScheduler = cronScheduler;
+        this.meterRegistry = meterRegistry;
+        this.curatorDaemon = curatorDaemon;
+        this.lspService = lspService;
         this.sessionStartTime = Instant.now();
         if (session != null && session.loadedSkills() != null) {
             loadedSkills.addAll(session.loadedSkills());
@@ -234,6 +336,22 @@ public class ReplContext {
     /** The expert team coordinator. May be {@code null} if not configured. */
     public SwarmCoordinator swarmCoordinator() {
         return swarmCoordinator;
+    }
+
+    public CronScheduler cronScheduler() {
+        return cronScheduler;
+    }
+
+    public MeterRegistry meterRegistry() {
+        return meterRegistry;
+    }
+
+    public LifecycleCuratorDaemon curatorDaemon() {
+        return curatorDaemon;
+    }
+
+    public LspService lspService() {
+        return lspService;
     }
 
     public CodeAgentConfig config() {

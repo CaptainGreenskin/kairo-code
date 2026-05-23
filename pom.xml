@@ -54,11 +54,16 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <configuration>
-                        <parallel>methods</parallel>
-                        <useUnlimitedThreads>false</useUnlimitedThreads>
-                        <threadCount>4</threadCount>
-                        <forkCount>1.5C</forkCount>
-                        <reuseForks>true</reuseForks>
+                        <!-- M-A6: tests fall in two groups
+                             1) parallel=methods deadlocks on shared /tmp + System.setProperty
+                             2) some tests (KairoCodeAcpServerTest) call CommandLine.execute()
+                                which invokes System.exit on validation errors, killing
+                                a reused fork.
+                             Resolution: serial + fresh JVM per test class. Slower (~3-5 min
+                             on kairo-code-cli) but reliable. Modules that want speed back can
+                             override locally once their tests are fork-safe. -->
+                        <forkCount>1</forkCount>
+                        <reuseForks>false</reuseForks>
                     </configuration>
                 </plugin>
             </plugins>
