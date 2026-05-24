@@ -19,6 +19,9 @@ import io.kairo.code.core.mcp.McpConfig;
  * @param toolBudgetForce max tool calls before hard stop (0 = use default from ToolBudgetHook)
  * @param repetitiveToolThreshold consecutive turns threshold for RepetitiveToolHook (0 = use default)
  * @param thinkingBudget the Anthropic extended thinking budget in tokens (null = disabled, 0 = use default)
+ * @param llmClassifier  controls the LLM fallback for {@code BashCommandClassifier.UNKNOWN}
+ *   commands inside {@code DangerousCommandPolicy} (nullable → heuristic-only). See
+ *   {@link LlmClassifierConfig}.
  */
 public record CodeAgentConfig(
         String apiKey,
@@ -29,13 +32,22 @@ public record CodeAgentConfig(
         McpConfig mcpConfig,
         int toolBudgetForce,
         int repetitiveToolThreshold,
-        Integer thinkingBudget
+        Integer thinkingBudget,
+        LlmClassifierConfig llmClassifier
 ) {
     public CodeAgentConfig(String apiKey, String baseUrl, String modelName,
                            int maxIterations, String workingDir, McpConfig mcpConfig,
                            int toolBudgetForce, int repetitiveToolThreshold) {
         this(apiKey, baseUrl, modelName, maxIterations, workingDir, mcpConfig,
-             toolBudgetForce, repetitiveToolThreshold, null);
+             toolBudgetForce, repetitiveToolThreshold, null, null);
+    }
+
+    public CodeAgentConfig(String apiKey, String baseUrl, String modelName,
+                           int maxIterations, String workingDir, McpConfig mcpConfig,
+                           int toolBudgetForce, int repetitiveToolThreshold,
+                           Integer thinkingBudget) {
+        this(apiKey, baseUrl, modelName, maxIterations, workingDir, mcpConfig,
+             toolBudgetForce, repetitiveToolThreshold, thinkingBudget, null);
     }
 
     public CodeAgentConfig {
@@ -68,6 +80,9 @@ public record CodeAgentConfig(
         }
         if (thinkingBudget != null && thinkingBudget < 0) {
             thinkingBudget = 0;
+        }
+        if (llmClassifier == null) {
+            llmClassifier = LlmClassifierConfig.disabled();
         }
     }
 

@@ -493,7 +493,7 @@ public final class CodeAgentFactory {
             if (!"off".equalsIgnoreCase(System.getenv("KAIRO_PII_REDACTION"))) {
                 policies.add(new io.kairo.security.pii.PiiRedactionPolicy());
             }
-            policies.add(new io.kairo.core.guardrail.policy.DangerousCommandPolicy());
+            policies.add(buildDangerousCommandPolicy(config, options, modelProvider));
             policies.add(new io.kairo.core.guardrail.policy.PathTraversalPolicy());
             policies.add(new io.kairo.core.guardrail.policy.ToolLoopDetectionPolicy());
             builder.guardrailChain(new io.kairo.core.guardrail.DefaultGuardrailChain(policies));
@@ -508,6 +508,40 @@ public final class CodeAgentFactory {
         return new CodeAgentSession(
                 agent, executor, registry, activeSkills, mcpRegistry,
                 tracker, turnMetrics, sessionMetrics);
+    }
+
+    /**
+     * Build the dangerous-command guardrail with the LLM fallback wired iff the user opted in via
+     * {@link LlmClassifierConfig#enabled()}. The fallback rides on the SAME {@link ModelProvider}
+     * the agent already authenticated — no extra credentials to manage, and any tracer the caller
+     * passed via {@link SessionOptions#tracer()} is propagated so the LLM span shows up next to the
+     * agent's reasoning spans in Langfuse / OTel. Failures inside the classifier degrade to
+     * {@code UNKNOWN→ALLOW} (preserving today's semantics), so a model outage cannot escalate to
+     * a deny-storm.
+     */
+    static io.kairo.core.guardrail.policy.DangerousCommandPolicy buildDangerousCommandPolicy(
+            CodeAgentConfig config, SessionOptions options, ModelProvider modelProvider) {
+        LlmClassifierConfig llmCfg = config.llmClassifier();
+        if (llmCfg == null || !llmCfg.enabled()) {
+            return new io.kairo.core.guardrail.policy.DangerousCommandPolicy();
+        }
+        String model =
+                (llmCfg.model() != null && !llmCfg.model().isBlank())
+                        ? llmCfg.model()
+                        : config.modelName();
+        var cfgBuilder =
+                io.kairo.core.guardrail.policy.LlmBashClassifier.Config.builder()
+                        .cacheSize(llmCfg.cacheSize())
+                        .timeout(java.time.Duration.ofMillis(llmCfg.timeoutMillis()));
+        if (options != null && options.tracer() != null) {
+            cfgBuilder.tracer(options.tracer());
+        }
+        var classifier =
+                new io.kairo.core.guardrail.policy.LlmBashClassifier(
+                        modelProvider, model, cfgBuilder.build());
+        return new io.kairo.core.guardrail.policy.DangerousCommandPolicy(
+                io.kairo.core.guardrail.policy.DangerousCommandPolicy.DEFAULT_SHELL_TOOLS,
+                classifier);
     }
 
     /**
