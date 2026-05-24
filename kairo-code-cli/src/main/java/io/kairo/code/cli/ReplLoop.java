@@ -426,14 +426,42 @@ public class ReplLoop {
                     ? eventPrinter.maxContextTokens()
                     : TokenStatusLine.contextLimitForModel(config.modelName());
 
+            // Status-line custom shell: if the user dropped a statusline.json with `command`
+            // set, route through the shell renderer instead of the built-in token bar.
+            // Loaded once at REPL start — changes to settings require a restart, matching
+            // the rest of kairo-code's config conventions.
+            Path slProjectRoot = config.workingDir() != null && !config.workingDir().isBlank()
+                    ? Path.of(config.workingDir())
+                    : Path.of(System.getProperty("user.dir"));
+            com.fasterxml.jackson.databind.ObjectMapper slMapper =
+                    new com.fasterxml.jackson.databind.ObjectMapper();
+            io.kairo.code.cli.statusline.StatusLineConfig statusLineCfg =
+                    new io.kairo.code.cli.statusline.StatusLineConfigLoader(
+                            slMapper, slProjectRoot)
+                            .load();
+            io.kairo.code.cli.statusline.ShellStatusLineRenderer shellRenderer =
+                    new io.kairo.code.cli.statusline.ShellStatusLineRenderer(slMapper);
+
             InputAccumulator accumulator = new InputAccumulator();
             String currentPrompt = PROMPT;
 
             while (context.isRunning()) {
-                // Print persistent token status line above the prompt (after first response).
+                // Print persistent status line above the prompt (after first response).
                 if (eventPrinter != null) {
-                    String statusLine = TokenStatusLine.format(
-                            eventPrinter.totalInputTokens(), contextLimit, null);
+                    String statusLine;
+                    if (statusLineCfg.isShellEnabled()) {
+                        io.kairo.code.cli.statusline.StatusLineState state =
+                                buildStatusLineState(
+                                        cliSessionId,
+                                        config,
+                                        eventPrinter.totalInputTokens(),
+                                        contextLimit,
+                                        slProjectRoot);
+                        statusLine = shellRenderer.render(statusLineCfg, state);
+                    } else {
+                        statusLine = TokenStatusLine.format(
+                                eventPrinter.totalInputTokens(), contextLimit, null);
+                    }
                     if (!statusLine.isEmpty()) {
                         writer.println(statusLine);
                         writer.flush();
@@ -761,6 +789,37 @@ public class ReplLoop {
         for (SkillWithSource ws : loader.loadAll()) {
             skillSources.put(ws.skill().name(), ws.priority().name());
         }
+    }
+
+    /**
+     * Snapshot the runtime state into a {@link io.kairo.code.cli.statusline.StatusLineState}
+     * for the shell renderer. Fields kairo can't populate (sessionName, agent.name, etc.) are
+     * left null and Jackson omits them on the wire.
+     */
+    private static io.kairo.code.cli.statusline.StatusLineState buildStatusLineState(
+            String sessionId,
+            CodeAgentConfig config,
+            long inputTokens,
+            int contextLimit,
+            Path projectRoot) {
+        String modelId = config.modelName();
+        return new io.kairo.code.cli.statusline.StatusLineState(
+                sessionId,
+                null,
+                new io.kairo.code.cli.statusline.StatusLineState.ModelInfo(modelId, modelId),
+                new io.kairo.code.cli.statusline.StatusLineState.WorkspaceInfo(
+                        System.getProperty("user.dir"), projectRoot.toString()),
+                resolveVersion(),
+                io.kairo.code.cli.statusline.StatusLineState.ContextWindowInfo.from(
+                        inputTokens, contextLimit, null),
+                null);
+    }
+
+    private static String resolveVersion() {
+        String v = ReplLoop.class.getPackage() != null
+                ? ReplLoop.class.getPackage().getImplementationVersion()
+                : null;
+        return v != null ? v : "dev";
     }
 
     private static Path ensureKairoDir() {
