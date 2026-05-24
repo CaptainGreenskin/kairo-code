@@ -6,6 +6,7 @@ import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.skill.SkillRegistry;
 import io.kairo.code.core.config.ConfigLoader;
+import io.kairo.code.cli.commands.ClassifierCommand;
 import io.kairo.code.cli.commands.ClearCommand;
 import io.kairo.code.cli.commands.CompactCommand;
 import io.kairo.code.cli.commands.CostCommand;
@@ -660,6 +661,7 @@ public class ReplLoop {
         registry.register(new MemoryCommand());
         registry.register(new LearnedCommand());
         registry.register(new StatsCommand());
+        registry.register(new ClassifierCommand());
         registry.register(new MetricsCommand());
         registry.register(new SessionCommand());
         registry.register(new SwarmCommand());

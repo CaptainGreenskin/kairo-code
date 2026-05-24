@@ -16,6 +16,7 @@ import io.kairo.api.acp.AcpCapabilities;
 import io.kairo.api.acp.AcpImplementation;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
+import io.kairo.code.core.LlmClassifierConfig;
 import io.kairo.code.core.mcp.McpConfig;
 import io.kairo.code.core.hook.PlanModeHook;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -122,6 +123,20 @@ public class KairoCodeMain implements Callable<Integer> {
 
     @Option(names = "--plan", description = "Show execution plan and wait for confirmation before acting")
     private boolean planMode;
+
+    @Option(names = "--llm-classifier",
+            description = "Enable the LLM-backed bash-command classifier as a fallback "
+                    + "for heuristically-UNKNOWN commands inside the dangerous-command guardrail. "
+                    + "Equivalent to setting llm-classifier=true in config or "
+                    + "KAIRO_CODE_LLM_CLASSIFIER=true.")
+    private boolean llmClassifierEnabled;
+
+    @Option(names = "--llm-classifier-model",
+            description = "Override the model used by --llm-classifier "
+                    + "(defaults to the agent's primary model). "
+                    + "Equivalent to llm-classifier-model in config or "
+                    + "KAIRO_CODE_LLM_CLASSIFIER_MODEL.")
+    private String llmClassifierModel;
 
     @Option(names = "--acp-server",
             description =
@@ -234,9 +249,13 @@ public class KairoCodeMain implements Callable<Integer> {
 
             McpConfig mcpConfig = McpConfig.loadDefault();
 
+            LlmClassifierConfig resolvedLlmClassifier =
+                    resolveLlmClassifierConfig(fileConfig);
+
             CodeAgentConfig config = new CodeAgentConfig(
                     resolvedApiKey, resolvedBaseUrl, resolvedModel,
-                    maxIterations, resolvedWorkingDir, mcpConfig, toolBudget, 0, thinkingBudget);
+                    maxIterations, resolvedWorkingDir, mcpConfig, toolBudget, 0,
+                    thinkingBudget, resolvedLlmClassifier);
             ModelProvider modelProvider = buildModelProvider(
                     resolvedProvider, resolvedApiKey, resolvedBaseUrl, resolvedChatPath);
 
@@ -298,6 +317,48 @@ public class KairoCodeMain implements Callable<Integer> {
             return new OpenAIProvider(apiKey, baseUrl, chatPath);
         }
         return new OpenAIProvider(apiKey, baseUrl);
+    }
+
+    /**
+     * Resolve the LLM-classifier knobs through the same precedence ladder we use elsewhere:
+     * explicit CLI flag &gt; env var &gt; config file &gt; off. Returns {@code null} so the
+     * {@link CodeAgentConfig} compact constructor normalizes it to
+     * {@link LlmClassifierConfig#disabled()} — that keeps the off-path a single source of truth
+     * and avoids confusing the user with two distinct &quot;disabled&quot; representations.
+     */
+    LlmClassifierConfig resolveLlmClassifierConfig(Properties fileConfig) {
+        boolean enabled = llmClassifierEnabled;
+        if (!enabled) {
+            enabled = isTruthy(System.getenv("KAIRO_CODE_LLM_CLASSIFIER"));
+        }
+        if (!enabled && fileConfig != null) {
+            enabled = isTruthy(fileConfig.getProperty("llm-classifier"));
+        }
+        if (!enabled) {
+            return null;
+        }
+
+        String resolvedModel = llmClassifierModel;
+        if (resolvedModel == null || resolvedModel.isBlank()) {
+            resolvedModel = System.getenv("KAIRO_CODE_LLM_CLASSIFIER_MODEL");
+        }
+        if ((resolvedModel == null || resolvedModel.isBlank()) && fileConfig != null) {
+            resolvedModel = fileConfig.getProperty("llm-classifier-model");
+        }
+        if (resolvedModel != null && resolvedModel.isBlank()) {
+            resolvedModel = null;
+        }
+
+        // cacheSize / timeoutMillis stay on defaults — exposing them as CLI flags now would
+        // ossify the surface before we have any tuning evidence. The record's compact ctor
+        // backfills 512 / 5_000ms when zero is passed.
+        return new LlmClassifierConfig(true, resolvedModel, 0, 0L);
+    }
+
+    private static boolean isTruthy(String raw) {
+        if (raw == null) return false;
+        String v = raw.trim().toLowerCase();
+        return v.equals("true") || v.equals("1") || v.equals("yes") || v.equals("on");
     }
 
     /**
