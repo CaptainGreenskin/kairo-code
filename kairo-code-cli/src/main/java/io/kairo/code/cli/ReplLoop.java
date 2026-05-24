@@ -223,9 +223,17 @@ public class ReplLoop {
             TaskToolDependencies taskDeps = buildTaskDependencies(
                     config, kairoDir, terminalReader, writer, approvalHandler, skillRegistry);
 
+            // Output-budget tracker — per-session, used by the "+500k" / "spend 2M tokens" DSL.
+            // Stays empty (no nudges) until startTurn() is called below on a user prompt that
+            // carries the syntax. Living here (not inside CodeAgentFactory) so ReplLoop can both
+            // hand it to the hook AND drive startTurn / endTurn from the input loop.
+            final io.kairo.core.context.budget.OutputBudgetTracker outputBudgetTracker =
+                    new io.kairo.core.context.budget.OutputBudgetTracker();
+
             // Wire shell hooks if configured. ShellHookListener bridges kairo @HookHandler events
             // to user-configured shell commands (~/.kairo-code/hooks.json).
             List<Object> allHooks = new ArrayList<>(hooks);
+            allHooks.add(new io.kairo.core.context.budget.OutputBudgetHook(outputBudgetTracker));
             ShellHookListener shellHookListener = null;
             HookExecutor hookExecutor = null;
             if (!hooksConfig.isEmpty()) {
@@ -532,13 +540,36 @@ public class ReplLoop {
                     continue;
                 }
 
+                // Output-budget DSL: if the prompt has "+500k" / "spend 2M tokens" syntax,
+                // snapshot the tracker and feed the model the prompt with the syntax stripped.
+                // Without strip, the literal "+500k" would read like a typo to the model.
+                io.kairo.core.context.budget.OutputBudgetParser.ParseResult budgetParse =
+                        io.kairo.core.context.budget.OutputBudgetParser.parseAndStrip(trimmed);
+                String agentInput = trimmed;
+                if (budgetParse.budget().isPresent()) {
+                    var budget = budgetParse.budget().get();
+                    outputBudgetTracker.startTurn(budget);
+                    agentInput = budgetParse.strippedPrompt();
+                    writer.println(
+                            "\033[36m[output budget: "
+                                    + formatBudget(budget.totalTokens())
+                                    + " tokens — agent will keep working until ≥ 90% used]\033[0m");
+                    writer.flush();
+                }
+
                 // Regular input — send to agent via StreamingAgentRunner
                 // Persist user turn to session JSONL before sending to agent
                 if (context.sessionWriter() != null) {
                     context.sessionWriter().appendTurn(
-                            "user", trimmed, 0, java.time.Instant.now());
+                            "user", agentInput, 0, java.time.Instant.now());
                 }
-                executeAgentCall(trimmed, context, runner, writer);
+                try {
+                    executeAgentCall(agentInput, context, runner, writer);
+                } finally {
+                    // Clear budget so the NEXT user prompt without budget syntax doesn't
+                    // inherit the previous turn's nudge loop.
+                    outputBudgetTracker.endTurn();
+                }
             }
 
             // Print session summary on normal exit (e.g., :exit command)
@@ -820,6 +851,20 @@ public class ReplLoop {
                 ? ReplLoop.class.getPackage().getImplementationVersion()
                 : null;
         return v != null ? v : "dev";
+    }
+
+    /** Human-readable form of an output-budget for the REPL banner: 500_000 → "500k", 2_000_000 → "2m". */
+    static String formatBudget(long tokens) {
+        if (tokens >= 1_000_000_000L) {
+            return (tokens / 1_000_000_000L) + "b";
+        }
+        if (tokens >= 1_000_000L) {
+            return (tokens / 1_000_000L) + "m";
+        }
+        if (tokens >= 1_000L) {
+            return (tokens / 1_000L) + "k";
+        }
+        return String.valueOf(tokens);
     }
 
     private static Path ensureKairoDir() {
