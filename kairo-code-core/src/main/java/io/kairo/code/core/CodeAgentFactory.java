@@ -70,6 +70,7 @@ import io.kairo.tools.agent.TodoReadTool;
 import io.kairo.tools.agent.TodoWriteTool;
 import io.kairo.tools.info.AskUserTool;
 import io.kairo.tools.info.WebFetchTool;
+import io.kairo.tools.cron.SleepTool;
 import io.kairo.tools.exec.MvnTool;
 import io.kairo.tools.exec.VerifyExecutionTool;
 import io.kairo.tools.file.BatchReadTool;
@@ -203,6 +204,9 @@ public final class CodeAgentFactory {
         // mvn/npm/pytest/cargo/make and reports per-command pass/fail + verified bool.
         // Paired with PostBatchEditVerifyHook's nudge after batch Java edits.
         registry.registerTool(VerifyExecutionTool.class);
+        // Sleep: lets the agent voluntarily pause (poll CI, rate-limit bulk ops, demo pacing).
+        // Reactor-cancellable, capped at 24h. For longer waits the agent should use CronCreate.
+        registry.registerTool(SleepTool.class);
         registry.registerTool(GithubTool.class);
         if (System.getenv("TAVILY_API_KEY") != null && !System.getenv("TAVILY_API_KEY").isBlank()) {
             registry.registerTool(WebSearchTool.class);
