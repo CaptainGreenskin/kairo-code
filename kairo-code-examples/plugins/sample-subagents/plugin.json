@@ -1,0 +1,7 @@
+{
+  "name": "sample-subagents",
+  "version": "0.1.0",
+  "description": "Reference plugin demonstrating the agents/*.md subagent format for kairo-code.",
+  "author": "@kairo",
+  "license": "Apache-2.0"
+}

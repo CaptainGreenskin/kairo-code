@@ -50,6 +50,66 @@ The `skills/` directory follows the same format as user skills (see
 [Skills](./skills)). Other supported directories: `commands/`, `agents/`,
 `hooks/`, `mcp/`, `bin/`, `output-styles/`.
 
+## Subagents (`agents/*.md`)
+
+Each `.md` file in `agents/` declares one subagent — an LLM persona with
+its own system prompt, an optional tool whitelist, and an optional model
+pin. The filename minus `.md` is the default subagent name; the YAML
+frontmatter overrides metadata; the body is the system prompt.
+
+```markdown
+---
+name: code-reviewer
+description: Reviews code diffs and flags issues by severity
+model: claude-haiku-4-5-20251001   # optional — null = inherit parent
+tools:                              # optional — empty = inherit parent
+  - read
+  - grep
+---
+You are a meticulous code reviewer.
+
+Read the diff and report issues by severity:
+- BLOCKER: must fix before merge (correctness, security)
+- MAJOR: should fix (perf, maintainability)
+- MINOR: nit / style
+```
+
+Frontmatter fields are all optional:
+
+| Field         | Default               | Purpose                                          |
+|---------------|-----------------------|--------------------------------------------------|
+| `name`        | filename minus `.md`  | Subagent name; combined with plugin namespace.   |
+| `description` | empty string          | Hint to the parent agent when deciding to delegate. |
+| `model`       | null (inherit parent) | Model alias to pin — e.g. cheap haiku for triage. |
+| `tools`       | `[]` (inherit parent) | Whitelist by tool name; unknown names dropped.   |
+
+Once the plugin is enabled, subagents are registered in the
+`SubagentRegistry` under the qualified name `<plugin-namespace>:<name>`
+(or just `<name>` if the plugin is unnamespaced). Programs embedding
+Kairo can resolve them via `SubagentRegistry.get(qualifiedName)` and
+spawn them through the framework's `agent_spawn` tool.
+
+> **kairo-code REPL note (2026-05):** the REPL today uses the `task`
+> tool for child sessions (see [m3-task-tool-demo](../m3-task-tool-demo)).
+> Plugin-contributed subagents are loaded and registered, but a unified
+> wiring that lets the REPL spawn them as first-class personas alongside
+> the expert-role mechanism is being designed — track in [ADR-031 (draft)].
+> Use the SDK path below if you need to drive a plugin subagent today.
+>
+> A bundled reference plugin lives at
+> [`kairo-code-examples/plugins/sample-subagents`](https://github.com/captaingreenskin/kairo-code/tree/main/kairo-code-examples/plugins/sample-subagents)
+> with two ready-to-use subagents (`code-reviewer`, `test-runner`).
+
+```java
+// Embedding path: resolve a plugin-contributed subagent and spawn it
+SubagentRegistry registry = pluginManager.subagentRegistry();
+AgentSpawnTool spawn = new AgentSpawnTool(agentFactory, parentConfig, registry);
+ToolResult result = spawn.execute(
+    Map.of("subagent_type", "my-plugin:code-reviewer",
+           "task", "review the diff in /tmp/pr-42.patch"),
+    toolContext).block();
+```
+
 ## Variable substitution
 
 Use `${KAIRO_PLUGIN_ROOT}` in any plugin file to refer to its install
