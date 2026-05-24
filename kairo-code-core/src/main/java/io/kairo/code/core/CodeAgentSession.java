@@ -4,6 +4,7 @@ import io.kairo.api.agent.Agent;
 import io.kairo.code.core.hook.SessionMetricsCollector;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
+import io.kairo.core.guardrail.policy.LlmBashClassifier;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
 import io.kairo.mcp.McpClientRegistry;
@@ -27,6 +28,10 @@ import java.util.Set;
  * @param sessionMetricsCollector mid-session tool/file/iteration counters (powers
  *     {@code KAIRO_SESSION_RESULT.json} and the {@code /api/sessions/{id}/metrics}
  *     endpoint); null only for legacy REPL-construction paths that pre-date metrics
+ * @param llmBashClassifier the LLM fallback classifier wired into DangerousCommandPolicy when
+ *     {@link LlmClassifierConfig#enabled()} is true; null when the policy stays in heuristic-only
+ *     mode. Exposed so {@code :stats} can render verdict counts / cache hit-rate / LLM-call counters
+ *     — without this handle there's no way for the user to confirm the fallback is actually firing.
  */
 public record CodeAgentSession(
         Agent agent,
@@ -36,7 +41,8 @@ public record CodeAgentSession(
         McpClientRegistry mcpRegistry,
         ToolUsageTracker toolUsageTracker,
         TurnMetricsCollector turnMetricsCollector,
-        SessionMetricsCollector sessionMetricsCollector) {
+        SessionMetricsCollector sessionMetricsCollector,
+        LlmBashClassifier llmBashClassifier) {
 
     public CodeAgentSession(
             Agent agent,
@@ -44,7 +50,7 @@ public record CodeAgentSession(
             DefaultToolRegistry toolRegistry,
             Set<String> loadedSkills) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, null,
-                new ToolUsageTracker(), new TurnMetricsCollector(), null);
+                new ToolUsageTracker(), new TurnMetricsCollector(), null, null);
     }
 
     public CodeAgentSession(
@@ -54,7 +60,7 @@ public record CodeAgentSession(
             Set<String> loadedSkills,
             McpClientRegistry mcpRegistry) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
-                new ToolUsageTracker(), new TurnMetricsCollector(), null);
+                new ToolUsageTracker(), new TurnMetricsCollector(), null, null);
     }
 
     /** Legacy 7-arg constructor (pre-sessionMetricsCollector) preserved for callers. */
@@ -67,7 +73,21 @@ public record CodeAgentSession(
             ToolUsageTracker toolUsageTracker,
             TurnMetricsCollector turnMetricsCollector) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
-                toolUsageTracker, turnMetricsCollector, null);
+                toolUsageTracker, turnMetricsCollector, null, null);
+    }
+
+    /** Legacy 8-arg constructor (pre-llmBashClassifier) preserved for callers. */
+    public CodeAgentSession(
+            Agent agent,
+            DefaultToolExecutor toolExecutor,
+            DefaultToolRegistry toolRegistry,
+            Set<String> loadedSkills,
+            McpClientRegistry mcpRegistry,
+            ToolUsageTracker toolUsageTracker,
+            TurnMetricsCollector turnMetricsCollector,
+            SessionMetricsCollector sessionMetricsCollector) {
+        this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
+                toolUsageTracker, turnMetricsCollector, sessionMetricsCollector, null);
     }
 
     public CodeAgentSession {
@@ -77,6 +97,7 @@ public record CodeAgentSession(
         loadedSkills = loadedSkills == null ? Set.of() : Set.copyOf(loadedSkills);
         if (toolUsageTracker == null) toolUsageTracker = new ToolUsageTracker();
         if (turnMetricsCollector == null) turnMetricsCollector = new TurnMetricsCollector();
-        // sessionMetricsCollector intentionally nullable — REPL paths don't auto-register it
+        // sessionMetricsCollector intentionally nullable — REPL paths don't auto-register it.
+        // llmBashClassifier intentionally nullable — only set when the fallback is enabled.
     }
 }

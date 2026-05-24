@@ -49,9 +49,12 @@ class CodeAgentFactoryLlmClassifierTest {
                 new CodeAgentConfig(
                         "test-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
 
-        var policy =
-                CodeAgentFactory.buildDangerousCommandPolicy(
+        var classifier =
+                CodeAgentFactory.buildLlmBashClassifierIfEnabled(
                         config, CodeAgentFactory.SessionOptions.empty(), provider);
+        assertThat(classifier).isNull();
+
+        var policy = CodeAgentFactory.buildDangerousCommandPolicy(classifier);
         var decision = policy.evaluate(preBash("./obscure.sh")).block();
 
         assertThat(decision.action()).isEqualTo(GuardrailDecision.Action.ALLOW);
@@ -76,9 +79,11 @@ class CodeAgentFactoryLlmClassifierTest {
                         null,
                         LlmClassifierConfig.enabledDefault());
 
-        var policy =
-                CodeAgentFactory.buildDangerousCommandPolicy(
+        var classifier =
+                CodeAgentFactory.buildLlmBashClassifierIfEnabled(
                         config, CodeAgentFactory.SessionOptions.empty(), provider);
+        assertThat(classifier).isNotNull();
+        var policy = CodeAgentFactory.buildDangerousCommandPolicy(classifier);
         var decision = policy.evaluate(preBash("./obscure.sh")).block();
 
         assertThat(decision.action()).isEqualTo(GuardrailDecision.Action.DENY);
@@ -105,9 +110,10 @@ class CodeAgentFactoryLlmClassifierTest {
                         null,
                         LlmClassifierConfig.enabledDefault());
 
-        var policy =
-                CodeAgentFactory.buildDangerousCommandPolicy(
+        var classifier =
+                CodeAgentFactory.buildLlmBashClassifierIfEnabled(
                         config, CodeAgentFactory.SessionOptions.empty(), provider);
+        var policy = CodeAgentFactory.buildDangerousCommandPolicy(classifier);
         var decision = policy.evaluate(preBash("rm -rf /")).block();
 
         assertThat(decision.action()).isEqualTo(GuardrailDecision.Action.DENY);
@@ -134,9 +140,10 @@ class CodeAgentFactoryLlmClassifierTest {
                         null,
                         new LlmClassifierConfig(true, "haiku-cheapo", 64, 1_500L));
 
-        var policy =
-                CodeAgentFactory.buildDangerousCommandPolicy(
+        var classifier =
+                CodeAgentFactory.buildLlmBashClassifierIfEnabled(
                         config, CodeAgentFactory.SessionOptions.empty(), provider);
+        var policy = CodeAgentFactory.buildDangerousCommandPolicy(classifier);
         var decision = policy.evaluate(preBash("./mystery.sh")).block();
 
         assertThat(decision.action()).isEqualTo(GuardrailDecision.Action.WARN);

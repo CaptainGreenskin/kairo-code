@@ -4,20 +4,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentState;
+import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
+import io.kairo.api.model.ModelConfig;
+import io.kairo.api.model.ModelProvider;
+import io.kairo.api.model.ModelResponse;
 import io.kairo.code.cli.CommandRegistry;
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.stats.ToolUsageTracker;
+import io.kairo.core.guardrail.policy.LlmBashClassifier;
 import io.kairo.core.tool.DefaultPermissionGuard;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 class StatsCommandTest {
@@ -94,16 +101,100 @@ class StatsCommandTest {
         assertThat(output).contains("100.0%");
     }
 
+    @Test
+    void noToolUsage_butClassifierWired_stillShowsClassifierSection() {
+        // Regression guard for an empty-but-enabled session: previously :stats short-circuited on
+        // "no tool usage" and the user couldn't tell whether the LLM fallback was actually wired.
+        LlmBashClassifier classifier = new LlmBashClassifier(stubProvider(), "test-model");
+        ReplContext context = createContext(new ToolUsageTracker(), classifier);
+
+        new StatsCommand().execute("", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("LLM Bash Classifier");
+        assertThat(output).contains("LLM calls         : 0");
+        assertThat(output).doesNotContain("No tool usage recorded yet.");
+    }
+
+    @Test
+    void classifierCounters_renderAfterAFiredLlmCall() {
+        // Drive an UNKNOWN command through the classifier so cache-miss + llm-call + verdict
+        // counters all tick. Asserts that the surface actually reflects classifier state — without
+        // this the user has no way to confirm the fallback is firing.
+        LlmBashClassifier classifier =
+                new LlmBashClassifier(
+                        stubProvider("{\"category\":\"DESTRUCTIVE\",\"reason\":\"x\"}"),
+                        "test-model");
+        classifier.classify("./obscure-script.sh").block();
+
+        ReplContext context = createContext(new ToolUsageTracker(), classifier);
+        new StatsCommand().execute("", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("LLM Bash Classifier");
+        assertThat(output).contains("LLM calls         : 1");
+        assertThat(output).contains("Cache hits/misses : 0 / 1");
+        assertThat(output).contains("Verdict breakdown");
+        assertThat(output).contains("DESTRUCTIVE");
+    }
+
+    @Test
+    void classifierNotWired_existingBehaviourUnchanged() {
+        // Pin the disabled-by-default case so users without the fallback don't see surprising
+        // empty headers.
+        ReplContext context = createContext(new ToolUsageTracker());
+        new StatsCommand().execute("", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("No tool usage recorded yet.");
+        assertThat(output).doesNotContain("LLM Bash Classifier");
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────
 
     private ReplContext createContext(ToolUsageTracker tracker) {
+        return createContext(tracker, null);
+    }
+
+    private ReplContext createContext(ToolUsageTracker tracker, LlmBashClassifier classifier) {
         DefaultToolRegistry toolRegistry = new DefaultToolRegistry();
         DefaultToolExecutor toolExecutor =
                 new DefaultToolExecutor(toolRegistry, new DefaultPermissionGuard());
         CodeAgentSession session =
-                new CodeAgentSession(stubAgent(), toolExecutor, toolRegistry, Set.of(), null, tracker, null);
+                new CodeAgentSession(
+                        stubAgent(), toolExecutor, toolRegistry, Set.of(), null,
+                        tracker, null, null, classifier);
         return new ReplContext(
                 session, config, null, registry, writer, null, null, null, null);
+    }
+
+    private static ModelProvider stubProvider() {
+        return stubProvider("{\"category\":\"UNKNOWN\"}");
+    }
+
+    private static ModelProvider stubProvider(String responseJson) {
+        return new ModelProvider() {
+            @Override
+            public Mono<ModelResponse> call(List<Msg> messages, ModelConfig config) {
+                return Mono.just(
+                        new ModelResponse(
+                                "stub-id",
+                                List.of(new Content.TextContent(responseJson)),
+                                new ModelResponse.Usage(0, 0, 0, 0),
+                                ModelResponse.StopReason.END_TURN,
+                                "stub-model"));
+            }
+
+            @Override
+            public Flux<ModelResponse> stream(List<Msg> messages, ModelConfig config) {
+                return Flux.from(call(messages, config));
+            }
+
+            @Override
+            public String name() {
+                return "stub-provider";
+            }
+        };
     }
 
     private static Agent stubAgent() {

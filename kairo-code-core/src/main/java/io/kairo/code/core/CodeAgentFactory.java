@@ -488,12 +488,19 @@ public final class CodeAgentFactory {
         //   - ToolLoopDetectionPolicy (M-F5a, upstream): warns/denies same (tool, args) loops
         // KAIRO_PII_REDACTION=off skips the PII step (debugging) — the dangerous-command /
         // path-traversal / loop policies stay on regardless.
+        // Build the classifier once so the same instance feeds the policy AND the session — the
+        // session-held reference is what powers :stats. Building inline (rather than inside the
+        // try/catch below) keeps the bootstrap exception surface narrow: a classifier-construction
+        // failure should look like a guardrail-chain failure, not bring down agent creation.
+        io.kairo.core.guardrail.policy.LlmBashClassifier llmClassifier =
+                buildLlmBashClassifierIfEnabled(config, options, modelProvider);
+
         try {
             var policies = new java.util.ArrayList<io.kairo.api.guardrail.GuardrailPolicy>();
             if (!"off".equalsIgnoreCase(System.getenv("KAIRO_PII_REDACTION"))) {
                 policies.add(new io.kairo.security.pii.PiiRedactionPolicy());
             }
-            policies.add(buildDangerousCommandPolicy(config, options, modelProvider));
+            policies.add(buildDangerousCommandPolicy(llmClassifier));
             policies.add(new io.kairo.core.guardrail.policy.PathTraversalPolicy());
             policies.add(new io.kairo.core.guardrail.policy.ToolLoopDetectionPolicy());
             builder.guardrailChain(new io.kairo.core.guardrail.DefaultGuardrailChain(policies));
@@ -507,23 +514,25 @@ public final class CodeAgentFactory {
         TurnMetricsCollector turnMetrics = findTurnMetricsCollector(hooks);
         return new CodeAgentSession(
                 agent, executor, registry, activeSkills, mcpRegistry,
-                tracker, turnMetrics, sessionMetrics);
+                tracker, turnMetrics, sessionMetrics, llmClassifier);
     }
 
     /**
-     * Build the dangerous-command guardrail with the LLM fallback wired iff the user opted in via
-     * {@link LlmClassifierConfig#enabled()}. The fallback rides on the SAME {@link ModelProvider}
-     * the agent already authenticated — no extra credentials to manage, and any tracer the caller
-     * passed via {@link SessionOptions#tracer()} is propagated so the LLM span shows up next to the
-     * agent's reasoning spans in Langfuse / OTel. Failures inside the classifier degrade to
-     * {@code UNKNOWN→ALLOW} (preserving today's semantics), so a model outage cannot escalate to
-     * a deny-storm.
+     * Build the LLM-backed fallback classifier iff the user opted in via
+     * {@link LlmClassifierConfig#enabled()}, else return {@code null}. The fallback rides on the
+     * SAME {@link ModelProvider} the agent already authenticated — no extra credentials to manage,
+     * and any tracer the caller passed via {@link SessionOptions#tracer()} is propagated so the
+     * LLM span shows up next to the agent's reasoning spans in Langfuse / OTel.
+     *
+     * <p>Split out of {@code buildDangerousCommandPolicy} so the same classifier instance can also
+     * be threaded into {@link CodeAgentSession} for {@code :stats} visibility — without this seam
+     * the REPL has no way to confirm the fallback is actually firing.
      */
-    static io.kairo.core.guardrail.policy.DangerousCommandPolicy buildDangerousCommandPolicy(
+    static io.kairo.core.guardrail.policy.LlmBashClassifier buildLlmBashClassifierIfEnabled(
             CodeAgentConfig config, SessionOptions options, ModelProvider modelProvider) {
         LlmClassifierConfig llmCfg = config.llmClassifier();
         if (llmCfg == null || !llmCfg.enabled()) {
-            return new io.kairo.core.guardrail.policy.DangerousCommandPolicy();
+            return null;
         }
         String model =
                 (llmCfg.model() != null && !llmCfg.model().isBlank())
@@ -536,9 +545,21 @@ public final class CodeAgentFactory {
         if (options != null && options.tracer() != null) {
             cfgBuilder.tracer(options.tracer());
         }
-        var classifier =
-                new io.kairo.core.guardrail.policy.LlmBashClassifier(
-                        modelProvider, model, cfgBuilder.build());
+        return new io.kairo.core.guardrail.policy.LlmBashClassifier(
+                modelProvider, model, cfgBuilder.build());
+    }
+
+    /**
+     * Wrap the (optional) LLM fallback in a {@link io.kairo.core.guardrail.policy.DangerousCommandPolicy}.
+     * Null classifier → heuristic-only policy. Failures inside the classifier degrade to
+     * {@code UNKNOWN→ALLOW} (preserving today's semantics), so a model outage cannot escalate to
+     * a deny-storm.
+     */
+    static io.kairo.core.guardrail.policy.DangerousCommandPolicy buildDangerousCommandPolicy(
+            io.kairo.core.guardrail.policy.LlmBashClassifier classifier) {
+        if (classifier == null) {
+            return new io.kairo.core.guardrail.policy.DangerousCommandPolicy();
+        }
         return new io.kairo.core.guardrail.policy.DangerousCommandPolicy(
                 io.kairo.core.guardrail.policy.DangerousCommandPolicy.DEFAULT_SHELL_TOOLS,
                 classifier);
