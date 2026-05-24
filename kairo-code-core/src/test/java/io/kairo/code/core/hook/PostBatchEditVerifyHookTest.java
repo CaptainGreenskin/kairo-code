@@ -63,6 +63,14 @@ class PostBatchEditVerifyHookTest {
         return new Content.ToolUseContent("tool-2", "bash", Map.of("command", command));
     }
 
+    private static Content.ToolUseContent verifyExecution() {
+        return new Content.ToolUseContent("tool-v", "verify_execution", Map.of());
+    }
+
+    private static Content.ToolUseContent mvn(String... goals) {
+        return new Content.ToolUseContent("tool-m", "mvn", Map.of("goals", List.of(goals)));
+    }
+
     private static Content.ToolUseContent readFile(String path) {
         return new Content.ToolUseContent("tool-3", "read", Map.of("path", path));
     }
@@ -177,6 +185,50 @@ class PostBatchEditVerifyHookTest {
         HookResult<PostReasoningEvent> r3 =
                 hook.onPostReasoning(eventWithToolCalls(readFile("src/main/java/Util.java")));
         assertThat(r3.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+    }
+
+    @Test
+    void verifyExecutionCall_resetsCounter() {
+        // M-PlanVerify step 3: verify_execution is the canonical wrapper. Calling it must reset
+        // the post-edit countdown the same way bash `mvn test` does — otherwise the agent gets
+        // an annoying double-nudge ("you didn't verify!" right after it just called verify).
+        PostBatchEditVerifyHook hook = new PostBatchEditVerifyHook(false);
+
+        hook.onPostReasoning(eventWithToolCalls(editFile("src/main/java/Foo.java")));
+        hook.onPostReasoning(eventWithToolCalls(verifyExecution()));
+
+        // Idle turn after verify — must NOT inject.
+        HookResult<PostReasoningEvent> r3 = hook.onPostReasoning(emptyTurnEvent());
+        assertThat(r3.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+    }
+
+    @Test
+    void mvnToolCall_resetsCounter() {
+        // The structured `mvn` tool counts as verification too — agent shouldn't be punished
+        // for picking the typed Maven tool over the raw bash command.
+        PostBatchEditVerifyHook hook = new PostBatchEditVerifyHook(false);
+
+        hook.onPostReasoning(eventWithToolCalls(editFile("src/main/java/Foo.java")));
+        hook.onPostReasoning(eventWithToolCalls(mvn("test")));
+
+        HookResult<PostReasoningEvent> r3 = hook.onPostReasoning(emptyTurnEvent());
+        assertThat(r3.decision()).isEqualTo(HookResult.Decision.CONTINUE);
+    }
+
+    @Test
+    void injectedMessage_pointsAtVerifyExecutionAsPrimaryPath() {
+        // The nudge must surface the new canonical wrapper as the first option so the agent
+        // adopts the structured path; raw `mvn test` stays as the documented fallback.
+        PostBatchEditVerifyHook hook = new PostBatchEditVerifyHook(false);
+        hook.onPostReasoning(eventWithToolCalls(editFile("src/main/java/Foo.java")));
+        HookResult<PostReasoningEvent> r = hook.onPostReasoning(emptyTurnEvent());
+
+        assertThat(r.decision()).isEqualTo(HookResult.Decision.INJECT);
+        String msg = r.injectedMessage().text();
+        assertThat(msg).contains("verify_execution");
+        // verify_execution must appear BEFORE the bash/mvn fallback — order communicates priority.
+        assertThat(msg.indexOf("verify_execution"))
+                .isLessThan(msg.indexOf("mvn test"));
     }
 
     @Test

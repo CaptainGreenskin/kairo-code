@@ -41,9 +41,18 @@ public final class PostBatchEditVerifyHook {
 
     private static final Set<String> EDIT_TOOLS = Set.of("write", "edit");
 
+    /**
+     * Tool names that count as "verification ran" — invoking any of these resets the
+     * post-edit countdown. `bash` covers manual {@code mvn test} / {@code npm test} runs;
+     * `verify_execution` is the canonical wrapper (auto-detects build system); `mvn` is
+     * the structured Maven tool when the agent uses it directly.
+     */
+    private static final Set<String> VERIFY_TOOLS = Set.of("bash", "verify_execution", "mvn");
+
     private static final String INJECT_MESSAGE =
             "You have made edits to Java files but have not run any verification command. "
-                    + "Run `mvn test` NOW to check if your changes are correct. "
+                    + "Call `verify_execution` NOW (it auto-detects the build system and runs"
+                    + " `mvn test`), or invoke `mvn test` directly via bash. "
                     + "Do not make more edits until you see the test results.";
 
     /**
@@ -73,7 +82,7 @@ public final class PostBatchEditVerifyHook {
         }
 
         ModelResponse response = event.response();
-        boolean hasBash = false;
+        boolean hasVerify = false;
         boolean hasJavaEdit = false;
 
         boolean hasAnyToolCall = false;
@@ -82,8 +91,8 @@ public final class PostBatchEditVerifyHook {
                 if (content instanceof Content.ToolUseContent toolUse) {
                     hasAnyToolCall = true;
                     String toolName = toolUse.toolName();
-                    if ("bash".equals(toolName)) {
-                        hasBash = true;
+                    if (VERIFY_TOOLS.contains(toolName)) {
+                        hasVerify = true;
                     }
                     if (EDIT_TOOLS.contains(toolName)) {
                         Object pathValue = toolUse.input().get("path");
@@ -95,8 +104,8 @@ public final class PostBatchEditVerifyHook {
             }
         }
 
-        if (hasBash) {
-            // Verification happened — reset.
+        if (hasVerify) {
+            // Verification happened (bash / verify_execution / mvn) — reset.
             turnsSinceEdit = 0;
             return HookResult.proceed(event);
         }

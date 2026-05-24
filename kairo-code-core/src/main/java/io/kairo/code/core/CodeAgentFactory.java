@@ -71,6 +71,7 @@ import io.kairo.tools.agent.TodoWriteTool;
 import io.kairo.tools.info.AskUserTool;
 import io.kairo.tools.info.WebFetchTool;
 import io.kairo.tools.exec.MvnTool;
+import io.kairo.tools.exec.VerifyExecutionTool;
 import io.kairo.tools.file.BatchReadTool;
 import io.kairo.tools.file.BatchWriteTool;
 import io.kairo.tools.file.DiffTool;
@@ -198,6 +199,10 @@ public final class CodeAgentFactory {
         registry.registerTool(PatchApplyTool.class);
         registry.registerTool(SearchReplaceTool.class);
         registry.registerTool(MvnTool.class);
+        // verify_execution: language-agnostic Plan→Execute→Verify closer. Auto-detects
+        // mvn/npm/pytest/cargo/make and reports per-command pass/fail + verified bool.
+        // Paired with PostBatchEditVerifyHook's nudge after batch Java edits.
+        registry.registerTool(VerifyExecutionTool.class);
         registry.registerTool(GithubTool.class);
         if (System.getenv("TAVILY_API_KEY") != null && !System.getenv("TAVILY_API_KEY").isBlank()) {
             registry.registerTool(WebSearchTool.class);
