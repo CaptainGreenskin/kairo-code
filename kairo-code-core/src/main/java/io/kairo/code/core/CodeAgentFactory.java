@@ -73,6 +73,7 @@ import io.kairo.tools.info.WebFetchTool;
 import io.kairo.tools.cron.SleepTool;
 import io.kairo.tools.exec.MvnTool;
 import io.kairo.tools.exec.VerifyExecutionTool;
+import io.kairo.tools.workflow.WorkflowTool;
 import io.kairo.tools.file.BatchReadTool;
 import io.kairo.tools.file.BatchWriteTool;
 import io.kairo.tools.file.DiffTool;
@@ -207,6 +208,10 @@ public final class CodeAgentFactory {
         // Sleep: lets the agent voluntarily pause (poll CI, rate-limit bulk ops, demo pacing).
         // Reactor-cancellable, capped at 24h. For longer waits the agent should use CronCreate.
         registry.registerTool(SleepTool.class);
+        // Workflow tool — schema registration only here. The instance + executor injection
+        // happens AFTER the DefaultToolExecutor is constructed below (it doesn't exist yet at
+        // this point in the bootstrap).
+        registry.registerTool(WorkflowTool.class);
         registry.registerTool(GithubTool.class);
         if (System.getenv("TAVILY_API_KEY") != null && !System.getenv("TAVILY_API_KEY").isBlank()) {
             registry.registerTool(WebSearchTool.class);
@@ -253,6 +258,12 @@ public final class CodeAgentFactory {
             executor.setPermissionMode(
                     io.kairo.core.tool.permission.PermissionMode.BYPASS);
         }
+
+        // Workflow tool — the schema is already registered above; now inject the executor
+        // so the tool can dispatch each step back through the same executor the agent uses.
+        WorkflowTool workflowTool = new WorkflowTool();
+        workflowTool.setToolExecutor(executor);
+        registry.registerInstance("workflow", workflowTool);
 
         // --- M57-002: plan mode tools (require executor) ---
         EnterPlanModeTool enterPlanMode = new EnterPlanModeTool();
