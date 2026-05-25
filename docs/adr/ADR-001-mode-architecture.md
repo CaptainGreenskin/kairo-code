@@ -63,12 +63,12 @@ Adopt a **four-mode layered architecture**:
 3. **Experts is the opinionated preset; Team is the open framework.** Once Team mode exists, Experts becomes a configured instance of it (fixed role registry + Canvas projection), not a parallel implementation.
 4. **`SwarmCoordinator` stays bound to Experts/Team session payloads, not to the Agent-mode tool registry.** It is an out-of-band, session-level orchestrator.
 
-### Implementation order
+### Implementation status & order
 
-1. **Now (this session):** Revert #55. Remove `expert_team` from Agent-mode `ToolRegistry`. Keep `SessionOptions.withSwarmCoordinator(...)` as plumbing for the future Team payload — the field is harmless and avoids touching the record again.
-2. **Next (M-Subagent):** Build the Subagent primitive as a model-facing tool (`subagent` or `task`) — Claude Task-style: spawn isolated child, restricted tool set, return single result. This is the right thing to put in Agent mode.
-3. **Then (M-Team):** Add Team mode as a new session mode in `AgentService` (`TeamSessionPayload`-style). P2P `SendMessage`, shared `TaskList`. `SwarmCoordinator` plugs in here.
-4. **Then (M-Experts-Upgrade):** Refactor today's Experts mode to be a configured preset of Team mode — fixed `ExpertRoleRegistry`, Canvas projection, self-evolution toggle.
+1. ✅ **Subagent — already shipped in M3** (`io.kairo.code.core.task.TaskTool`, `name="task"`). Spawns isolated child `CodeAgentSession` in a fresh worktree, supports `expert_role` specialization via `ExpertRoleRegistry`, prompts for merge/discard/keep on write tasks, and guards against recursion (child sessions never get the `task` tool). This is the Claude-style Task tool primitive — no further work needed in this lane.
+2. ✅ **Now (this session, task #57):** Reverted #55. Removed `expert_team` from Agent-mode `ToolRegistry`. Kept `SessionOptions.withSwarmCoordinator(...)` as plumbing for the future Team payload — the field is harmless and avoids touching the record again.
+3. 🔨 **Next (M-Team):** Add Team mode as a new session mode in `AgentService`. The existing `TeamSessionPayload` is *misnamed* — it actually serves today's Experts mode (DAG-style batch via `SwarmCoordinator`). M-Team needs either (a) a new payload type alongside (`LiveTeamSessionPayload`?) or (b) renaming the existing one to `ExpertsSessionPayload` and introducing the new `TeamSessionPayload` for the live P2P model. The Claude-style behavior to add: long-lived team of roles, peer-to-peer `SendMessage`, shared `TaskList`, dynamic role composition.
+4. 🔨 **Then (M-Experts-Upgrade):** Refactor today's Experts mode to be a configured preset of Team mode — fixed `ExpertRoleRegistry` roster, Canvas projection, self-evolution toggle. After M-Team this collapses naturally.
 
 ## Consequences
 
@@ -100,3 +100,4 @@ Adopt a **four-mode layered architecture**:
 - qoder Experts mode docs — `https://docs.qoder.com/zh/user-guide/quest/experts-mode`
 - Claude Code `TeamCreate` and Task tool — internal `claude-code-best/` reference repo
 - Memory: `feedback_kairo_vision.md`, `feedback_borrow_from_claude_code.md`, `project_kairo_code_expert_team.md`
+- Existing TaskTool implementation: `kairo-code-core/src/main/java/io/kairo/code/core/task/TaskTool.java` (M3, 2026)
