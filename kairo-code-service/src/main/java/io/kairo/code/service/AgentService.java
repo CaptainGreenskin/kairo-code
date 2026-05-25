@@ -299,6 +299,12 @@ public class AgentService implements DisposableBean, InitializingBean {
                     .asReplSession()
                     .withApprovalHandler(approvalHandler)
                     .withHooks(List.of(bridgeHook, compactionHook, planHook));
+            if (swarmCoordinator != null) {
+                // Wire the expert_team tool so the model can dispatch sub-tasks even
+                // outside "experts" mode. Single SwarmCoordinator bean is shared with
+                // TeamSessionPayload above — no extra lifecycle.
+                opts = opts.withSwarmCoordinator(swarmCoordinator);
+            }
             if (tracer != null) {
                 // Wrap so every span carries session.id + langfuse.session.id +
                 // langfuse.user.id. Without this Langfuse can't group multi-turn
@@ -1017,6 +1023,11 @@ public class AgentService implements DisposableBean, InitializingBean {
                 .asReplSession()
                 .withApprovalHandler(approvalHandler)
                 .withHooks(List.of(bridgeHook, compactionHook, planHook));
+        if (swarmCoordinator != null) {
+            // Rebuilt session must keep the expert_team tool — see createSession path
+            // for the wiring rationale.
+            opts = opts.withSwarmCoordinator(swarmCoordinator);
+        }
         if (tracer != null) {
             // Same session-id stamping as createSession — see Langfuse rationale there.
             opts = opts.withTracer(

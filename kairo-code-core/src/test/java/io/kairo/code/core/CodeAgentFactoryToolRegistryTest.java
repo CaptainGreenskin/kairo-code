@@ -10,6 +10,13 @@ import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelConfig;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.api.model.ModelResponse;
+import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.expertteam.ExpertTeamCoordinator;
+import io.kairo.expertteam.SimpleEvaluationStrategy;
+import io.kairo.expertteam.internal.DefaultPlanner;
+import io.kairo.expertteam.role.ExpertRoleRegistry;
+import io.kairo.expertteam.tck.NoopMessageBus;
+import io.kairo.expertteam.tck.StubAgent;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -126,5 +133,52 @@ class CodeAgentFactoryToolRegistryTest {
         CodeAgentConfig config = minimalConfig();
         assertThatCode(() -> CodeAgentFactory.create(config, new StubModelProvider()))
                 .doesNotThrowAnyException();
+    }
+
+    // --- expert_team tool wiring (M-Expert-Wiring) ---
+    // The model-facing tool is only registered when a SwarmCoordinator is provided;
+    // baseline sessions (no team infra) must not see it. Child sessions never see it
+    // either — same rationale as TaskTool (no recursive team spawning).
+
+    private static SwarmCoordinator newSwarmCoordinator() {
+        ExpertRoleRegistry roleRegistry = new ExpertRoleRegistry();
+        DefaultPlanner planner = new DefaultPlanner(roleRegistry, null, null);
+        ExpertTeamCoordinator expertCoordinator = new ExpertTeamCoordinator(
+                null, new SimpleEvaluationStrategy(), null, planner, roleRegistry);
+        return new SwarmCoordinator(
+                expertCoordinator, roleRegistry, new NoopMessageBus(),
+                List.of(StubAgent.fixed("worker", "done")));
+    }
+
+    @Test
+    void expertTeamToolNotRegisteredByDefault() {
+        assertThat(toolNames()).doesNotContain("expert_team");
+    }
+
+    @Test
+    void expertTeamToolRegisteredWhenSwarmCoordinatorWired() {
+        var session = CodeAgentFactory.createSession(minimalConfig(),
+                CodeAgentFactory.SessionOptions.empty()
+                        .withModelProvider(new StubModelProvider())
+                        .withSwarmCoordinator(newSwarmCoordinator()));
+        List<String> names = session.toolRegistry().getAll().stream()
+                .map(io.kairo.api.tool.ToolDefinition::name)
+                .toList();
+        assertThat(names).contains("expert_team");
+    }
+
+    @Test
+    void expertTeamToolNotRegisteredInChildSession() {
+        // Child sessions must not get expert_team even when a coordinator is present —
+        // recursive team spawning is out of scope (mirrors TaskTool's child-session guard).
+        var session = CodeAgentFactory.createSession(minimalConfig(),
+                CodeAgentFactory.SessionOptions.empty()
+                        .withModelProvider(new StubModelProvider())
+                        .withSwarmCoordinator(newSwarmCoordinator())
+                        .asChildSession());
+        List<String> names = session.toolRegistry().getAll().stream()
+                .map(io.kairo.api.tool.ToolDefinition::name)
+                .toList();
+        assertThat(names).doesNotContain("expert_team");
     }
 }
