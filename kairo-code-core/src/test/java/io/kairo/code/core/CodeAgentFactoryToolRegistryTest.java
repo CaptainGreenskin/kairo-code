@@ -135,10 +135,12 @@ class CodeAgentFactoryToolRegistryTest {
                 .doesNotThrowAnyException();
     }
 
-    // --- expert_team tool wiring (M-Expert-Wiring) ---
-    // The model-facing tool is only registered when a SwarmCoordinator is provided;
-    // baseline sessions (no team infra) must not see it. Child sessions never see it
-    // either — same rationale as TaskTool (no recursive team spawning).
+    // --- expert_team tool MUST NOT be registered in Agent mode (ADR-001) ---
+    // Architectural guard: SwarmCoordinator is reserved for Experts mode
+    // (TeamSessionPayload, out-of-band orchestrator). Exposing it as a
+    // model-facing tool in Agent mode would smuggle a multi-minute batch
+    // workflow into a tool-result loop and break the qoder-style mode split.
+    // See kairo-code/docs/adr/ADR-001-mode-architecture.md.
 
     private static SwarmCoordinator newSwarmCoordinator() {
         ExpertRoleRegistry roleRegistry = new ExpertRoleRegistry();
@@ -156,26 +158,15 @@ class CodeAgentFactoryToolRegistryTest {
     }
 
     @Test
-    void expertTeamToolRegisteredWhenSwarmCoordinatorWired() {
+    void expertTeamToolNotRegisteredEvenWhenSwarmCoordinatorWired() {
+        // Regression guard for ADR-001: even when a SwarmCoordinator is attached
+        // to SessionOptions, Agent-mode sessions must not surface expert_team as
+        // a model-facing tool. Re-introducing the wiring would re-create the
+        // sub-second-tool-call vs multi-minute-batch UX mismatch.
         var session = CodeAgentFactory.createSession(minimalConfig(),
                 CodeAgentFactory.SessionOptions.empty()
                         .withModelProvider(new StubModelProvider())
                         .withSwarmCoordinator(newSwarmCoordinator()));
-        List<String> names = session.toolRegistry().getAll().stream()
-                .map(io.kairo.api.tool.ToolDefinition::name)
-                .toList();
-        assertThat(names).contains("expert_team");
-    }
-
-    @Test
-    void expertTeamToolNotRegisteredInChildSession() {
-        // Child sessions must not get expert_team even when a coordinator is present —
-        // recursive team spawning is out of scope (mirrors TaskTool's child-session guard).
-        var session = CodeAgentFactory.createSession(minimalConfig(),
-                CodeAgentFactory.SessionOptions.empty()
-                        .withModelProvider(new StubModelProvider())
-                        .withSwarmCoordinator(newSwarmCoordinator())
-                        .asChildSession());
         List<String> names = session.toolRegistry().getAll().stream()
                 .map(io.kairo.api.tool.ToolDefinition::name)
                 .toList();

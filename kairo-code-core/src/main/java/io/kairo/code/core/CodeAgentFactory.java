@@ -53,7 +53,6 @@ import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.TaskTool;
 import io.kairo.code.core.task.TaskToolDependencies;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.tools.ExpertTeamTool;
 import io.kairo.core.tool.DefaultPermissionGuard;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
@@ -249,14 +248,14 @@ public final class CodeAgentFactory {
             registry.registerTool(TaskTool.class);
         }
 
-        // Register the expert team tool when a SwarmCoordinator is wired AND this is not a
-        // child session. Like TaskTool, recursive expert teams are out of scope — a child
-        // session should not be able to spawn its own team.
-        if (options.swarmCoordinator() != null && !options.childSession()) {
-            registry.registerTool(ExpertTeamTool.class);
-            registry.registerInstance(
-                    "expert_team", new ExpertTeamTool(options.swarmCoordinator()));
-        }
+        // Note: SessionOptions.swarmCoordinator is intentionally NOT exposed to Agent mode
+        // as a model-facing tool. Experts mode (TeamSessionPayload) uses SwarmCoordinator
+        // out-of-band as a session-level orchestrator; making it a tool call in Agent mode
+        // would smuggle a multi-minute batch workflow into a tool-result loop, which
+        // breaks both UX (looks like a hang) and qoder's own use-case split
+        // ("Agent mode is more efficient for simple, well-defined edits"). The field is
+        // retained on SessionOptions for the future Team mode (claude-style long-lived
+        // P2P agents) — see ADR-001 in kairo-code/docs/adr/.
 
         // Wire MCP tools from config if present.
         McpClientRegistry mcpRegistry = registerMcpTools(registry, config);
@@ -1038,10 +1037,17 @@ public final class CodeAgentFactory {
         }
 
         /**
-         * Set the swarm coordinator. When provided (and not a child session), the
-         * {@code expert_team} tool is registered so the model can dispatch sub-tasks to
-         * the expert team. Like {@code TaskTool}, child sessions never get this tool —
-         * recursive teams are out of scope.
+         * Attach a swarm coordinator to the session options.
+         *
+         * <p><b>Not used by Agent mode.</b> Per ADR-001, Agent-mode sessions never
+         * surface the expert team as a model-facing tool — a multi-minute batch
+         * inside a tool-result loop would look like a hang. Experts mode uses
+         * {@link SwarmCoordinator} out-of-band via {@code TeamSessionPayload}.
+         *
+         * <p>This setter is retained on {@code SessionOptions} for the future
+         * Claude-style Team mode (long-lived multi-agent + P2P + shared task list),
+         * which will plumb the coordinator into a different payload type rather
+         * than the model's tool registry.
          */
         public SessionOptions withSwarmCoordinator(SwarmCoordinator coord) {
             return new SessionOptions(

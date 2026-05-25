@@ -299,12 +299,11 @@ public class AgentService implements DisposableBean, InitializingBean {
                     .asReplSession()
                     .withApprovalHandler(approvalHandler)
                     .withHooks(List.of(bridgeHook, compactionHook, planHook));
-            if (swarmCoordinator != null) {
-                // Wire the expert_team tool so the model can dispatch sub-tasks even
-                // outside "experts" mode. Single SwarmCoordinator bean is shared with
-                // TeamSessionPayload above — no extra lifecycle.
-                opts = opts.withSwarmCoordinator(swarmCoordinator);
-            }
+            // SwarmCoordinator is intentionally NOT wired into Agent-mode sessions.
+            // Experts mode (TeamSessionPayload) uses it out-of-band as a session-level
+            // orchestrator; exposing it as a model-facing tool in Agent mode would
+            // smuggle a multi-minute batch workflow into a tool-result loop. See
+            // kairo-code/docs/adr/ADR-001-mode-architecture.md.
             if (tracer != null) {
                 // Wrap so every span carries session.id + langfuse.session.id +
                 // langfuse.user.id. Without this Langfuse can't group multi-turn
@@ -1023,11 +1022,8 @@ public class AgentService implements DisposableBean, InitializingBean {
                 .asReplSession()
                 .withApprovalHandler(approvalHandler)
                 .withHooks(List.of(bridgeHook, compactionHook, planHook));
-        if (swarmCoordinator != null) {
-            // Rebuilt session must keep the expert_team tool — see createSession path
-            // for the wiring rationale.
-            opts = opts.withSwarmCoordinator(swarmCoordinator);
-        }
+        // SwarmCoordinator intentionally NOT wired in Agent mode — see createSession
+        // path comment and ADR-001-mode-architecture.md.
         if (tracer != null) {
             // Same session-id stamping as createSession — see Langfuse rationale there.
             opts = opts.withTracer(
