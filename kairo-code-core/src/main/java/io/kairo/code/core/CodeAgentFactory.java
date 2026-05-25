@@ -251,7 +251,27 @@ public final class CodeAgentFactory {
         McpClientRegistry mcpRegistry = registerMcpTools(registry, config);
 
         PermissionGuard guard = new DefaultPermissionGuard();
-        DefaultToolExecutor executor = new DefaultToolExecutor(registry, guard);
+
+        // Build the guardrail chain BEFORE the executor so PRE_TOOL/POST_TOOL policies
+        // (DangerousCommandPolicy, PathTraversalPolicy, ToolLoopDetectionPolicy) actually
+        // fire. The chain on AgentBuilder only covers PRE_MODEL/POST_MODEL — without
+        // wiring it into DefaultToolExecutor, DangerousCommandPolicy is dead code (log:
+        // "GuardrailChain not configured — guardrail evaluation disabled for this executor").
+        // Same instance threaded into AgentBuilder.guardrailChain() below so both layers
+        // share state and tests can swap in one mock.
+        io.kairo.core.guardrail.policy.LlmBashClassifier llmClassifier =
+                buildLlmBashClassifierIfEnabled(config, options, modelProvider);
+        io.kairo.api.guardrail.GuardrailChain guardrailChain =
+                buildGuardrailChainOrNull(llmClassifier);
+
+        DefaultToolExecutor executor =
+                new DefaultToolExecutor(
+                        registry,
+                        guard,
+                        options.tracer(),
+                        null,
+                        3, // DEFAULT_CIRCUIT_BREAKER_THRESHOLD — package-private upstream
+                        guardrailChain);
         // In one-shot / batch mode (no approval handler), auto-approve all tools
         // so bash and other SYSTEM_CHANGE tools can execute without blocking.
         if (options.approvalHandler() == null && !options.isRepl()) {
@@ -481,32 +501,13 @@ public final class CodeAgentFactory {
             builder.restoreFrom(options.restoreFrom());
         }
 
-        // Full guardrail chain — the Governable promise on the README is hollow without it.
-        //   - PiiRedactionPolicy (M-B1): redacts secrets in model + tool output
-        //   - DangerousCommandPolicy (M-F5a, upstream): blocks rm -rf / / mkfs / shutdown etc
-        //   - PathTraversalPolicy (M-F5a, upstream): blocks `../` and writes to /etc/passwd
-        //   - ToolLoopDetectionPolicy (M-F5a, upstream): warns/denies same (tool, args) loops
-        // KAIRO_PII_REDACTION=off skips the PII step (debugging) — the dangerous-command /
-        // path-traversal / loop policies stay on regardless.
-        // Build the classifier once so the same instance feeds the policy AND the session — the
-        // session-held reference is what powers :stats. Building inline (rather than inside the
-        // try/catch below) keeps the bootstrap exception surface narrow: a classifier-construction
-        // failure should look like a guardrail-chain failure, not bring down agent creation.
-        io.kairo.core.guardrail.policy.LlmBashClassifier llmClassifier =
-                buildLlmBashClassifierIfEnabled(config, options, modelProvider);
-
-        try {
-            var policies = new java.util.ArrayList<io.kairo.api.guardrail.GuardrailPolicy>();
-            if (!"off".equalsIgnoreCase(System.getenv("KAIRO_PII_REDACTION"))) {
-                policies.add(new io.kairo.security.pii.PiiRedactionPolicy());
-            }
-            policies.add(buildDangerousCommandPolicy(llmClassifier));
-            policies.add(new io.kairo.core.guardrail.policy.PathTraversalPolicy());
-            policies.add(new io.kairo.core.guardrail.policy.ToolLoopDetectionPolicy());
-            builder.guardrailChain(new io.kairo.core.guardrail.DefaultGuardrailChain(policies));
-        } catch (Throwable t) {
-            LoggerFactory.getLogger(CodeAgentFactory.class)
-                    .warn("Failed to wire guardrail chain: {}", t.getMessage());
+        // Same chain instance the executor uses (built above before executor construction).
+        // Wired here so PRE_MODEL / POST_MODEL phases (PiiRedactionPolicy on model output)
+        // share the chain with PRE_TOOL / POST_TOOL phases (DangerousCommandPolicy on bash).
+        // Single instance = stateful policies (e.g. ToolLoopDetectionPolicy) see the full
+        // request lifecycle.
+        if (guardrailChain != null) {
+            builder.guardrailChain(guardrailChain);
         }
 
         Agent agent = builder.build();
@@ -547,6 +548,34 @@ public final class CodeAgentFactory {
         }
         return new io.kairo.core.guardrail.policy.LlmBashClassifier(
                 modelProvider, model, cfgBuilder.build());
+    }
+
+    /**
+     * Assemble the full guardrail chain (PII redaction + dangerous command + path traversal +
+     * tool loop detection) and return it ready to wire into both the executor (PRE_TOOL /
+     * POST_TOOL) and the agent (PRE_MODEL / POST_MODEL). Returns {@code null} if construction
+     * fails — bootstrapping the agent without a chain is acceptable degraded mode, blowing up
+     * the whole session is not.
+     *
+     * <p>{@code KAIRO_PII_REDACTION=off} skips the PII step (debugging) — the dangerous-command
+     * / path-traversal / loop policies stay on regardless.
+     */
+    static io.kairo.api.guardrail.GuardrailChain buildGuardrailChainOrNull(
+            io.kairo.core.guardrail.policy.LlmBashClassifier classifier) {
+        try {
+            var policies = new java.util.ArrayList<io.kairo.api.guardrail.GuardrailPolicy>();
+            if (!"off".equalsIgnoreCase(System.getenv("KAIRO_PII_REDACTION"))) {
+                policies.add(new io.kairo.security.pii.PiiRedactionPolicy());
+            }
+            policies.add(buildDangerousCommandPolicy(classifier));
+            policies.add(new io.kairo.core.guardrail.policy.PathTraversalPolicy());
+            policies.add(new io.kairo.core.guardrail.policy.ToolLoopDetectionPolicy());
+            return new io.kairo.core.guardrail.DefaultGuardrailChain(policies);
+        } catch (Throwable t) {
+            LoggerFactory.getLogger(CodeAgentFactory.class)
+                    .warn("Failed to wire guardrail chain: {}", t.getMessage());
+            return null;
+        }
     }
 
     /**

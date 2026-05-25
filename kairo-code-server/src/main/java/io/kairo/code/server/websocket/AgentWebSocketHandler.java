@@ -159,7 +159,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
 
         CodeAgentConfig config = new CodeAgentConfig(
                 apiKey, baseUrl, model, Integer.MAX_VALUE, workspace.workingDir(), null, 0, 0,
-                serverProperties.thinkingBudget());
+                serverProperties.thinkingBudget(), serverProperties.llmClassifier());
 
         String sessionId = agentService.createSession(config, workspace.id(), workspace.useWorktree(), mode);
         bind(session, sessionId);

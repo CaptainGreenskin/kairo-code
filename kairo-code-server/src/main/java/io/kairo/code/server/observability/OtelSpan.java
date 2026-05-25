@@ -1,11 +1,14 @@
 package io.kairo.code.server.observability;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kairo.api.tracing.Span;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Scope;
+import java.util.Collection;
 import java.util.Map;
 
 /**
@@ -18,6 +21,11 @@ import java.util.Map;
  * <p>Not thread-safe across {@link #end()} — callers must ensure end is invoked once.
  */
 final class OtelSpan implements Span {
+
+    // Langfuse expects langfuse.usage_details / langfuse.cost_details as JSON-encoded strings;
+    // toString() on a Map yields {input=120, output=80} which Langfuse can't parse → cost panel
+    // stays empty even when usage data is present. Static + thread-safe so we share one instance.
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final io.opentelemetry.api.trace.Span otel;
     private final Span parent;
@@ -67,8 +75,18 @@ final class OtelSpan implements Span {
             otel.setAttribute(AttributeKey.doubleKey(key), f.doubleValue());
         } else if (value instanceof Boolean b) {
             otel.setAttribute(AttributeKey.booleanKey(key), b);
+        } else if (value instanceof Map<?, ?> || value instanceof Collection<?>) {
+            otel.setAttribute(AttributeKey.stringKey(key), encodeJson(value));
         } else {
             otel.setAttribute(AttributeKey.stringKey(key), value.toString());
+        }
+    }
+
+    private static String encodeJson(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            return value.toString();
         }
     }
 

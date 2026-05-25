@@ -1,6 +1,7 @@
 package io.kairo.code.server.config;
 
 import io.kairo.code.core.CodeAgentConfig;
+import io.kairo.code.core.LlmClassifierConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,6 +45,25 @@ public class ServerConfig {
     @Value("${kairo.code.thinking-budget:#{null}}")
     private Integer thinkingBudget;
 
+    // LLM-backed bash classifier (DangerousCommandPolicy.UNKNOWN fallback). Defaults to enabled
+    // because (a) the dogfood server is the canonical observability target — we need the
+    // SecurityEvent + langfuse span flowing in real traffic to know the wiring actually works;
+    // (b) cost is bounded (only fires when the static regex returns UNKNOWN, then LRU-cached);
+    // (c) heuristic-only mode is still one env flip away (kairo.code.bash.llm-classifier.enabled=false).
+    @Value("${kairo.code.bash.llm-classifier.enabled:true}")
+    private boolean llmClassifierEnabled;
+
+    // Blank → reuses CodeAgentConfig.modelName so the fallback rides on the agent's provider
+    // (e.g. glm-5.1) — no separate auth path to maintain.
+    @Value("${kairo.code.bash.llm-classifier.model:}")
+    private String llmClassifierModel;
+
+    @Value("${kairo.code.bash.llm-classifier.cache-size:512}")
+    private int llmClassifierCacheSize;
+
+    @Value("${kairo.code.bash.llm-classifier.timeout-millis:5000}")
+    private long llmClassifierTimeoutMillis;
+
     private final ConfigPersistenceService configPersistenceService;
     private final WorkspacePersistenceService workspacePersistenceService;
 
@@ -65,7 +85,8 @@ public class ServerConfig {
                 null,
                 0,
                 0,
-                props.thinkingBudget()
+                props.thinkingBudget(),
+                props.llmClassifier()
         );
     }
 
@@ -92,13 +113,21 @@ public class ServerConfig {
         // can rely on having at least one workspace to attach sessions to.
         workspacePersistenceService.bootstrapIfEmpty(resolvedWorkingDir);
 
+        LlmClassifierConfig llmClassifier =
+                new LlmClassifierConfig(
+                        llmClassifierEnabled,
+                        StringUtils.hasText(llmClassifierModel) ? llmClassifierModel : null,
+                        llmClassifierCacheSize,
+                        llmClassifierTimeoutMillis);
+
         return new ServerProperties(
                 resolvedProvider,
                 resolvedModel,
                 resolvedWorkingDir,
                 resolvedBaseUrl,
                 resolvedApiKey,
-                resolvedThinkingBudget
+                resolvedThinkingBudget,
+                llmClassifier
         );
     }
 
@@ -140,20 +169,32 @@ public class ServerConfig {
         private volatile String baseUrl;
         private volatile String apiKey;
         private volatile Integer thinkingBudget;
+        private volatile LlmClassifierConfig llmClassifier;
 
         public ServerProperties(String provider, String model, String workingDir,
-                                String baseUrl, String apiKey, Integer thinkingBudget) {
+                                String baseUrl, String apiKey, Integer thinkingBudget,
+                                LlmClassifierConfig llmClassifier) {
             this.provider = provider;
             this.model = model;
             this.workingDir = workingDir;
             this.baseUrl = baseUrl;
             this.apiKey = apiKey;
             this.thinkingBudget = thinkingBudget;
+            this.llmClassifier = llmClassifier != null
+                    ? llmClassifier
+                    : LlmClassifierConfig.disabled();
+        }
+
+        public ServerProperties(String provider, String model, String workingDir,
+                                String baseUrl, String apiKey, Integer thinkingBudget) {
+            this(provider, model, workingDir, baseUrl, apiKey, thinkingBudget,
+                    LlmClassifierConfig.disabled());
         }
 
         public ServerProperties(String provider, String model, String workingDir,
                                 String baseUrl, String apiKey) {
-            this(provider, model, workingDir, baseUrl, apiKey, null);
+            this(provider, model, workingDir, baseUrl, apiKey, null,
+                    LlmClassifierConfig.disabled());
         }
 
         public String provider() { return provider; }
@@ -162,6 +203,7 @@ public class ServerConfig {
         public String baseUrl() { return baseUrl; }
         public String apiKey() { return apiKey; }
         public Integer thinkingBudget() { return thinkingBudget; }
+        public LlmClassifierConfig llmClassifier() { return llmClassifier; }
 
         public void setProvider(String provider) { this.provider = provider; }
         public void setModel(String model) { this.model = model; }
@@ -169,5 +211,10 @@ public class ServerConfig {
         public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
         public void setApiKey(String apiKey) { this.apiKey = apiKey; }
         public void setThinkingBudget(Integer thinkingBudget) { this.thinkingBudget = thinkingBudget; }
+        public void setLlmClassifier(LlmClassifierConfig llmClassifier) {
+            this.llmClassifier = llmClassifier != null
+                    ? llmClassifier
+                    : LlmClassifierConfig.disabled();
+        }
     }
 }
