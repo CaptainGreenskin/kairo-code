@@ -509,7 +509,7 @@ export function ChatInput({
 
     return (
         <div
-            className={`px-4 pb-3 pt-1 transition-all ${
+            className={`shrink-0 px-4 pb-3 pt-1 transition-all ${
                 dragging ? 'ring-2 ring-[var(--color-primary)]' : ''
             }`}
             onDrop={handleDrop}

@@ -5,7 +5,7 @@ import { useWorkspaceStore } from '@store/workspaceStore';
 import { useLayoutStore } from '@store/layoutStore';
 import { useOpenFilesStore } from '@store/openFilesStore';
 import { useAgentWebSocket } from '@hooks/useAgentWebSocket';
-import { useBreakpoint } from '@hooks/useBreakpoint';
+import { useBreakpoint, useViewportHeight } from '@hooks/useBreakpoint';
 import { Header } from '@components/Header';
 import { DevDiagnosticsPanel } from '@components/DevDiagnosticsPanel';
 import { SearchBar } from '@components/SearchBar';
@@ -248,6 +248,13 @@ function App() {
     const breakpoint = useBreakpoint();
     const isMobile = breakpoint === 'xs' || breakpoint === 'sm';
     const isNarrow = isMobile || breakpoint === 'md';
+    const viewportHeight = useViewportHeight();
+    // TopBar (~48) + StatusBar (~24) + min editor row (~320 to fit ChatInput + 1 line)
+    // = 392. A persisted bottomHeight bigger than viewport - 392 would push ChatInput
+    // off-screen or behind the bottom panel; clamp at render so the persisted value
+    // still applies when the window grows back.
+    const maxBottomHeight = Math.max(120, viewportHeight - 392);
+    const effectiveBottomHeight = Math.min(bottomHeight, maxBottomHeight);
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     // Narrow screen: nothing to force-close anymore (file tree lives in PrimarySidebar)
@@ -1654,13 +1661,13 @@ ${content}
                     <ResizeHandle
                         side="bottom"
                         orientation="horizontal"
-                        width={bottomHeight}
+                        width={effectiveBottomHeight}
                         minWidth={120}
-                        maxWidth={800}
-                        onResize={setBottomHeight}
-                        onResizeEnd={(h) => setBottomHeight(h)}
+                        maxWidth={maxBottomHeight}
+                        onResize={(h) => setBottomHeight(Math.min(h, maxBottomHeight))}
+                        onResizeEnd={(h) => setBottomHeight(Math.min(h, maxBottomHeight))}
                     />
-                    <div style={{ height: bottomHeight }} className="shrink-0">
+                    <div style={{ height: effectiveBottomHeight }} className="shrink-0">
                         <BottomPanel
                             workspaceId={currentWorkspaceId ?? undefined}
                             externalCommand={shellExternalCommand}

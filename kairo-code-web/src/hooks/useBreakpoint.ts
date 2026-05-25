@@ -30,3 +30,15 @@ export function useBreakpoint(): Breakpoint {
 
     return bp;
 }
+
+export function useViewportHeight(): number {
+    const [h, setH] = useState<number>(() =>
+        typeof window === 'undefined' ? 0 : window.innerHeight,
+    );
+    useEffect(() => {
+        const handler = () => setH(window.innerHeight);
+        window.addEventListener('resize', handler);
+        return () => window.removeEventListener('resize', handler);
+    }, []);
+    return h;
+}
