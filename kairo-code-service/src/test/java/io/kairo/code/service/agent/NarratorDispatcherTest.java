@@ -156,13 +156,46 @@ class NarratorDispatcherTest {
         }
     }
 
-    // NOTE: NarratorDispatcher's `queueHighWaterMark` "force flush" mechanism (a second
-    // tryEmitNext when pendingBatch hits the high-water mark) does not actually trigger
-    // `bufferTimeout` to drain early — bufferTimeout only fires on count == maxBatchSize or
-    // on the time window elapsing. The high-water emit only adds an extra signal, never
-    // crosses the maxBatchSize threshold (since by construction highWater < maxBatch), so
-    // the dispatcher silently waits the full debounce window. This is a known implementation
-    // gap to address separately; not covered by this test class.
+    // ── #71 high-water-mark fires ahead of the debounce window ──────────────────
+
+    /**
+     * Regression for #71: previously {@code bufferTimeout(maxBatchSize, ...)} meant the
+     * high-water-mark "force flush" was dead code, and the dispatcher always waited the
+     * full debounce window. Fix wires the buffer's count threshold to
+     * {@code queueHighWaterMark}, so {@code highWater} consecutive enqueues fire well
+     * before the debounce window elapses.
+     */
+    @Test
+    void highWaterMark_firesEarly() {
+        // 2 s debounce, fire after 3 events queued — the dispatch should land in well under
+        // a second once we publish the 3rd event.
+        Harness h = Harness.builder()
+                .withNarratorDebounce(Duration.ofSeconds(2))
+                .withMaxBatchSize(10)
+                .withQueueHighWaterMark(3)
+                .build();
+        try {
+            long start = System.currentTimeMillis();
+            for (int i = 0; i < 3; i++) {
+                h.publishStepCompleted("researcher", "event-" + i);
+            }
+
+            await(() -> !h.agent.calls.isEmpty(), Duration.ofMillis(800));
+            long elapsedMs = System.currentTimeMillis() - start;
+
+            assertThat(h.agent.calls).hasSize(1);
+            assertThat(elapsedMs)
+                    .as("must fire well before the 2s debounce window")
+                    .isLessThan(1500);
+
+            String prompt = h.agent.calls.get(0);
+            assertThat(prompt).contains("event-0");
+            assertThat(prompt).contains("event-1");
+            assertThat(prompt).contains("event-2");
+        } finally {
+            h.payload.stop();
+        }
+    }
 
     // ── #5 stop() disposes the dispatcher cleanly ──────────────────────────────
 

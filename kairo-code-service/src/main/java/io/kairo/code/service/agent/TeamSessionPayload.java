@@ -644,8 +644,10 @@ public final class TeamSessionPayload implements SessionPayload {
      *   <li><b>Single-flight</b>: an in-flight narrator call blocks new dispatches via the
      *       {@code dispatchInFlight} CAS. Backlog events accumulate in {@code pendingBatch} and
      *       drain on the next dispatch — no narrator call ever sees a stale prompt.
-     *   <li><b>Debounced</b>: {@code bufferTimeout(maxBatchSize, debounceWindow)} fires on whichever
-     *       arrives first — events stop arriving for {@code debounceWindow}, or the buffer fills.
+     *   <li><b>Debounced</b>: {@code bufferTimeout(queueHighWaterMark, debounceWindow)} fires on
+     *       whichever arrives first — {@code debounceWindow} elapses, or the queue accumulates
+     *       {@code queueHighWaterMark} events. {@code maxBatchSize} is the *prompt-size cap* enforced
+     *       at {@link #drainBatch()}, not the buffer trigger (avoids the dead force-flush of #71).
      *   <li><b>Suspendable</b>: {@link #suspend()} is called from {@code handleMessage} before the
      *       user turn acquires a slot, ensuring no narrator call competes with a user turn.
      *       {@link #resume()} re-enables dispatch; backlog events are still in {@code pendingBatch}.
@@ -664,8 +666,11 @@ public final class TeamSessionPayload implements SessionPayload {
 
         NarratorDispatcher(NarratorSettings settings) {
             this.settings = settings;
+            // bufferTimeout's count threshold is the high-water-mark — the queue size at which
+            // we want to fire ahead of the debounce window. maxBatchSize is the prompt-size cap
+            // and is applied at drainBatch(), not here.
             this.subscription = signal.asFlux()
-                    .bufferTimeout(settings.maxBatchSize(), settings.debounceWindow())
+                    .bufferTimeout(settings.queueHighWaterMark(), settings.debounceWindow())
                     .filter(b -> !b.isEmpty())
                     .publishOn(Schedulers.boundedElastic())
                     .subscribe(this::triggerDispatch,
@@ -676,12 +681,6 @@ public final class TeamSessionPayload implements SessionPayload {
         void enqueue(PeerEventSummary e) {
             pendingBatch.offer(e);
             signal.tryEmitNext(e);
-            if (pendingBatch.size() >= settings.queueHighWaterMark()) {
-                // Force-flush ahead of the debounce window. We use a second emit rather than
-                // tryEmitComplete because completing would tear down the subscription; the
-                // bufferTimeout downstream will close the in-flight buffer on the next tick.
-                signal.tryEmitNext(e);
-            }
         }
 
         void suspend() {
