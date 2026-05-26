@@ -308,7 +308,7 @@ public final class TeamSessionPayload implements SessionPayload {
 
         Sinks.Many<AgentEvent> localSink = Sinks.many().multicast().onBackpressureBuffer();
 
-        preset.coordinator().confirmAndExecute(teamId)
+        Disposable disposable = preset.coordinator().confirmAndExecute(teamId)
                 .doOnSuccess(result -> {
                     ctx.runningState().set(false);
                     phaseRef.set(SessionPhase.COMPLETED);
@@ -327,8 +327,15 @@ public final class TeamSessionPayload implements SessionPayload {
                             "TEAM_EXECUTION_ERROR"));
                     localSink.tryEmitComplete();
                 })
+                .doOnCancel(() -> {
+                    ctx.runningState().set(false);
+                    phaseRef.set(SessionPhase.FAILED_EXECUTION);
+                    ctx.persistPhase().accept(SessionPhase.FAILED_EXECUTION);
+                    localSink.tryEmitComplete();
+                })
                 .subscribe();
 
+        currentRun.set(disposable);
         return localSink.asFlux();
     }
 
@@ -375,7 +382,8 @@ public final class TeamSessionPayload implements SessionPayload {
         Sinks.Many<AgentEvent> localSink = Sinks.many().multicast().onBackpressureBuffer();
         localSink.tryEmitNext(AgentEvent.thinking(sessionId));
 
-        preset.coordinator().startExpertTeam(goal, preset.teamConfig(), List.<String>of(), true)
+        Disposable disposable = preset.coordinator()
+                .startExpertTeam(goal, preset.teamConfig(), List.<String>of(), true)
                 .doOnSuccess(result -> {
                     ctx.runningState().set(false);
                     pendingTeamId = preset.coordinator().lastTeamId();
@@ -396,8 +404,15 @@ public final class TeamSessionPayload implements SessionPayload {
                             "PLANNING_ERROR"));
                     localSink.tryEmitComplete();
                 })
+                .doOnCancel(() -> {
+                    ctx.runningState().set(false);
+                    ctx.phaseRef().set(SessionPhase.FAILED_PLANNING);
+                    ctx.persistPhase().accept(SessionPhase.FAILED_PLANNING);
+                    localSink.tryEmitComplete();
+                })
                 .subscribe();
 
+        currentRun.set(disposable);
         return localSink.asFlux();
     }
 

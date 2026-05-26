@@ -239,6 +239,83 @@ class TeamSessionPayloadPresetTest {
                 .isFalse();
     }
 
+    // ── #5b stop() cancels in-flight planning ───────────────────────────────────
+
+    /**
+     * Regression for the deferred ExpertTeamPanel.stop() leak called out in the M-Experts-Upgrade
+     * plan: previously {@code startPlanOnly} subscribed without capturing the resulting
+     * {@code Disposable}, so calling {@code stop()} mid-planning could not cancel the
+     * SwarmCoordinator Mono. Fix wires the subscribe() return into {@code currentRun}; this test
+     * proves it by using a never-completing planning Mono — the only way phase becomes
+     * {@code FAILED_PLANNING} is via the {@code doOnCancel} side-effect that fires when
+     * {@code stop()} disposes the captured Disposable.
+     */
+    @Test
+    void presetMode_stopCancelsInFlightPlanning() throws InterruptedException {
+        TestFixture f = TestFixture.create();
+        RecordingSwarmCoordinator coord = RecordingSwarmCoordinator.create();
+        coord.planResult = Mono.never();
+
+        TeamSessionPayload payload = newPresetPayload(
+                f, coord, anyTriage(true), FallbackHarness.create().payload, false);
+        try {
+            payload.handleMessage(MessageRequest.text(
+                    "Refactor the entire auth subsystem for testability and add coverage."))
+                    .subscribe();
+
+            await(() -> f.runningState.get(), Duration.ofSeconds(2));
+            assertThat(f.phaseRef.get()).isEqualTo(SessionPhase.PLANNING);
+
+            payload.stop();
+            Thread.sleep(150);
+
+            assertThat(f.runningState.get())
+                    .as("stop() must cancel in-flight planning Mono")
+                    .isFalse();
+            assertThat(f.phaseRef.get()).isEqualTo(SessionPhase.FAILED_PLANNING);
+        } finally {
+            payload.stop();
+        }
+    }
+
+    // ── #5c stop() cancels in-flight execution ──────────────────────────────────
+
+    /**
+     * Companion to {@link #presetMode_stopCancelsInFlightPlanning}: same leak applied to
+     * {@code confirmBuild}'s execution path. A never-completing execution Mono must transition
+     * to {@code FAILED_EXECUTION} + runningState=false after {@code stop()} — proof that
+     * {@code doOnCancel} fired on the captured Disposable.
+     */
+    @Test
+    void presetMode_stopCancelsInFlightExecution() throws InterruptedException {
+        TestFixture f = TestFixture.create();
+        f.phaseRef.set(SessionPhase.PLAN_PENDING);
+
+        RecordingSwarmCoordinator coord = RecordingSwarmCoordinator.create();
+        coord.confirmResult = Mono.never();
+
+        TeamSessionPayload payload = newPresetPayload(
+                f, coord, anyTriage(true), FallbackHarness.create().payload, false);
+        injectPendingTeamId(payload, "team-cancel");
+
+        try {
+            payload.confirmBuild().subscribe();
+
+            await(() -> f.runningState.get(), Duration.ofSeconds(2));
+            assertThat(f.phaseRef.get()).isEqualTo(SessionPhase.EXECUTING);
+
+            payload.stop();
+            Thread.sleep(150);
+
+            assertThat(f.runningState.get())
+                    .as("stop() must cancel in-flight execution Mono")
+                    .isFalse();
+            assertThat(f.phaseRef.get()).isEqualTo(SessionPhase.FAILED_EXECUTION);
+        } finally {
+            payload.stop();
+        }
+    }
+
     // ── #6 REGRESSION GATE: default Team mode unchanged ─────────────────────────
 
     @Test
