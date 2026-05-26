@@ -34,10 +34,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *   {"action":"bind",     "sessionId":"..."}
  *   {"action":"create",   "workingDir":"...", "model":"...", "provider":"...", "apiKey":"..."}
  *   {"action":"message",  "sessionId":"...", "message":"...", "imageData":"...", "imageMediaType":"..."}
- *   {"action":"approve",  "sessionId":"...", "toolCallId":"...", "approved":true,  "reason":"..."}
- *   {"action":"stop",     "sessionId":"..."}
- *   {"action":"revert",   "sessionId":"..."}
- *   {"action":"rejectStep", "teamId":"...", "stepId":"...", "feedback":"..."}
+ *   {"action":"approve",      "sessionId":"...", "toolCallId":"...", "approved":true,  "reason":"..."}
+ *   {"action":"confirmBuild", "sessionId":"..."}
+ *   {"action":"stop",         "sessionId":"..."}
+ *   {"action":"revert",       "sessionId":"..."}
+ *   {"action":"rejectStep",   "teamId":"...", "stepId":"...", "feedback":"..."}
  * </pre>
  *
  * <p>Server → Client (events for the bound session arrive on this socket only):
@@ -95,9 +96,10 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                 case "bind"    -> handleBind(session, root);
                 case "create"  -> handleCreate(session, root);
                 case "message" -> handleMessage(session, root);
-                case "approve" -> handleApprove(session, root);
-                case "stop"    -> handleStop(session, root);
-                case "revert"  -> handleRevert(session, root);
+                case "approve"      -> handleApprove(session, root);
+                case "confirmBuild" -> handleConfirmBuild(session, root);
+                case "stop"         -> handleStop(session, root);
+                case "revert"       -> handleRevert(session, root);
                 case "subscribeTeam"   -> handleSubscribeTeam(session, root);
                 case "unsubscribeTeam" -> handleUnsubscribeTeam(session, root);
                 case "rejectStep"      -> handleRejectStep(session, root);
@@ -225,6 +227,23 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
             // surfacing this as AGENT_ERROR clutters the chat with a phantom error card.
             log.debug("Stale approve for session {} toolCallId {} (already resolved or expired)",
                     sid, toolCallId);
+        }
+    }
+
+    private void handleConfirmBuild(WebSocketSession session, JsonNode body) {
+        String sid = text(body, "sessionId");
+        if (sid == null) {
+            sendErr(session, "confirmBuild", "missing sessionId");
+            return;
+        }
+        boolean accepted = agentService.confirmBuild(sid);
+        if (accepted) {
+            sendAck(session, "confirmBuild");
+            log.info("confirmBuild accepted for session {}", sid);
+        } else {
+            // Benign: session not in PLAN_PENDING (e.g. user double-clicked, or phase already
+            // moved). Log at debug; surfacing as ERR clutters the chat with a phantom error card.
+            log.debug("confirmBuild ignored for session {} (not in PLAN_PENDING)", sid);
         }
     }
 

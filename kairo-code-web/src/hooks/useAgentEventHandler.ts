@@ -297,11 +297,18 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     // Safety net: any tool call still 'approved' (Running) at agent-done
                     // never received a TOOL_RESULT. Mark them errored so the UI doesn't
                     // pin a forever-spinning card. Real backend hangs still need fixing.
+                    //
+                    // Skip tools that already have a result — happens for exit_plan_mode,
+                    // which the PlanPendingInterceptHook SKIPs server-side: a synthetic
+                    // TOOL_RESULT arrives and sets status='done'/result='Tool execution
+                    // skipped by hook', then the user's Approve click optimistically flips
+                    // status='approved' (App.tsx handleApproveTool). Without this guard the
+                    // safety net would overwrite a tool that *did* return.
                     {
                         const msgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
                         for (const m of msgs) {
                             for (const tc of m.toolCalls ?? []) {
-                                if (tc.status === 'approved') {
+                                if (tc.status === 'approved' && !tc.result) {
                                     updateToolCallIn(sid, m.id, tc.id, {
                                         status: 'error',
                                         result: '(no result — agent ended before tool returned)',
@@ -373,11 +380,12 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         useBuildPhaseStore.getState().setPhase('FAILED_EXECUTION');
                     }
                     // Same safety net as AGENT_DONE — finalize stuck-running tool cards.
+                    // Skip tools that already have a result (see AGENT_DONE comment).
                     {
                         const msgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
                         for (const m of msgs) {
                             for (const tc of m.toolCalls ?? []) {
-                                if (tc.status === 'approved' || tc.status === 'pending') {
+                                if ((tc.status === 'approved' || tc.status === 'pending') && !tc.result) {
                                     updateToolCallIn(sid, m.id, tc.id, {
                                         status: 'error',
                                         result: '(no result — agent ended before tool returned)',
