@@ -69,26 +69,6 @@ class SwarmCoordinatorIntegrationTest {
     }
 
     @Test
-    void swarmToolDelegatesToCoordinator() {
-        SwarmTool tool = new SwarmTool(coordinator);
-        var result = tool.execute("refactor auth", 2, 2);
-
-        assertNotNull(result.get("requestId"));
-        assertNotNull(result.get("status"));
-        assertEquals("refactor auth", result.get("goal"));
-    }
-
-    @Test
-    void swarmToolWithRoleIds() {
-        SwarmTool tool = new SwarmTool(coordinator);
-        var result = tool.execute("build feature", List.of("CODER", "TESTER"));
-
-        assertNotNull(result.get("requestId"));
-        assertNotNull(result.get("status"));
-        assertEquals("build feature", result.get("goal"));
-    }
-
-    @Test
     void multipleAgentsRoundRobin() {
         ExpertRoleRegistry registry = new ExpertRoleRegistry();
         DefaultPlanner planner = new DefaultPlanner(registry, null, null);

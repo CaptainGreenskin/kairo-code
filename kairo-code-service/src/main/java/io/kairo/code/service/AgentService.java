@@ -2,8 +2,6 @@ package io.kairo.code.service;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.api.agent.AgentDiagnostics;
-import io.kairo.api.message.Msg;
-import io.kairo.api.message.MsgRole;
 import io.kairo.api.tool.ApprovalResult;
 import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.CodeAgentConfig;
@@ -16,13 +14,14 @@ import io.kairo.code.service.agent.AgentRuntimeContext;
 import io.kairo.code.service.agent.AgentSessionPayload;
 import io.kairo.code.service.agent.MessageRequest;
 import io.kairo.code.service.agent.SessionPayload;
-import io.kairo.code.service.agent.ExpertsSessionPayload;
 import io.kairo.code.service.agent.TeamSessionPayload;
+import io.kairo.code.service.agent.tools.NoNarrationTool;
 import io.kairo.code.service.concurrency.AgentConcurrencyController;
 import io.kairo.code.service.team.TriageGate;
+import io.kairo.code.core.evolution.FailurePatternTracker;
+import io.kairo.code.core.evolution.LearnedLessonStore;
+import io.kairo.code.core.evolution.ReflectionPipeline;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.service.concurrency.AgentConcurrencyException;
-import io.kairo.code.service.concurrency.AgentSlot;
 import io.kairo.code.service.workspace.WorkspaceSnapshotService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -150,6 +149,15 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     @Autowired(required = false)
     private TriageGate triageGate;
+
+    /**
+     * KairoEventBus — used by the Experts preset of {@link TeamSessionPayload} to project
+     * SwarmCoordinator step events as {@code PEER_MESSAGE} into the Team Lead's sink.
+     * Null when the kairo-core/event-bus bean is not on the classpath; the experts arm
+     * tolerates this (warning logged inside TeamSessionPayload).
+     */
+    @Autowired(required = false)
+    private io.kairo.api.event.KairoEventBus eventBus;
 
     /** Team-mode primitives — null when the kairo-code-server beans aren't on the classpath. */
     @Autowired(required = false)
@@ -303,15 +311,34 @@ public class AgentService implements DisposableBean, InitializingBean {
         try {
             // Web sessions are interactive (like a REPL) — skip the one-shot/batch hooks that
             // force tool calls on text-only responses.
+            // Hook list: bridge + compaction + plan-pending always; FailurePatternTracker
+            // only when mode=experts (M-Experts-Upgrade self-evolution port). Agent and Team
+            // modes' hook lists are bit-for-bit identical to pre-change behavior.
+            java.util.List<Object> hooks = new java.util.ArrayList<>();
+            hooks.add(bridgeHook);
+            hooks.add(compactionHook);
+            hooks.add(planHook);
+            if ("experts".equals(normalizedMode)) {
+                final CodeAgentConfig effectiveCfg = config;
+                final Path kairoDir = Path.of(finalWorkingDir, ".kairo-code");
+                final LearnedLessonStore lessonStore = LearnedLessonStore.fromKairoDir(kairoDir);
+                FailurePatternTracker failureTracker = new FailurePatternTracker(strike -> {
+                    sink.tryEmitNext(AgentEvent.textChunk(sessionId,
+                            "⚠ Tool '" + strike.toolName() + "' has failed 3 consecutive times. "
+                                    + "Generating lesson in background…"));
+                    ReflectionPipeline.generateAndSave(strike, effectiveCfg, lessonStore);
+                });
+                hooks.add(failureTracker);
+            }
             SessionOptions opts = SessionOptions.empty()
                     .asReplSession()
                     .withApprovalHandler(approvalHandler)
-                    .withHooks(List.of(bridgeHook, compactionHook, planHook));
+                    .withHooks(hooks);
             // SwarmCoordinator is intentionally NOT wired into Agent-mode sessions.
-            // Experts mode (ExpertsSessionPayload) uses it out-of-band as a session-level
-            // orchestrator; exposing it as a model-facing tool in Agent mode would
-            // smuggle a multi-minute batch workflow into a tool-result loop. See
-            // kairo-code/docs/adr/ADR-001-mode-architecture.md.
+            // Experts mode (TeamSessionPayload + ExpertsPresetConfig, post M-Experts-Upgrade)
+            // uses it out-of-band as a session-level orchestrator; exposing it as a model-facing
+            // tool in Agent mode would smuggle a multi-minute batch workflow into a tool-result
+            // loop. See kairo-code/docs/adr/ADR-001-mode-architecture.md.
             if (tracer != null) {
                 // Wrap so every span carries session.id + langfuse.session.id +
                 // langfuse.user.id. Without this Langfuse can't group multi-turn
@@ -337,11 +364,30 @@ public class AgentService implements DisposableBean, InitializingBean {
                         throw new IllegalStateException(
                                 "experts mode unavailable: SwarmCoordinator not configured");
                     }
+                    if (teamManager == null || messageBus == null) {
+                        throw new IllegalStateException(
+                                "experts mode unavailable: team primitives missing");
+                    }
+                    // Register no_narration into the session's tool registry BEFORE the
+                    // NarratorDispatcher fires; the dispatcher relies on the tool being
+                    // callable from agent.call(). Mode-isolation: this registration only
+                    // ever runs on the experts arm.
+                    TeamSessionPayload.NarratorSettings narratorSettings =
+                            TeamSessionPayload.NarratorSettings.defaults();
+                    if (narratorSettings.enabled()) {
+                        session.toolRegistry().registerTool(NoNarrationTool.class);
+                    }
                     AgentSessionPayload fb = new AgentSessionPayload(config, session, ctx);
-                    ExpertsSessionPayload expertsPayload = new ExpertsSessionPayload(
-                            swarmCoordinator, io.kairo.api.team.TeamConfig.defaults(),
-                            sessionId, triageGate, ctx, fb);
-                    yield expertsPayload;
+                    TeamSessionPayload.ExpertsPresetConfig presetCfg =
+                            new TeamSessionPayload.ExpertsPresetConfig(
+                                    swarmCoordinator,
+                                    io.kairo.api.team.TeamConfig.defaults(),
+                                    triageGate,
+                                    fb,
+                                    narratorSettings,
+                                    eventBus);
+                    yield new TeamSessionPayload(config, session, ctx,
+                            teamManager, messageBus, presetCfg);
                 }
                 case "team" -> {
                     if (teamManager == null || messageBus == null) {
@@ -422,12 +468,15 @@ public class AgentService implements DisposableBean, InitializingBean {
      * @param sessionId the session ID
      * @return true if confirmation accepted, false if session not in PLAN_PENDING
      */
-    // TODO(M-team-lifecycle): confirmBuild still manages its own lifecycle (running CAS, slot, agent.call)
-    // instead of delegating through SessionPayload.handleMessage. This is the last lifecycle path that
-    // bypasses the payload. Should be extracted into a dedicated payload method in M-team-lifecycle.
+    // M-Experts-Upgrade (#61): lifecycle now lives entirely on the payload. We CAS-check phase,
+    // create the workspace snapshot (a service concern AgentService owns), then delegate the actual
+    // execution to {@link SessionPayload#confirmBuild()}. The payload owns the slot acquisition,
+    // agent.call, and phase transitions to COMPLETED / FAILED_EXECUTION via its own ctx.
+    // Default Agent/Team payloads return Flux.empty() — only TeamSessionPayload with the
+    // experts preset actually drives execution here.
     public boolean confirmBuild(String sessionId) {
         AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
-        if (phaseRef == null || !phaseRef.compareAndSet(SessionPhase.PLAN_PENDING, SessionPhase.EXECUTING)) {
+        if (phaseRef == null || phaseRef.get() != SessionPhase.PLAN_PENDING) {
             log.warn("confirmBuild rejected for session {} — not in PLAN_PENDING (phase={})",
                     sessionId, phaseRef != null ? phaseRef.get() : "null");
             return false;
@@ -435,98 +484,49 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         SessionEntry entry = sessions.get(sessionId);
         if (entry == null) {
-            phaseRef.set(SessionPhase.PLAN_PENDING); // rollback
             return false;
         }
 
-        // Safe config/workingDir resolution (works for both agent and experts mode)
         CodeAgentConfig cfg = entry.configOrNull();
         if (cfg == null || cfg.workingDir() == null) {
-            log.warn("confirmBuild: no config/workingDir available for session {} — rolling back", sessionId);
-            phaseRef.set(SessionPhase.PLAN_PENDING);
+            log.warn("confirmBuild: no config/workingDir available for session {}", sessionId);
             return false;
         }
         String workingDir = cfg.workingDir();
 
-        log.info("Plan confirmed for session {} — transitioning to EXECUTING", sessionId);
-        persistPhase(workingDir, SessionPhase.EXECUTING);
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        if (sink == null) {
+            log.warn("confirmBuild: no event sink for session {}", sessionId);
+            return false;
+        }
 
-        // Create workspace snapshot before execution begins
+        log.info("Plan confirmed for session {} — delegating to payload.confirmBuild()", sessionId);
+
+        // Create workspace snapshot before execution begins (kept here — snapshot lifecycle
+        // is an AgentService concern, not a payload concern).
         if (workspaceSnapshotService.isGitWorkspace(workingDir)) {
             workspaceSnapshotService.createSnapshot(workingDir);
         }
 
-        // Acquire running state
-        AtomicBoolean running = runningState.get(sessionId);
-        if (running == null || !running.compareAndSet(false, true)) {
-            log.error("confirmBuild: session {} already running — inconsistent state", sessionId);
-            return false;
-        }
-
-        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-        if (sink == null) {
-            running.set(false);
-            phaseRef.set(SessionPhase.PLAN_PENDING);
-            return false;
-        }
-
-        sink.tryEmitNext(AgentEvent.thinking(sessionId));
-
-        // Send confirmation message to the agent so it resumes execution.
-        // The agent is still in plan mode (exit_plan_mode was skipped); send a synthetic
-        // user message that tells it the plan was approved and it should now execute.
-        Msg confirmMsg = Msg.of(MsgRole.USER,
-                "Plan confirmed by user. Proceed with execution now. "
-                        + "Call exit_plan_mode if still in plan mode, then execute the plan.");
-
-        // Get agent safely from payload (supports both agent and experts mode)
-        Agent agent;
-        if (entry.payload() instanceof AgentSessionPayload asp) {
-            agent = asp.session().agent();
-        } else if (entry.payload() instanceof ExpertsSessionPayload esp) {
-            agent = esp.fallback().session().agent();
-        } else {
-            log.warn("confirmBuild: unknown payload type for session {}", sessionId);
-            running.set(false);
-            phaseRef.set(SessionPhase.PLAN_PENDING);
-            return false;
-        }
-        AgentSlot slot;
-        try {
-            slot = concurrencyController.acquire(sessionId);
-        } catch (AgentConcurrencyException e) {
-            sink.tryEmitNext(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
-            running.set(false);
-            phaseRef.set(SessionPhase.PLAN_PENDING);
-            return false;
-        }
-
-        long startedAtMs = System.currentTimeMillis();
-
-        agent.call(confirmMsg)
-                .subscribeOn(Schedulers.boundedElastic())
-                .doFinally(signal -> {
-                    slot.close();
-                    running.set(false);
-                    long elapsedMs = System.currentTimeMillis() - startedAtMs;
-                    log.info("agent.terminal(confirmBuild) session={} signal={} elapsedMs={}",
-                            sessionId, signal, elapsedMs);
-                    // On successful completion: drop snapshot and clean up
-                    if (phaseRef.compareAndSet(SessionPhase.EXECUTING, SessionPhase.COMPLETED)) {
-                        persistPhase(workingDir, SessionPhase.COMPLETED);
-                        // Drop the snapshot stash entry on successful completion
+        // Drop the snapshot once execution completes successfully. The payload transitions
+        // to COMPLETED on success — observe via its emitted AGENT_DONE.
+        Flux<AgentEvent> execution = entry.payload().confirmBuild()
+                .doOnNext(evt -> {
+                    if (evt.type() == AgentEvent.EventType.AGENT_DONE) {
                         dropSnapshotIfPresent(workingDir);
                     }
-                })
+                });
+
+        execution
+                .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(
-                        responseMsg -> { /* terminal emit via hook */ },
+                        sink::tryEmitNext,
                         err -> {
-                            log.warn("confirmBuild execution error for session {}: {}",
+                            log.warn("confirmBuild delegation error for session {}: {}",
                                     sessionId, err.getMessage());
-                            phaseRef.compareAndSet(SessionPhase.EXECUTING, SessionPhase.FAILED_EXECUTION);
-                            persistPhase(workingDir, SessionPhase.FAILED_EXECUTION);
-                        }
-                );
+                            sink.tryEmitNext(AgentEvent.error(sessionId,
+                                    err.getMessage(), "CONFIRM_BUILD_ERROR"));
+                        });
 
         return true;
     }
@@ -1069,23 +1069,41 @@ public class AgentService implements DisposableBean, InitializingBean {
                     phaseRef != null ? phaseRef : new AtomicReference<>(SessionPhase.IDLE),
                     persistPhaseFn, concurrencyController);
     
-            // Pattern-match on sealed payload type
+            // Pattern-match on sealed payload type. Experts is a TeamSessionPayload preset
+            // post M-Experts-Upgrade — preserve the preset config across rebuild so the
+            // narrator + swarm bridge survive credential refresh.
             SessionPayload newPayload;
-            if (entry.payload() instanceof ExpertsSessionPayload e) {
-                AgentSessionPayload newFallback = new AgentSessionPayload(rebuilt, newSession, newCtx);
-                newPayload = new ExpertsSessionPayload(
-                        e.coordinator(), e.teamConfig(), sid,
-                        triageGate, newCtx, newFallback);
-            } else if (entry.payload() instanceof TeamSessionPayload t) {
-                // Team mode rebuild: re-create the live multi-agent payload around the
-                // freshly built CodeAgentSession; new poller picks up the same session id.
+            if (entry.payload() instanceof TeamSessionPayload t) {
                 if (teamManager == null || messageBus == null) {
                     log.warn("Cannot rebuild team-mode session {}: team primitives missing",
                             entry.sessionId());
                     return entry;
                 }
-                newPayload = new TeamSessionPayload(rebuilt, newSession, newCtx,
-                        teamManager, messageBus);
+                TeamSessionPayload.ExpertsPresetConfig existingPreset = t.preset();
+                if (existingPreset != null) {
+                    // Experts preset: rebuild the fallback AgentSessionPayload around the
+                    // fresh session, but reuse the other preset collaborators (coordinator,
+                    // triage, narrator settings, eventBus) — they're stateless w.r.t. the
+                    // CodeAgentSession.
+                    AgentSessionPayload newFallback = new AgentSessionPayload(
+                            rebuilt, newSession, newCtx);
+                    TeamSessionPayload.ExpertsPresetConfig rebuiltPreset =
+                            new TeamSessionPayload.ExpertsPresetConfig(
+                                    existingPreset.coordinator(),
+                                    existingPreset.teamConfig(),
+                                    existingPreset.triageGate(),
+                                    newFallback,
+                                    existingPreset.narrator(),
+                                    existingPreset.eventBus());
+                    if (rebuiltPreset.narrator().enabled()) {
+                        newSession.toolRegistry().registerTool(NoNarrationTool.class);
+                    }
+                    newPayload = new TeamSessionPayload(rebuilt, newSession, newCtx,
+                            teamManager, messageBus, rebuiltPreset);
+                } else {
+                    newPayload = new TeamSessionPayload(rebuilt, newSession, newCtx,
+                            teamManager, messageBus);
+                }
             } else {
                 newPayload = new AgentSessionPayload(rebuilt, newSession, newCtx);
             }
@@ -1620,17 +1638,13 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         /**
          * Payload-agnostic config accessor. Returns the underlying agent config for
-         * chat-mode sessions (AgentSessionPayload), experts-mode sessions
-         * (via ExpertsSessionPayload.fallback), or team-mode sessions
-         * (via TeamSessionPayload.config). Returns null if no config is reachable.
+         * chat-mode sessions (AgentSessionPayload) or team-mode sessions including the
+         * experts preset (via TeamSessionPayload.config). Returns null if no config is
+         * reachable.
          */
         public CodeAgentConfig configOrNull() {
             if (payload instanceof AgentSessionPayload asp) {
                 return asp.config();
-            }
-            if (payload instanceof ExpertsSessionPayload esp) {
-                AgentSessionPayload fb = esp.fallback();
-                return fb != null ? fb.config() : null;
             }
             if (payload instanceof TeamSessionPayload tsp) {
                 return tsp.config();

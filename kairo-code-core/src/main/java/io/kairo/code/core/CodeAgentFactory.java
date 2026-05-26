@@ -254,8 +254,9 @@ public final class CodeAgentFactory {
         }
 
         // Note: SessionOptions.swarmCoordinator is intentionally NOT exposed to Agent mode
-        // as a model-facing tool. Experts mode (ExpertsSessionPayload) uses SwarmCoordinator
-        // out-of-band as a session-level orchestrator; making it a tool call in Agent mode
+        // as a model-facing tool. Experts mode (TeamSessionPayload + ExpertsPresetConfig,
+        // post M-Experts-Upgrade) uses SwarmCoordinator out-of-band as a session-level
+        // orchestrator; making it a tool call in Agent mode
         // would smuggle a multi-minute batch workflow into a tool-result loop, which
         // breaks both UX (looks like a hang) and qoder's own use-case split
         // ("Agent mode is more efficient for simple, well-defined edits"). The field is
@@ -1068,7 +1069,8 @@ public final class CodeAgentFactory {
          * <p><b>Not used by Agent mode.</b> Per ADR-001, Agent-mode sessions never
          * surface the expert team as a model-facing tool — a multi-minute batch
          * inside a tool-result loop would look like a hang. Experts mode uses
-         * {@link SwarmCoordinator} out-of-band via {@code ExpertsSessionPayload}.
+         * {@link SwarmCoordinator} out-of-band via {@code TeamSessionPayload} with
+         * an {@code ExpertsPresetConfig} attached (M-Experts-Upgrade / #61).
          *
          * <p>This setter is retained on {@code SessionOptions} for use by the live
          * Claude-style Team mode ({@code TeamSessionPayload}, M-Team / #60), which

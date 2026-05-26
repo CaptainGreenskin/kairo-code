@@ -107,11 +107,17 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
             }
             return { type: 'CONTEXT_COMPACTED', sessionId, timestamp: ts, payload: parsed };
         }
-        case 'PLAN_READY':
+        case 'PLAN_READY': {
+            // Experts preset stamps teamId on resultMetadata so the Canvas can auto-attach.
+            const meta = (raw.resultMetadata as Record<string, unknown>) ?? {};
             return {
                 type: 'PLAN_READY', sessionId, timestamp: ts,
-                payload: { planSummary: (raw.content as string) ?? '' },
+                payload: {
+                    planSummary: (raw.content as string) ?? '',
+                    teamId: (meta.teamId as string) ?? undefined,
+                },
             };
+        }
         case 'REVERTED':
             return {
                 type: 'REVERTED', sessionId, timestamp: ts,

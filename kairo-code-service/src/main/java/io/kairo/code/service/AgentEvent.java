@@ -170,6 +170,18 @@ public record AgentEvent(
                 System.currentTimeMillis());
     }
 
+    /**
+     * PLAN_READY variant that carries a {@code teamId} so the frontend Canvas
+     * can auto-attach to the running expert team without command-palette interaction.
+     * Used by the Experts preset in {@code TeamSessionPayload}.
+     */
+    public static AgentEvent planReady(String sessionId, String planOverview, String teamId) {
+        Map<String, Object> meta = teamId == null ? null : Map.of("teamId", teamId);
+        return new AgentEvent(EventType.PLAN_READY, sessionId, planOverview, null, null,
+                false, null, null, null, null, null, null, meta,
+                System.currentTimeMillis());
+    }
+
     /** Create a REVERTED event signalling that the workspace was successfully reverted. */
     public static AgentEvent reverted(String sessionId) {
         return new AgentEvent(EventType.REVERTED, sessionId, null, null, null,

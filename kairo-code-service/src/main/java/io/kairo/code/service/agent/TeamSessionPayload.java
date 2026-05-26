@@ -1,17 +1,26 @@
 package io.kairo.code.service.agent;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.api.event.KairoEvent;
+import io.kairo.api.event.KairoEventBus;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.api.team.TeamConfig;
+import io.kairo.api.team.TeamEvent;
+import io.kairo.api.team.TeamEventType;
+import io.kairo.api.team.TeamResult;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.team.MessageBus;
+import io.kairo.code.core.team.SwarmCoordinator;
 import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.SessionPhase;
+import io.kairo.code.service.agent.tools.NoNarrationTool;
 import io.kairo.code.service.concurrency.AgentConcurrencyException;
 import io.kairo.code.service.concurrency.AgentSlot;
+import io.kairo.code.service.team.TriageGate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
@@ -20,30 +29,47 @@ import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * Team-mode session payload — Claude-style {@code TeamCreate} live multi-agent collaboration.
+ * Team-mode session payload — Claude-style {@code TeamCreate} live multi-agent collaboration, plus
+ * the M-Experts-Upgrade preset that runs upstream {@link SwarmCoordinator} workers behind a
+ * Team-Lead chat session.
  *
- * <p>The orchestrator session is a normal {@link CodeAgentSession} whose tool registry has been
- * augmented (via {@link io.kairo.code.core.CodeAgentFactory.SessionOptions#withTeamPrimitives}) with
- * {@code team_create} / {@code send_message} / {@code team_delete}. The model uses those tools to
- * spawn workers (via the existing {@code task} tool) and exchange messages over the in-process
- * {@link MessageBus}. Inbound peer messages addressed to this session are polled by a background
- * scheduler and projected onto the shared sink as {@link AgentEvent#peerMessage} events so they
- * surface in the live chat transcript.
+ * <p>Default Team mode (5-arg constructor, {@code preset == null}) is functionally identical to
+ * the original M-Team payload: a long-lived orchestrator session whose tool registry has been
+ * augmented with {@code team_create} / {@code send_message} / {@code team_delete}, with a
+ * background peer-message poller draining the in-process {@link MessageBus} mailbox onto the
+ * shared sink as {@link AgentEvent#peerMessage} events.
  *
- * <p>The phase machine reuses only the {@link AgentSessionPayload} chat-loop subset
- * (IDLE ⇄ PLANNING ⇄ COMPLETED ⇄ FAILED_PLANNING). PLAN_PENDING / EXECUTING are Experts-only and
- * never reached here — Team mode never enters the plan-preview flow.
+ * <p>Experts preset (6-arg constructor, {@code preset != null}) layers on top:
+ * <ul>
+ *   <li>plan-gate state machine (PLAN_PENDING / EXECUTING / FAILED_EXECUTION) lifted from the now
+ *       deleted {@code ExpertsSessionPayload};
+ *   <li>{@link TriageGate} fallback that demotes short messages back to a single-agent payload;
+ *   <li>{@link SwarmCoordinator}-backed plan / confirm / execute flow;
+ *   <li>swarm-event bridge that subscribes to {@link KairoEventBus#DOMAIN_TEAM} and projects every
+ *       lifecycle step into a {@code PEER_MESSAGE} on the sink (the same UX channel M-Team uses);
+ *   <li>active {@link NarratorDispatcher} that batches projected events and triggers a Team-Lead
+ *       {@code agent.call} per debounced batch — Team Lead either narrates the batch as a
+ *       {@code TEXT_CHUNK} or invokes the {@code no_narration} tool to stay silent.
+ * </ul>
  *
- * <p>Introduced by M-Team (task #60). See ADR-001 §"Implementation status & order" §3 and
- * {@link ExpertsSessionPayload} for the DAG-batch counterpart.
+ * <p><b>Mode isolation</b> (load-bearing — see M-Experts-Upgrade plan): every preset-only field and
+ * branch is gated behind {@code preset != null}. The 5-arg constructor delegates to the 6-arg one
+ * with {@code presetOrNull=null}, preserving the public surface used by every default Team call
+ * site in {@code AgentService}. {@code AgentSessionPayload} is untouched. The existing
+ * {@code TeamSessionPayloadTest} and {@code AgentServiceTeamModeTest} cases must pass without
+ * modification — they are the regression gate.
  */
 public final class TeamSessionPayload implements SessionPayload {
 
@@ -52,6 +78,15 @@ public final class TeamSessionPayload implements SessionPayload {
     /** Cadence for draining the peer-message mailbox. 500ms keeps perceived latency low. */
     private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
 
+    /**
+     * High-frequency swarm events that would flood both the user chat and the narrator's prompt
+     * context if surfaced. Same filter set TeamEventBridge marks as droppable.
+     */
+    private static final Set<TeamEventType> HIGH_FREQ_TYPES = EnumSet.of(
+            TeamEventType.STEP_THINKING,
+            TeamEventType.STEP_TOOL_CALL,
+            TeamEventType.STEP_ARTIFACT_CHUNK);
+
     private final CodeAgentConfig config;
     private final CodeAgentSession session;
     private volatile Agent agent;
@@ -59,20 +94,57 @@ public final class TeamSessionPayload implements SessionPayload {
     private final TeamManager teamManager;
     private final MessageBus messageBus;
 
+    // ── Experts preset (null in default Team mode) ──
+    private final ExpertsPresetConfig preset;
+    private volatile String pendingTeamId;
+    private final Disposable swarmEventBridge;
+    private final NarratorDispatcher narrator;
+
     private final AtomicReference<Disposable> currentRun = new AtomicReference<>();
     private final AtomicReference<Disposable> peerPoller = new AtomicReference<>();
 
+    /**
+     * Default Team-mode constructor. Preserved bit-for-bit for the M-Team call sites at
+     * {@code AgentService} case {@code "team"} — delegates to the 6-arg constructor with a null
+     * preset. Existing {@code TeamSessionPayloadTest} cases must continue to compile against this
+     * exact signature.
+     */
     public TeamSessionPayload(CodeAgentConfig config,
                               CodeAgentSession session,
                               AgentRuntimeContext ctx,
                               TeamManager teamManager,
                               MessageBus messageBus) {
+        this(config, session, ctx, teamManager, messageBus, null);
+    }
+
+    /**
+     * Full constructor used by experts-mode sessions. Pass {@code presetOrNull = null} to get
+     * default Team mode behavior — semantically identical to the 5-arg form above.
+     */
+    public TeamSessionPayload(CodeAgentConfig config,
+                              CodeAgentSession session,
+                              AgentRuntimeContext ctx,
+                              TeamManager teamManager,
+                              MessageBus messageBus,
+                              ExpertsPresetConfig presetOrNull) {
         this.config = Objects.requireNonNull(config, "config");
         this.session = Objects.requireNonNull(session, "session");
         this.agent = session.agent();
         this.ctx = Objects.requireNonNull(ctx, "ctx");
         this.teamManager = Objects.requireNonNull(teamManager, "teamManager");
         this.messageBus = Objects.requireNonNull(messageBus, "messageBus");
+        this.preset = presetOrNull;
+        if (preset != null) {
+            NarratorSettings narratorSettings = preset.narrator();
+            this.narrator =
+                    (narratorSettings != null && narratorSettings.enabled())
+                            ? new NarratorDispatcher(narratorSettings)
+                            : null;
+            this.swarmEventBridge = subscribeSwarmEvents(preset.eventBus());
+        } else {
+            this.narrator = null;
+            this.swarmEventBridge = null;
+        }
         startPeerPoller();
     }
 
@@ -84,6 +156,57 @@ public final class TeamSessionPayload implements SessionPayload {
         AtomicReference<SessionPhase> phaseRef = ctx.phaseRef();
         SessionPhase phase = phaseRef.get();
 
+        // ── Experts preset: plan-gate state machine ─────────────────────────────
+        if (preset != null) {
+            switch (phase) {
+                case IDLE, FAILED_PLANNING -> {
+                    if (!preset.triageGate().shouldFanOut(request.text())) {
+                        AgentEvent demoted = AgentEvent.modeDemoted(sessionId,
+                                "Message too brief for experts mode, single-agent fallback");
+                        return Flux.concat(
+                                Flux.just(demoted),
+                                preset.demotionFallback().handleMessage(request));
+                    }
+                    if (narrator != null) {
+                        narrator.suspend();
+                    }
+                    return startPlanOnly(request.text());
+                }
+                case PLAN_PENDING -> {
+                    if (narrator != null) {
+                        narrator.suspend();
+                    }
+                    return startPlanOnly(request.text());
+                }
+                case PLANNING -> {
+                    return Flux.just(AgentEvent.error(sessionId,
+                            "Planning is already in progress. Please wait for the plan to be generated.",
+                            "SESSION_BUSY"));
+                }
+                case EXECUTING -> {
+                    return Flux.just(AgentEvent.error(sessionId,
+                            "Expert team is currently executing. Please wait for completion.",
+                            "SESSION_BUSY"));
+                }
+                case COMPLETED -> {
+                    phaseRef.set(SessionPhase.IDLE);
+                    ctx.persistPhase().accept(SessionPhase.IDLE);
+                    return handleMessage(request);
+                }
+                case FAILED_EXECUTION -> {
+                    return Flux.just(AgentEvent.error(sessionId,
+                            "Execution failed. Please revert the workspace before retrying.",
+                            "REVERT_REQUIRED"));
+                }
+                default -> {
+                    // PLANNING already handled above; this is unreachable but keep the compiler happy.
+                    return Flux.just(AgentEvent.error(sessionId,
+                            "Unexpected session phase: " + phase, "INTERNAL_ERROR"));
+                }
+            }
+        }
+
+        // ── Default Team mode: chat-loop subset (unchanged from M-Team) ─────────
         // Team mode never enters PLAN_PENDING / FAILED_EXECUTION — those are Experts-only.
         // Mirror AgentSessionPayload's idle/retry behaviour for the rest.
         if (phase == SessionPhase.FAILED_PLANNING) {
@@ -153,7 +276,70 @@ public final class TeamSessionPayload implements SessionPayload {
     }
 
     @Override
+    public Flux<AgentEvent> confirmBuild() {
+        if (preset == null) {
+            return Flux.empty();
+        }
+
+        String sessionId = ctx.sessionId();
+        AtomicReference<SessionPhase> phaseRef = ctx.phaseRef();
+
+        if (!phaseRef.compareAndSet(SessionPhase.PLAN_PENDING, SessionPhase.EXECUTING)) {
+            return Flux.just(AgentEvent.error(sessionId,
+                    "No plan is pending confirmation. Current phase: " + phaseRef.get(),
+                    "INVALID_STATE"));
+        }
+        ctx.persistPhase().accept(SessionPhase.EXECUTING);
+
+        String teamId = pendingTeamId;
+        if (teamId == null) {
+            phaseRef.set(SessionPhase.PLAN_PENDING);
+            ctx.persistPhase().accept(SessionPhase.PLAN_PENDING);
+            return Flux.just(AgentEvent.error(sessionId,
+                    "No pending team ID found.", "INTERNAL_ERROR"));
+        }
+
+        if (!ctx.runningState().compareAndSet(false, true)) {
+            phaseRef.set(SessionPhase.PLAN_PENDING);
+            ctx.persistPhase().accept(SessionPhase.PLAN_PENDING);
+            return Flux.just(AgentEvent.error(sessionId,
+                    "Session is already running", "SESSION_BUSY"));
+        }
+
+        Sinks.Many<AgentEvent> localSink = Sinks.many().multicast().onBackpressureBuffer();
+
+        preset.coordinator().confirmAndExecute(teamId)
+                .doOnSuccess(result -> {
+                    ctx.runningState().set(false);
+                    phaseRef.set(SessionPhase.COMPLETED);
+                    ctx.persistPhase().accept(SessionPhase.COMPLETED);
+                    localSink.tryEmitNext(AgentEvent.done(sessionId, 0, 0));
+                    localSink.tryEmitComplete();
+                })
+                .doOnError(err -> {
+                    ctx.runningState().set(false);
+                    phaseRef.set(SessionPhase.FAILED_EXECUTION);
+                    ctx.persistPhase().accept(SessionPhase.FAILED_EXECUTION);
+                    log.warn("Expert team execution failed (session={}): {}",
+                            sessionId, err.getMessage());
+                    localSink.tryEmitNext(AgentEvent.error(sessionId,
+                            "Expert team execution failed: " + err.getMessage(),
+                            "TEAM_EXECUTION_ERROR"));
+                    localSink.tryEmitComplete();
+                })
+                .subscribe();
+
+        return localSink.asFlux();
+    }
+
+    @Override
     public void stop() {
+        if (narrator != null) {
+            narrator.dispose();
+        }
+        if (swarmEventBridge != null && !swarmEventBridge.isDisposed()) {
+            swarmEventBridge.dispose();
+        }
         Disposable d = currentRun.getAndSet(null);
         if (d != null && !d.isDisposed()) {
             d.dispose();
@@ -164,7 +350,8 @@ public final class TeamSessionPayload implements SessionPayload {
         }
         ctx.runningState().set(false);
         session.agent().interrupt();
-        log.info("TeamSessionPayload stopped (session={})", ctx.sessionId());
+        log.info("TeamSessionPayload stopped (session={}, preset={})",
+                ctx.sessionId(), preset != null);
     }
 
     @Override
@@ -175,6 +362,109 @@ public final class TeamSessionPayload implements SessionPayload {
     @Override
     public SessionPhase getState() {
         return ctx.phaseRef().get();
+    }
+
+    // ── Plan-only flow (experts preset) ──────────────────────────────────────────
+
+    private Flux<AgentEvent> startPlanOnly(String goal) {
+        String sessionId = ctx.sessionId();
+        ctx.phaseRef().set(SessionPhase.PLANNING);
+        ctx.persistPhase().accept(SessionPhase.PLANNING);
+        ctx.runningState().set(true);
+
+        Sinks.Many<AgentEvent> localSink = Sinks.many().multicast().onBackpressureBuffer();
+        localSink.tryEmitNext(AgentEvent.thinking(sessionId));
+
+        preset.coordinator().startExpertTeam(goal, preset.teamConfig(), List.<String>of(), true)
+                .doOnSuccess(result -> {
+                    ctx.runningState().set(false);
+                    pendingTeamId = preset.coordinator().lastTeamId();
+                    ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
+                    ctx.persistPhase().accept(SessionPhase.PLAN_PENDING);
+                    localSink.tryEmitNext(AgentEvent.planReady(sessionId,
+                            extractPlanSummary(result), pendingTeamId));
+                    localSink.tryEmitComplete();
+                })
+                .doOnError(err -> {
+                    ctx.runningState().set(false);
+                    ctx.phaseRef().set(SessionPhase.FAILED_PLANNING);
+                    ctx.persistPhase().accept(SessionPhase.FAILED_PLANNING);
+                    log.warn("Expert team planning failed (session={}): {}",
+                            sessionId, err.getMessage());
+                    localSink.tryEmitNext(AgentEvent.error(sessionId,
+                            "Planning failed: " + err.getMessage(),
+                            "PLANNING_ERROR"));
+                    localSink.tryEmitComplete();
+                })
+                .subscribe();
+
+        return localSink.asFlux();
+    }
+
+    private static String extractPlanSummary(TeamResult result) {
+        return result.finalOutput().orElse("Plan generated successfully");
+    }
+
+    // ── Swarm-event bridge (experts preset) ──────────────────────────────────────
+
+    /**
+     * Subscribe to {@link KairoEventBus#DOMAIN_TEAM} and project lifecycle step events into the
+     * shared sink as {@code PEER_MESSAGE} events — same channel M-Team uses for live peer chatter,
+     * so the frontend rendering path is bit-identical. When the narrator is enabled the same
+     * projected event is also pushed onto the dispatcher's batch queue.
+     */
+    private Disposable subscribeSwarmEvents(KairoEventBus eventBus) {
+        if (eventBus == null) {
+            log.warn("Experts preset wired without KairoEventBus — swarm events will not surface "
+                    + "as PEER_MESSAGE (session={})", ctx.sessionId());
+            return null;
+        }
+        String sessionId = ctx.sessionId();
+        Sinks.Many<AgentEvent> sink = ctx.sharedSink();
+        return eventBus.subscribe(KairoEvent.DOMAIN_TEAM)
+                .publishOn(Schedulers.boundedElastic())
+                .subscribe(envelope -> {
+                    Object payload = envelope.payload();
+                    if (!(payload instanceof TeamEvent te)) {
+                        return;
+                    }
+                    String activeTeamId = pendingTeamId;
+                    if (activeTeamId == null || !activeTeamId.equals(te.teamId())) {
+                        return;
+                    }
+                    if (HIGH_FREQ_TYPES.contains(te.type())) {
+                        return;
+                    }
+                    String role = roleAttribute(te);
+                    String content = summarize(te);
+                    String fromTag = role != null ? "expert:" + role : "expert";
+                    String eventId = envelope.eventId();
+                    sink.tryEmitNext(AgentEvent.peerMessage(
+                            sessionId, fromTag, content, eventId));
+                    if (narrator != null) {
+                        narrator.enqueue(new PeerEventSummary(
+                                fromTag, content, eventId, envelope.timestamp().toEpochMilli()));
+                    }
+                }, err -> log.warn(
+                        "swarm-event bridge subscription error (session={}): {}",
+                        sessionId, err.getMessage()));
+    }
+
+    private static String roleAttribute(TeamEvent te) {
+        Object role = te.attributes().get("role");
+        if (role == null) {
+            role = te.attributes().get("expertRole");
+        }
+        return role != null ? role.toString() : null;
+    }
+
+    private static String summarize(TeamEvent te) {
+        Object summary = te.attributes().get("summary");
+        if (summary != null) return summary.toString();
+        Object output = te.attributes().get("output");
+        if (output != null) return output.toString();
+        Object stepId = te.attributes().get("stepId");
+        return te.type().name() + (stepId != null ? " step=" + stepId : "");
     }
 
     // ── Peer-message poller ──────────────────────────────────────────────────────
@@ -236,6 +526,16 @@ public final class TeamSessionPayload implements SessionPayload {
         return messageBus;
     }
 
+    /** Non-null only for experts-mode sessions. */
+    public ExpertsPresetConfig preset() {
+        return preset;
+    }
+
+    /** Non-null after plan-only completes (experts mode). */
+    public String pendingTeamId() {
+        return pendingTeamId;
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     public Msg buildUserMsg(MessageRequest request) {
@@ -248,5 +548,235 @@ public final class TeamSessionPayload implements SessionPayload {
                     .build();
         }
         return Msg.of(MsgRole.USER, request.text());
+    }
+
+    // ── Preset config records ────────────────────────────────────────────────────
+
+    /**
+     * Bundle of preset-only collaborators wired into experts-mode sessions. Defines the seam
+     * between the shared substrate (this payload's chat/peer-poller behavior) and the upstream
+     * Swarm execution path.
+     *
+     * @param coordinator the {@link SwarmCoordinator} that owns plan/confirm/execute
+     * @param teamConfig the {@link TeamConfig} passed to {@link SwarmCoordinator#startExpertTeam}
+     * @param triageGate decides whether a user message is substantial enough for fan-out
+     * @param demotionFallback single-agent payload invoked when triage rejects the message
+     * @param narrator narrator settings — pass {@link NarratorSettings#disabled()} to skip
+     * @param eventBus bus carrying swarm lifecycle events for the bridge; may be {@code null}
+     */
+    public record ExpertsPresetConfig(
+            SwarmCoordinator coordinator,
+            TeamConfig teamConfig,
+            TriageGate triageGate,
+            AgentSessionPayload demotionFallback,
+            NarratorSettings narrator,
+            KairoEventBus eventBus) {
+
+        public ExpertsPresetConfig {
+            Objects.requireNonNull(coordinator, "coordinator");
+            Objects.requireNonNull(teamConfig, "teamConfig");
+            Objects.requireNonNull(triageGate, "triageGate");
+            Objects.requireNonNull(demotionFallback, "demotionFallback");
+            Objects.requireNonNull(narrator, "narrator");
+            // eventBus intentionally nullable — the bridge degrades to a warning + no projection.
+        }
+    }
+
+    /**
+     * Tunables for the active narrator dispatcher.
+     *
+     * @param enabled master kill-switch; when false no dispatcher is constructed
+     * @param narratorSystemPrompt prompt injected as the system-role context for each narrator call
+     * @param debounceWindow how long the dispatcher waits to accumulate events before firing
+     * @param maxBatchSize cap on events fed into a single narrator prompt
+     * @param queueHighWaterMark threshold past which the dispatcher fires before the debounce
+     *     window elapses
+     */
+    public record NarratorSettings(
+            boolean enabled,
+            String narratorSystemPrompt,
+            Duration debounceWindow,
+            int maxBatchSize,
+            int queueHighWaterMark) {
+
+        public static NarratorSettings defaults() {
+            return new NarratorSettings(
+                    true,
+                    DEFAULT_NARRATOR_PROMPT,
+                    Duration.ofSeconds(3),
+                    10,
+                    5);
+        }
+
+        public static NarratorSettings disabled() {
+            return new NarratorSettings(false, "", Duration.ofSeconds(3), 10, 5);
+        }
+    }
+
+    /**
+     * Default narrator system prompt — kept intentionally terse. The Team Lead either writes a
+     * single short paragraph or calls {@code no_narration} when nothing is worth surfacing.
+     */
+    private static final String DEFAULT_NARRATOR_PROMPT =
+            "You are the Team Lead coordinating a multi-expert engineering team. Below are recent "
+                    + "updates from your experts. If anything is worth surfacing to the user — a "
+                    + "meaningful finding, a risk, a decision point — write a single short paragraph in "
+                    + "your own voice. If everything is routine in-progress noise, call the "
+                    + "`no_narration` tool with no arguments. Be terse; the user is already watching the "
+                    + "raw expert stream.";
+
+    /** Thin projection of a swarm event into the narrator's batch context. */
+    record PeerEventSummary(String role, String content, String eventId, long ts) {}
+
+    // ── NarratorDispatcher ──────────────────────────────────────────────────────
+
+    /**
+     * Single-flight, debounced dispatcher that asks the Team-Lead {@link Agent} to either narrate
+     * the latest batch of expert progress or stay silent via {@code no_narration}.
+     *
+     * <p>Lives as an inner class because it directly accesses the shared sink, the
+     * {@code AgentConcurrencyController}, and the wrapped {@code agent}. Lifecycle is bound to the
+     * enclosing {@code TeamSessionPayload}: created when the experts preset is constructed,
+     * disposed in {@link #stop()}.
+     *
+     * <p>Key properties (load-bearing — see plan §Risks):
+     * <ul>
+     *   <li><b>Single-flight</b>: an in-flight narrator call blocks new dispatches via the
+     *       {@code dispatchInFlight} CAS. Backlog events accumulate in {@code pendingBatch} and
+     *       drain on the next dispatch — no narrator call ever sees a stale prompt.
+     *   <li><b>Debounced</b>: {@code bufferTimeout(maxBatchSize, debounceWindow)} fires on whichever
+     *       arrives first — events stop arriving for {@code debounceWindow}, or the buffer fills.
+     *   <li><b>Suspendable</b>: {@link #suspend()} is called from {@code handleMessage} before the
+     *       user turn acquires a slot, ensuring no narrator call competes with a user turn.
+     *       {@link #resume()} re-enables dispatch; backlog events are still in {@code pendingBatch}.
+     * </ul>
+     */
+    private final class NarratorDispatcher {
+
+        private final NarratorSettings settings;
+        private final Sinks.Many<Object> signal =
+                Sinks.many().multicast().onBackpressureBuffer();
+        private final ConcurrentLinkedQueue<PeerEventSummary> pendingBatch =
+                new ConcurrentLinkedQueue<>();
+        private final AtomicBoolean suspended = new AtomicBoolean(false);
+        private final AtomicBoolean dispatchInFlight = new AtomicBoolean(false);
+        private final Disposable subscription;
+
+        NarratorDispatcher(NarratorSettings settings) {
+            this.settings = settings;
+            this.subscription = signal.asFlux()
+                    .bufferTimeout(settings.maxBatchSize(), settings.debounceWindow())
+                    .filter(b -> !b.isEmpty())
+                    .publishOn(Schedulers.boundedElastic())
+                    .subscribe(this::triggerDispatch,
+                            err -> log.warn("narrator.signal subscription error (session={}): {}",
+                                    ctx.sessionId(), err.getMessage()));
+        }
+
+        void enqueue(PeerEventSummary e) {
+            pendingBatch.offer(e);
+            signal.tryEmitNext(e);
+            if (pendingBatch.size() >= settings.queueHighWaterMark()) {
+                // Force-flush ahead of the debounce window. We use a second emit rather than
+                // tryEmitComplete because completing would tear down the subscription; the
+                // bufferTimeout downstream will close the in-flight buffer on the next tick.
+                signal.tryEmitNext(e);
+            }
+        }
+
+        void suspend() {
+            suspended.set(true);
+        }
+
+        void resume() {
+            if (suspended.compareAndSet(true, false) && !pendingBatch.isEmpty()) {
+                // Flushing a sentinel re-arms bufferTimeout so accumulated events get a dispatch.
+                signal.tryEmitNext(Boolean.TRUE);
+            }
+        }
+
+        void dispose() {
+            if (!subscription.isDisposed()) {
+                subscription.dispose();
+            }
+            pendingBatch.clear();
+        }
+
+        private void triggerDispatch(List<Object> batchSignal) {
+            if (suspended.get()) {
+                return;
+            }
+            if (!dispatchInFlight.compareAndSet(false, true)) {
+                return;
+            }
+            List<PeerEventSummary> batch = drainBatch();
+            if (batch.isEmpty()) {
+                dispatchInFlight.set(false);
+                return;
+            }
+            Msg narratorPrompt = buildNarratorPrompt(settings, batch);
+            String sessionId = ctx.sessionId();
+            Sinks.Many<AgentEvent> sink = ctx.sharedSink();
+            ctx.concurrency().enqueueNarrator(sessionId, slot ->
+                    agent.call(narratorPrompt)
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .doFinally(s -> {
+                                slot.close();
+                                dispatchInFlight.set(false);
+                            })
+                            .subscribe(
+                                    response -> emitOrSuppress(response, sessionId, sink),
+                                    err -> log.warn(
+                                            "narrator.call failed (session={}): {}",
+                                            sessionId, err.getMessage())));
+            // If enqueueNarrator dropped the dispatch on contention, the doFinally above never
+            // runs — release the latch so the next batch isn't permanently blocked.
+            if (!dispatchInFlight.get()) {
+                // No-op: doFinally already ran (re-entrant subscribe in some impls).
+                return;
+            }
+        }
+
+        private List<PeerEventSummary> drainBatch() {
+            List<PeerEventSummary> out = new ArrayList<>();
+            PeerEventSummary e;
+            while (out.size() < settings.maxBatchSize() && (e = pendingBatch.poll()) != null) {
+                out.add(e);
+            }
+            return out;
+        }
+
+        private void emitOrSuppress(Msg response, String sessionId, Sinks.Many<AgentEvent> sink) {
+            if (containsNoNarrationToolCall(response)) {
+                log.debug("narrator.dispatch suppressed=true session={}", sessionId);
+                return;
+            }
+            String text = response.text();
+            if (text == null || text.isBlank()) {
+                return;
+            }
+            log.debug("narrator.dispatch suppressed=false session={} chars={}",
+                    sessionId, text.length());
+            sink.tryEmitNext(AgentEvent.textChunk(sessionId, text));
+        }
+
+        private boolean containsNoNarrationToolCall(Msg response) {
+            for (Content c : response.contents()) {
+                if (c instanceof Content.ToolUseContent t
+                        && NoNarrationTool.NAME.equals(t.toolName())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private Msg buildNarratorPrompt(NarratorSettings settings, List<PeerEventSummary> batch) {
+            StringBuilder body = new StringBuilder(settings.narratorSystemPrompt())
+                    .append("\n\nRecent expert updates:");
+            for (PeerEventSummary e : batch) {
+                body.append("\n- [").append(e.role()).append("] ").append(e.content());
+            }
+            return Msg.of(MsgRole.USER, body.toString());
+        }
     }
 }

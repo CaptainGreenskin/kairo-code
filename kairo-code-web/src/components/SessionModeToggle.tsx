@@ -28,7 +28,7 @@ const MODES: ModeMeta[] = [
     {
         value: 'experts',
         label: 'Experts',
-        desc: 'Multi-expert team collaboration',
+        desc: 'Team preset: planner-led experts with live Canvas DAG',
         icon: Users,
         chip: 'bg-violet-500/10',
         chipText: 'text-violet-400',

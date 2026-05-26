@@ -217,9 +217,13 @@ export interface SessionInfo {
 /**
  * Payload for PLAN_READY event — emitted when the agent has finished planning and
  * is awaiting user confirmation to proceed with execution.
+ *
+ * In experts mode the backend also stamps {@code teamId} (via resultMetadata) so
+ * the always-on Canvas pane can auto-attach to the running expert team.
  */
 export interface PlanReadyPayload {
     planSummary?: string;
+    teamId?: string;
 }
 
 /**

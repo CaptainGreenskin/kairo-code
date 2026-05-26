@@ -87,9 +87,17 @@ export interface ExpertTeamStore {
   teams: Record<string, TeamState>;
   activeTeamId: string | null;
   teamByMessageId: Record<string, string>;
+  /**
+   * Team that the always-on experts Canvas pane should render. Set when PLAN_READY
+   * arrives for an experts-mode session and cleared on session switch / reset.
+   * Separate from {@link ExpertTeamStore.activeTeamId} (which the command-palette
+   * flow uses) so the Canvas doesn't fight the modal panel for the same slot.
+   */
+  canvasTeamId: string | null;
 
   // Actions
   setActiveTeam: (teamId: string | null) => void;
+  setCanvasTeamId: (teamId: string | null) => void;
   handleTeamEvent: (event: TeamWsEvent) => void;
   /**
    * Applies multiple high-frequency events (STEP_THINKING / STEP_ARTIFACT_CHUNK)
@@ -149,8 +157,10 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
   teams: {},
   activeTeamId: null,
   teamByMessageId: {},
+  canvasTeamId: null,
 
   setActiveTeam: (teamId) => set({ activeTeamId: teamId }),
+  setCanvasTeamId: (teamId) => set({ canvasTeamId: teamId }),
 
   getActiveTeam: () => {
     const { teams, activeTeamId } = get();
@@ -168,7 +178,7 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
     return teamId ? teams[teamId] ?? null : null;
   },
 
-  reset: () => set({ teams: {}, activeTeamId: null, teamByMessageId: {} }),
+  reset: () => set({ teams: {}, activeTeamId: null, teamByMessageId: {}, canvasTeamId: null }),
 
   handleBatchEvents: (events) => {
     if (events.length === 0) return;

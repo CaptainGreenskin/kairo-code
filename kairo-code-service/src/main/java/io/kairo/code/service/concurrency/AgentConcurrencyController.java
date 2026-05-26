@@ -1,10 +1,13 @@
 package io.kairo.code.service.concurrency;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * Three-layer concurrency protection for agent execution:
@@ -25,6 +28,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Component
 public class AgentConcurrencyController {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentConcurrencyController.class);
 
     private static final int GLOBAL_MAX = 30;
     private static final int SESSION_MAX = 10;
@@ -87,6 +92,39 @@ public class AgentConcurrencyController {
                 sessionCounters.remove(sessionId, counter);
             }
         });
+    }
+
+    /**
+     * Attempt to start a narrator-style auxiliary agent call without raising on contention.
+     *
+     * <p>Lower-priority counterpart to {@link #acquire(String)} used exclusively by the
+     * experts-mode {@code NarratorDispatcher}. On success the caller's {@link Consumer} receives the
+     * acquired {@link AgentSlot} and is responsible for closing it (typically in the reactive
+     * chain's {@code doFinally}). On contention (any of the three limits exceeded) the dispatch is
+     * silently dropped — the dispatcher's batch queue retains the events for the next attempt.
+     *
+     * <p>Default Agent and Team modes never call this method; it exercises zero shared mutable
+     * state beyond what {@link #acquire(String)} already touches, so mode isolation is preserved.
+     *
+     * @param sessionId session identifier (same one passed to {@link #acquire(String)})
+     * @param runWithSlot callback invoked synchronously when a slot is acquired; receives the slot
+     */
+    public void enqueueNarrator(String sessionId, Consumer<AgentSlot> runWithSlot) {
+        AgentSlot slot;
+        try {
+            slot = acquire(sessionId);
+        } catch (AgentConcurrencyException e) {
+            log.debug("narrator.dispatch dropped session={} reason={}", sessionId, e.reason());
+            return;
+        }
+        try {
+            runWithSlot.accept(slot);
+        } catch (RuntimeException e) {
+            // Callback failed before installing the reactive chain that would have closed the slot.
+            // Close it here to avoid leaking; the dispatcher's batch stays queued for retry.
+            slot.close();
+            log.warn("narrator.dispatch callback threw session={}: {}", sessionId, e.getMessage());
+        }
     }
 
     /**

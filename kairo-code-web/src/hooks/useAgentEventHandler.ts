@@ -3,8 +3,9 @@ import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { usePreferencesStore, shouldAutoApprove } from '@store/preferencesStore';
 import { usePlanModeStore } from '@store/planModeStore';
-import type { AgentEvent, ToolCall, SessionRestoredPayload, TodosUpdatedPayload } from '@/types/agent';
+import type { AgentEvent, ToolCall, PlanReadyPayload, SessionRestoredPayload, TodosUpdatedPayload } from '@/types/agent';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
+import { useExpertTeamStore } from '@store/expertTeamStore';
 import type { Phase } from '@components/ThinkingIndicator';
 import type { ToastMessage } from '@components/Toast';
 import { deleteSnapshot, saveSnapshot, setLastSessionId } from '@utils/sessionSnapshot';
@@ -512,6 +513,14 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
 
                 case 'PLAN_READY': {
                     useBuildPhaseStore.getState().setPhase('PLAN_PENDING');
+                    // M-Experts-Upgrade / #69: when the experts preset emits PLAN_READY it
+                    // stamps teamId on the payload so the always-on Canvas pane can attach
+                    // without command-palette interaction. App.tsx watches canvasTeamId and
+                    // calls teamSubscribe(...) — keeping WS-side effects out of the handler.
+                    const planPayload = event.payload as PlanReadyPayload;
+                    if (planPayload.teamId) {
+                        useExpertTeamStore.getState().setCanvasTeamId(planPayload.teamId);
+                    }
                     break;
                 }
 

@@ -48,6 +48,7 @@ import { ToolStatsDashboard } from '@components/ToolStatsDashboard';
 import { SessionSearchPanel } from '@components/SessionSearchPanel';
 import { TeamPanel } from '@components/TeamPanel';
 import { ExpertTeamPanel } from '@components/ExpertTeamPanel';
+import { ExpertTeamCanvas } from '@components/ExpertTeamCanvas';
 import { TeamReplay } from '@components/TeamReplay';
 import { ExportMenu } from '@components/ExportMenu';
 import { ExecutionTimeline } from '@components/ExecutionTimeline';
@@ -87,6 +88,7 @@ import { ConfirmBuildChip } from '@components/ConfirmBuildChip';
 import { RevertButton } from '@components/RevertButton';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
 import { useSessionModeStore } from '@store/sessionModeStore';
+import { useExpertTeamStore } from '@store/expertTeamStore';
 import { FileTrackerBadge } from '@components/FileTrackerBadge';
 
 declare const __APP_VERSION__: string;
@@ -185,6 +187,16 @@ function App() {
     const chatSessionsWidth = useLayoutStore((s) => s.chatSessionsWidth);
     const setChatSessionsWidthStore = useLayoutStore((s) => s.setChatSessionsWidth);
     const openFileInEditor = useOpenFilesStore((s) => s.openFile);
+    // M-Experts-Upgrade / #69: the always-on Canvas pane reads the active session's
+    // mode and shows itself only when mode === 'experts'. Resolved the same way
+    // SessionModeToggle does (session mode first, workspace default as fallback).
+    const sessionModesMap = useSessionModeStore((s) => s.sessionModes);
+    const getWorkspaceMode = useSessionModeStore((s) => s.getMode);
+    const activeMode: 'agent' | 'experts' | 'team' = sessionId
+        ? (sessionModesMap[sessionId] ?? (currentWorkspaceId ? getWorkspaceMode(currentWorkspaceId) : 'agent'))
+        : (currentWorkspaceId ? getWorkspaceMode(currentWorkspaceId) : 'agent');
+    const canvasTeamId = useExpertTeamStore((s) => s.canvasTeamId);
+    const setCanvasTeamId = useExpertTeamStore((s) => s.setCanvasTeamId);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -330,6 +342,26 @@ function App() {
     useEffect(() => {
         teamHandlerRef.current = teamHandleRaw;
     }, [teamHandleRaw]);
+
+    // M-Experts-Upgrade / #69: when PLAN_READY in experts mode sets canvasTeamId,
+    // auto-subscribe so the Canvas pane receives live TEAM_EVENTs without the user
+    // having to open the command-palette Team browser first. Cleanup is intentionally
+    // omitted — useExpertTeamHandler.subscribe() handles team-switching by
+    // unsubscribing the previous teamId, and we don't want to drop the subscription
+    // just because some other prop in the dep list churned.
+    useEffect(() => {
+        if (canvasTeamId && isConnected) {
+            teamSubscribe(canvasTeamId);
+        }
+    }, [canvasTeamId, isConnected, teamSubscribe]);
+
+    // Reset canvasTeamId when the user switches to a non-experts session — keeps the
+    // Canvas from showing a stale team after toggling modes / sessions.
+    useEffect(() => {
+        if (activeMode !== 'experts' && canvasTeamId !== null) {
+            setCanvasTeamId(null);
+        }
+    }, [activeMode, canvasTeamId, setCanvasTeamId]);
 
     useEffect(() => {
         approveToolRef.current = approveTool;
@@ -1548,7 +1580,7 @@ ${content}
                                                     const buildIsGit = useBuildPhaseStore((s) => s.isGit);
                                                     return (
                                                         <div className="px-4">
-                                                            {buildPhase === 'PLAN_PENDING' && sessionId && (
+                                                            {buildPhase === 'PLAN_PENDING' && sessionId && activeMode !== 'experts' && (
                                                                 <ConfirmBuildChip
                                                                     sessionId={sessionId}
                                                                     isVisible={true}
@@ -1653,6 +1685,16 @@ ${content}
                             </div>
                         </aside>
                     </>
+                )}
+
+                {!isMobile && activeMode === 'experts' && (
+                    <aside
+                        className="relative flex flex-col h-full min-w-0"
+                        style={{ flex: '0 1 480px', minWidth: 360 }}
+                        aria-label="Experts Canvas"
+                    >
+                        <ExpertTeamCanvas sendAction={send} />
+                    </aside>
                 )}
             </div>
 
