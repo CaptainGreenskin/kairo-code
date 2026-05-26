@@ -544,6 +544,26 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     }
                     break;
                 }
+
+                case 'PEER_MESSAGE': {
+                    // M-Team / #60: peer agent in the same team sent a message via the
+                    // in-process MessageBus. Render as a system-styled assistant bubble
+                    // tagged with the originator so the chat transcript shows the cross-talk.
+                    const payload = event.payload as {
+                        fromSessionId: string; content: string; messageId: string;
+                    };
+                    const fromTag = payload.fromSessionId
+                        ? payload.fromSessionId.substring(0, 8)
+                        : 'peer';
+                    addMessageTo(sid, {
+                        id: generateId(),
+                        role: 'assistant',
+                        content: `📨 from ${fromTag}: ${payload.content}`,
+                        toolCalls: [],
+                        timestamp: Date.now(),
+                    });
+                    break;
+                }
             }
         },
         [

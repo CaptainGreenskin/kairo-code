@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type SessionMode = 'agent' | 'experts';
+export type SessionMode = 'agent' | 'experts' | 'team';
 
 interface SessionModeState {
   modes: Record<string, SessionMode>;  // workspaceId -> mode (used at create time)

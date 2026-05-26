@@ -6,19 +6,20 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for triage routing behavior in expert-team sessions.
+ * Tests for triage routing behavior in Experts-mode sessions.
  *
- * <p>Since TeamSessionPayload requires a SwarmCoordinator (no Mockito in test deps),
- * we test the triage decision logic that determines routing. The gate's shouldFanOut
- * is called before messages reach TeamSessionPayload.handleMessage.
+ * <p>Since {@code ExpertsSessionPayload} requires a {@code SwarmCoordinator} (no Mockito in
+ * test deps), we test the triage decision logic that determines routing. The gate's
+ * {@code shouldFanOut} is called before messages reach
+ * {@code ExpertsSessionPayload.handleMessage}.
  *
  * <p>Triage flow:
  * <ul>
- *   <li>shouldFanOut=true → routes to ExpertTeamCoordinator (TeamSessionPayload)</li>
+ *   <li>shouldFanOut=true → routes to {@code ExpertTeamCoordinator} (ExpertsSessionPayload)</li>
  *   <li>shouldFanOut=false → routes to fallback AgentSessionPayload + emits MODE_DEMOTED</li>
  * </ul>
  */
-class TeamSessionPayloadTriageTest {
+class ExpertsSessionPayloadTriageTest {
 
     private final HeuristicTriageGate gate = new HeuristicTriageGate("");
 

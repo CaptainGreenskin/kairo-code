@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Users, Check, ChevronDown } from 'lucide-react';
+import { Bot, Users, Network, Check, ChevronDown } from 'lucide-react';
 import { useSessionModeStore, type SessionMode } from '@store/sessionModeStore';
 import { useWorkspaceStore } from '@store/workspaceStore';
 import { useExpertTeamStore } from '@store/expertTeamStore';
@@ -32,6 +32,14 @@ const MODES: ModeMeta[] = [
         icon: Users,
         chip: 'bg-violet-500/10',
         chipText: 'text-violet-400',
+    },
+    {
+        value: 'team',
+        label: 'Team',
+        desc: 'Long-lived multi-agent collaboration',
+        icon: Network,
+        chip: 'bg-emerald-500/10',
+        chipText: 'text-emerald-400',
     },
 ];
 

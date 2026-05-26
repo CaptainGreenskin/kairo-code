@@ -137,7 +137,7 @@ class CodeAgentFactoryToolRegistryTest {
 
     // --- expert_team tool MUST NOT be registered in Agent mode (ADR-001) ---
     // Architectural guard: SwarmCoordinator is reserved for Experts mode
-    // (TeamSessionPayload, out-of-band orchestrator). Exposing it as a
+    // (ExpertsSessionPayload, out-of-band orchestrator). Exposing it as a
     // model-facing tool in Agent mode would smuggle a multi-minute batch
     // workflow into a tool-result loop and break the qoder-style mode split.
     // See kairo-code/docs/adr/ADR-001-mode-architecture.md.

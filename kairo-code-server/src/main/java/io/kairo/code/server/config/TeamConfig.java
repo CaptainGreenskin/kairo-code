@@ -53,6 +53,22 @@ public class TeamConfig {
         return new TeamManager();
     }
 
+    /**
+     * M-Team (#60): in-process message bus for live Team-mode sessions.
+     *
+     * <p>This is the kairo-code-core {@code MessageBus} (concrete class) used by the
+     * Claude-style live multi-agent {@link io.kairo.code.service.agent.TeamSessionPayload}
+     * — distinct from the kairo-api {@link MessageBus} interface bean at
+     * {@link #messageBus()}, which is bound to the Experts-mode
+     * {@link io.kairo.expertteam.ExpertTeamCoordinator}. Both coexist on purpose: Experts
+     * (qoder lineage) and Team (Claude lineage) keep separate buses so changes in one
+     * don't bleed into the other.
+     */
+    @Bean
+    public io.kairo.code.core.team.MessageBus codeTeamMessageBus() {
+        return new io.kairo.code.core.team.MessageBus();
+    }
+
     // ── A2A Infrastructure ──
 
     @Bean

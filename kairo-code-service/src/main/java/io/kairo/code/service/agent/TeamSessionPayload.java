@@ -1,184 +1,170 @@
 package io.kairo.code.service.agent;
 
-import io.kairo.api.team.TeamConfig;
-import io.kairo.api.team.TeamResult;
-import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.api.agent.Agent;
+import io.kairo.api.message.Content;
+import io.kairo.api.message.Msg;
+import io.kairo.api.message.MsgRole;
+import io.kairo.code.core.CodeAgentConfig;
+import io.kairo.code.core.CodeAgentSession;
+import io.kairo.code.core.team.MessageBus;
+import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.SessionPhase;
-import io.kairo.code.service.team.TriageGate;
+import io.kairo.code.service.concurrency.AgentConcurrencyException;
+import io.kairo.code.service.concurrency.AgentSlot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
+import reactor.core.scheduler.Schedulers;
 
+import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
-
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
- * Expert-team session payload wrapping a {@link SwarmCoordinator} and {@link TeamConfig}.
+ * Team-mode session payload — Claude-style {@code TeamCreate} live multi-agent collaboration.
  *
- * <p>This payload handles "experts" mode sessions where the user's message is routed
- * through a plan-preview flow:
- * <ol>
- *   <li>First message: call coordinator with planOnly=true → PLAN_READY event</li>
- *   <li>Subsequent messages while in plan-pending: route for DAG adjustment (re-plan)</li>
- *   <li>On confirmBuild signal: call confirmAndExecute → full execution</li>
- * </ol>
+ * <p>The orchestrator session is a normal {@link CodeAgentSession} whose tool registry has been
+ * augmented (via {@link io.kairo.code.core.CodeAgentFactory.SessionOptions#withTeamPrimitives}) with
+ * {@code team_create} / {@code send_message} / {@code team_delete}. The model uses those tools to
+ * spawn workers (via the existing {@code task} tool) and exchange messages over the in-process
+ * {@link MessageBus}. Inbound peer messages addressed to this session are polled by a background
+ * scheduler and projected onto the shared sink as {@link AgentEvent#peerMessage} events so they
+ * surface in the live chat transcript.
  *
- * @see AgentSessionPayload for the single-agent counterpart
+ * <p>The phase machine reuses only the {@link AgentSessionPayload} chat-loop subset
+ * (IDLE ⇄ PLANNING ⇄ COMPLETED ⇄ FAILED_PLANNING). PLAN_PENDING / EXECUTING are Experts-only and
+ * never reached here — Team mode never enters the plan-preview flow.
+ *
+ * <p>Introduced by M-Team (task #60). See ADR-001 §"Implementation status & order" §3 and
+ * {@link ExpertsSessionPayload} for the DAG-batch counterpart.
  */
 public final class TeamSessionPayload implements SessionPayload {
 
     private static final Logger log = LoggerFactory.getLogger(TeamSessionPayload.class);
 
-    private final SwarmCoordinator coordinator;
-    private final TeamConfig teamConfig;
-    private final String sessionId;
-    private final TriageGate triageGate;
-    private final AgentRuntimeContext ctx;
-    private final AgentSessionPayload fallback;
-    private volatile String pendingTeamId;
+    /** Cadence for draining the peer-message mailbox. 500ms keeps perceived latency low. */
+    private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
 
-    public TeamSessionPayload(SwarmCoordinator coordinator,
-                               TeamConfig teamConfig,
-                               String sessionId,
-                               TriageGate triageGate,
-                               AgentRuntimeContext ctx,
-                               AgentSessionPayload fallback) {
-        this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
-        this.teamConfig = Objects.requireNonNull(teamConfig, "teamConfig");
-        this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
-        this.triageGate = Objects.requireNonNull(triageGate, "triageGate");
+    private final CodeAgentConfig config;
+    private final CodeAgentSession session;
+    private volatile Agent agent;
+    private final AgentRuntimeContext ctx;
+    private final TeamManager teamManager;
+    private final MessageBus messageBus;
+
+    private final AtomicReference<Disposable> currentRun = new AtomicReference<>();
+    private final AtomicReference<Disposable> peerPoller = new AtomicReference<>();
+
+    public TeamSessionPayload(CodeAgentConfig config,
+                              CodeAgentSession session,
+                              AgentRuntimeContext ctx,
+                              TeamManager teamManager,
+                              MessageBus messageBus) {
+        this.config = Objects.requireNonNull(config, "config");
+        this.session = Objects.requireNonNull(session, "session");
+        this.agent = session.agent();
         this.ctx = Objects.requireNonNull(ctx, "ctx");
-        this.fallback = Objects.requireNonNull(fallback, "fallback");
+        this.teamManager = Objects.requireNonNull(teamManager, "teamManager");
+        this.messageBus = Objects.requireNonNull(messageBus, "messageBus");
+        startPeerPoller();
     }
 
-    /**
-     * Handle a user message in expert-team mode.
-     *
-     * <p>Flow:
-     * <ol>
-     *   <li>First message (IDLE/FAILED_PLANNING): triage → if demoted route to fallback, else planOnly</li>
-     *   <li>Messages while PLAN_PENDING: route to re-plan (re-run planOnly with updated goal)</li>
-     *   <li>confirmBuild (see {@link #confirmBuild()}): execute the pending plan</li>
-     * </ol>
-     */
+    // ── SessionPayload contract ──────────────────────────────────────────────────
+
     @Override
     public Flux<AgentEvent> handleMessage(MessageRequest request) {
-        SessionPhase current = ctx.phaseRef().get();
+        String sessionId = ctx.sessionId();
+        AtomicReference<SessionPhase> phaseRef = ctx.phaseRef();
+        SessionPhase phase = phaseRef.get();
 
-        switch (current) {
-            case IDLE, FAILED_PLANNING -> {
-                if (!triageGate.shouldFanOut(request.text())) {
-                    // Demoted: single-agent fallback. Emit MODE_DEMOTED banner then
-                    // delegate to the fallback AgentSessionPayload for a real LLM response.
-                    AgentEvent demoted = AgentEvent.modeDemoted(sessionId,
-                            "Message too brief for experts mode, single-agent fallback");
-                    return Flux.concat(
-                            Flux.just(demoted),
-                            fallback.handleMessage(request)
-                    );
-                }
-                // Triage passed — start expert team planning
-                return startPlanOnly(request.text());
-            }
-
-            case PLAN_PENDING -> {
-                // User is refining the plan — re-plan with the updated goal
-                return startPlanOnly(request.text());
-            }
-
-            case PLANNING -> {
-                return Flux.just(AgentEvent.error(sessionId,
-                        "Planning is already in progress. Please wait for the plan to be generated.",
-                        "SESSION_BUSY"));
-            }
-
-            case EXECUTING -> {
-                return Flux.just(AgentEvent.error(sessionId,
-                        "Expert team is currently executing. Please wait for completion.",
-                        "SESSION_BUSY"));
-            }
-
-            case COMPLETED -> {
-                // Reset and allow new planning
-                ctx.phaseRef().set(SessionPhase.IDLE);
-                return handleMessage(request);
-            }
-
-            case FAILED_EXECUTION -> {
-                return Flux.just(AgentEvent.error(sessionId,
-                        "Execution failed. Please revert the workspace before retrying.",
-                        "REVERT_REQUIRED"));
-            }
-
-            default -> {
-                return Flux.just(AgentEvent.error(sessionId,
-                        "Unexpected session phase: " + current, "INTERNAL_ERROR"));
-            }
+        // Team mode never enters PLAN_PENDING / FAILED_EXECUTION — those are Experts-only.
+        // Mirror AgentSessionPayload's idle/retry behaviour for the rest.
+        if (phase == SessionPhase.FAILED_PLANNING) {
+            phaseRef.set(SessionPhase.PLANNING);
+            ctx.persistPhase().accept(SessionPhase.PLANNING);
         }
-    }
-
-    /**
-     * Confirm and execute the pending plan.
-     * Called when the user clicks "Start Team" after reviewing the plan preview.
-     *
-     * @return Flux of AgentEvents during execution
-     */
-    @Override
-    public Flux<AgentEvent> confirmBuild() {
-        // CAS-guard the transition so concurrent confirmBuild calls don't double-execute.
-        if (!ctx.phaseRef().compareAndSet(SessionPhase.PLAN_PENDING, SessionPhase.EXECUTING)) {
-            return Flux.just(AgentEvent.error(sessionId,
-                    "No plan is pending confirmation. Current phase: " + ctx.phaseRef().get(),
-                    "INVALID_STATE"));
+        if (phase == SessionPhase.IDLE || phase == SessionPhase.COMPLETED) {
+            phaseRef.set(SessionPhase.PLANNING);
+            ctx.persistPhase().accept(SessionPhase.PLANNING);
         }
 
-        String teamId = pendingTeamId;
-        if (teamId == null) {
-            // Roll back the phase since we won't be executing.
-            ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
-            return Flux.just(AgentEvent.error(sessionId,
-                    "No pending team ID found.", "INTERNAL_ERROR"));
-        }
-
-        if (!ctx.runningState().compareAndSet(false, true)) {
-            // Another lifecycle already holds the running slot — roll phase back.
-            ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
+        AtomicBoolean running = ctx.runningState();
+        if (!running.compareAndSet(false, true)) {
             return Flux.just(AgentEvent.error(sessionId,
                     "Session is already running", "SESSION_BUSY"));
         }
 
-        Sinks.Many<AgentEvent> sink = Sinks.many().multicast().onBackpressureBuffer();
+        Sinks.Many<AgentEvent> sink = ctx.sharedSink();
+        Msg userMsg = buildUserMsg(request);
+        final Agent localAgent = this.agent;
 
-        coordinator.confirmAndExecute(teamId)
-                .doOnSuccess(result -> {
-                    ctx.runningState().set(false);
-                    ctx.phaseRef().set(SessionPhase.COMPLETED);
-                    sink.tryEmitNext(AgentEvent.done(sessionId, 0, 0));
-                    sink.tryEmitComplete();
-                })
-                .doOnError(err -> {
-                    ctx.runningState().set(false);
-                    ctx.phaseRef().set(SessionPhase.FAILED_EXECUTION);
-                    log.warn("Expert team execution failed (session={}): {}",
-                            sessionId, err.getMessage());
-                    sink.tryEmitNext(AgentEvent.error(sessionId,
-                            "Expert team execution failed: " + err.getMessage(),
-                            "TEAM_EXECUTION_ERROR"));
-                    sink.tryEmitComplete();
-                })
-                .subscribe();
+        sink.tryEmitNext(AgentEvent.thinking(sessionId));
 
+        AgentSlot slot;
+        try {
+            slot = ctx.concurrency().acquire(sessionId);
+        } catch (AgentConcurrencyException e) {
+            sink.tryEmitNext(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
+            running.set(false);
+            return sink.asFlux();
+        }
+
+        Consumer<String> thinkingConsumer = delta -> {
+            if (delta != null && !delta.isEmpty()) {
+                sink.tryEmitNext(AgentEvent.thinkingChunk(sessionId, delta));
+            }
+        };
+
+        long startedAtMs = System.currentTimeMillis();
+
+        Disposable disposable = localAgent.call(userMsg)
+                .contextWrite(reactor.util.context.Context.of(
+                        io.kairo.core.agent.ReasoningPhase.THINKING_DELTA_KEY,
+                        thinkingConsumer))
+                .subscribeOn(Schedulers.boundedElastic())
+                .doFinally(signal -> {
+                    slot.close();
+                    running.set(false);
+                    currentRun.set(null);
+                    long elapsedMs = System.currentTimeMillis() - startedAtMs;
+                    log.info("team.terminal session={} signal={} elapsedMs={}",
+                            sessionId, signal, elapsedMs);
+                    phaseRef.compareAndSet(SessionPhase.PLANNING, SessionPhase.IDLE);
+                })
+                .subscribe(
+                        responseMsg -> {
+                            // Terminal emit happens in AgentEventBridgeHook.onSessionEnd.
+                        },
+                        err -> {
+                            log.debug("team.call error for session {}: {}",
+                                    sessionId, err.getMessage());
+                            phaseRef.compareAndSet(SessionPhase.PLANNING, SessionPhase.FAILED_PLANNING);
+                        });
+
+        currentRun.set(disposable);
         return sink.asFlux();
     }
 
     @Override
     public void stop() {
+        Disposable d = currentRun.getAndSet(null);
+        if (d != null && !d.isDisposed()) {
+            d.dispose();
+        }
+        Disposable p = peerPoller.getAndSet(null);
+        if (p != null && !p.isDisposed()) {
+            p.dispose();
+        }
         ctx.runningState().set(false);
-        fallback.stop();
-        log.info("TeamSessionPayload stopped (session={})", sessionId);
+        session.agent().interrupt();
+        log.info("TeamSessionPayload stopped (session={})", ctx.sessionId());
     }
 
     @Override
@@ -191,74 +177,76 @@ public final class TeamSessionPayload implements SessionPayload {
         return ctx.phaseRef().get();
     }
 
-    // ── Private helpers ──
-
-    private Flux<AgentEvent> startPlanOnly(String goal) {
-        ctx.phaseRef().set(SessionPhase.PLANNING);
-        ctx.runningState().set(true);
-
-        Sinks.Many<AgentEvent> sink = Sinks.many().multicast().onBackpressureBuffer();
-
-        // Emit thinking indicator
-        sink.tryEmitNext(AgentEvent.thinking(sessionId));
-
-        coordinator.startExpertTeam(goal, teamConfig, List.<String>of(), true)
-                .doOnSuccess(result -> {
-                    ctx.runningState().set(false);
-                    pendingTeamId = coordinator.lastTeamId();
-                    ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
-                    // Emit plan-ready with the plan text from finalOutput (the canonical location)
-                    sink.tryEmitNext(AgentEvent.planReady(sessionId,
-                            extractPlanSummary(result)));
-                    sink.tryEmitComplete();
-                })
-                .doOnError(err -> {
-                    ctx.runningState().set(false);
-                    ctx.phaseRef().set(SessionPhase.FAILED_PLANNING);
-                    log.warn("Expert team planning failed (session={}): {}",
-                            sessionId, err.getMessage());
-                    sink.tryEmitNext(AgentEvent.error(sessionId,
-                            "Planning failed: " + err.getMessage(),
-                            "PLANNING_ERROR"));
-                    sink.tryEmitComplete();
-                })
-                .subscribe();
-
-        return sink.asFlux();
-    }
+    // ── Peer-message poller ──────────────────────────────────────────────────────
 
     /**
-     * Extract the plan summary from the TeamResult.
-     * In planOnly mode the coordinator places the plan text in {@code finalOutput()}.
+     * Spawn a background poller that drains the session's MessageBus mailbox every
+     * {@link #POLL_INTERVAL} and projects each {@code TeamMessage} onto the shared sink as a
+     * {@code PEER_MESSAGE} event. Disposed in {@link #stop()}.
      */
-    private String extractPlanSummary(TeamResult result) {
-        return result.finalOutput().orElse("Plan generated successfully");
+    private void startPeerPoller() {
+        String sessionId = ctx.sessionId();
+        Sinks.Many<AgentEvent> sink = ctx.sharedSink();
+        Disposable d = Flux.interval(POLL_INTERVAL, Schedulers.boundedElastic())
+                .doOnNext(tick -> {
+                    try {
+                        List<MessageBus.TeamMessage> msgs = messageBus.poll(sessionId);
+                        for (MessageBus.TeamMessage msg : msgs) {
+                            sink.tryEmitNext(AgentEvent.peerMessage(
+                                    sessionId, msg.fromSessionId(),
+                                    msg.content(), msg.messageId()));
+                        }
+                    } catch (Exception e) {
+                        log.warn("Peer-message poll failed for session {}: {}",
+                                sessionId, e.getMessage());
+                    }
+                })
+                .subscribe();
+        peerPoller.set(d);
     }
 
-    // ── Accessors ──
+    // ── Agent rebuild support ────────────────────────────────────────────────────
 
-    /** The swarm coordinator for expert-team execution. */
-    public SwarmCoordinator coordinator() {
-        return coordinator;
+    /**
+     * Replace the live agent with a freshly built one (e.g. after credential update).
+     */
+    public AgentSessionPayload.AgentSnapshot rebuildAgent(Agent fresh) {
+        if (ctx.runningState().get()) {
+            throw new IllegalStateException("Cannot rebuild agent while session is running");
+        }
+        this.agent = fresh;
+        return new AgentSessionPayload.AgentSnapshot(fresh.name(), config.modelName());
     }
 
-    /** The team configuration for this session. */
-    public TeamConfig teamConfig() {
-        return teamConfig;
+    // ── Accessors ────────────────────────────────────────────────────────────────
+
+    public CodeAgentConfig config() {
+        return config;
     }
 
-    /** The fallback single-agent payload (constructor-injected, never null). */
-    public AgentSessionPayload fallback() {
-        return fallback;
+    public CodeAgentSession session() {
+        return session;
     }
 
-    /** The pending team ID (available after plan-only completes). */
-    public String pendingTeamId() {
-        return pendingTeamId;
+    public TeamManager teamManager() {
+        return teamManager;
     }
 
-    /** Current phase of the team session (string form for backward compat). */
-    public String currentPhase() {
-        return ctx.phaseRef().get().name().toLowerCase();
+    public MessageBus messageBus() {
+        return messageBus;
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    public Msg buildUserMsg(MessageRequest request) {
+        if (request.hasImage()) {
+            byte[] bytes = Base64.getDecoder().decode(request.imageData());
+            return Msg.builder()
+                    .role(MsgRole.USER)
+                    .addContent(new Content.TextContent(request.text()))
+                    .addContent(new Content.ImageContent(null, request.imageMediaType(), bytes))
+                    .build();
+        }
+        return Msg.of(MsgRole.USER, request.text());
     }
 }

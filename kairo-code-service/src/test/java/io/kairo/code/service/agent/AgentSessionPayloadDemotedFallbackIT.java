@@ -29,11 +29,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * M136 regression gate: tests the TeamSessionPayload demoted fallback path.
+ * M136 regression gate: tests the {@code ExpertsSessionPayload} demoted fallback path.
  *
- * <p>When the triage gate returns false (shouldFanOut=false), TeamSessionPayload
+ * <p>When the triage gate returns false (shouldFanOut=false), {@code ExpertsSessionPayload}
  * emits MODE_DEMOTED followed by the fallback AgentSessionPayload's event stream.
  * This test verifies the exact Flux.concat composition pattern used in production.
+ *
+ * <p>(Comment updated by M-Team / #60 after {@code TeamSessionPayload} → {@code
+ * ExpertsSessionPayload} rename. The new {@code TeamSessionPayload} is the live
+ * multi-agent payload and has no triage gate.)
  */
 @Timeout(value = 10, unit = TimeUnit.SECONDS)
 class AgentSessionPayloadDemotedFallbackIT {
@@ -72,7 +76,7 @@ class AgentSessionPayloadDemotedFallbackIT {
 
         AgentSessionPayload fallback = new AgentSessionPayload(config, session, ctx);
 
-        // Simulate the TeamSessionPayload demoted path:
+        // Simulate the ExpertsSessionPayload demoted path:
         // Flux.concat(Flux.just(demoted), fallback.handleMessage(request))
         MessageRequest request = MessageRequest.text("hi");
         AgentEvent demoted = AgentEvent.modeDemoted(SESSION_ID,

@@ -15,7 +15,8 @@ export type AgentEventType =
     | 'CONTEXT_COMPACTED'
     | 'PLAN_READY'
     | 'REVERTED'
-    | 'MODE_DEMOTED';
+    | 'MODE_DEMOTED'
+    | 'PEER_MESSAGE';
 
 /**
  * Mirrors {@code io.kairo.api.tool.FailureReason}. Carried on TOOL_RESULT payloads under
@@ -49,7 +50,8 @@ export type AgentEventPayload =
     | ContextCompactedPayload
     | PlanReadyPayload
     | RevertedPayload
-    | ModeDemotedPayload;
+    | ModeDemotedPayload
+    | PeerMessagePayload;
 
 export interface TextChunkPayload {
     text: string;
@@ -234,6 +236,17 @@ export interface RevertedPayload {
  */
 export interface ModeDemotedPayload {
     reason: string;
+}
+
+/**
+ * Payload for PEER_MESSAGE event — emitted by TeamSessionPayload (M-Team / #60) when
+ * a peer agent in the same team has sent a message via the in-process MessageBus.
+ * Rendered as a system-styled bubble in the chat.
+ */
+export interface PeerMessagePayload {
+    fromSessionId: string;
+    content: string;
+    messageId: string;
 }
 
 export interface TokenUsage {

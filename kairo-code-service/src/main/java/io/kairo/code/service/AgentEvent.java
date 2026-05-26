@@ -45,7 +45,13 @@ public record AgentEvent(
         /** Tells frontend to clear execution-phase messages from UI. */
         CLEAR_EXECUTION_MESSAGES,
         /** Emitted when expert-team triage demotes the request to single-agent ReAct. */
-        MODE_DEMOTED
+        MODE_DEMOTED,
+        /**
+         * Emitted by {@code TeamSessionPayload} when a peer agent in the same team has sent
+         * this session a message via {@code MessageBus}. {@code content} carries the body and
+         * {@code resultMetadata} carries {@code fromSessionId} and {@code messageId}.
+         */
+        PEER_MESSAGE
     }
 
     public static AgentEvent thinking(String sessionId) {
@@ -188,6 +194,22 @@ public record AgentEvent(
     public static AgentEvent modeDemoted(String sessionId, String reason) {
         return new AgentEvent(EventType.MODE_DEMOTED, sessionId, reason, null, null,
                 false, null, null, null, null, null, null, null,
+                System.currentTimeMillis());
+    }
+
+    /**
+     * Create a PEER_MESSAGE event for a message delivered from another team member's session
+     * via {@code io.kairo.code.core.team.MessageBus}. {@code content} holds the message body;
+     * {@code resultMetadata} carries {@code fromSessionId} and {@code messageId} so the UI can
+     * render attribution and dedupe re-deliveries.
+     */
+    public static AgentEvent peerMessage(String sessionId, String fromSessionId,
+                                         String content, String messageId) {
+        Map<String, Object> meta = Map.of(
+                "fromSessionId", fromSessionId == null ? "" : fromSessionId,
+                "messageId", messageId == null ? "" : messageId);
+        return new AgentEvent(EventType.PEER_MESSAGE, sessionId, content, null, null,
+                false, null, null, null, null, null, null, meta,
                 System.currentTimeMillis());
     }
 }

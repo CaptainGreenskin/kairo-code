@@ -16,6 +16,7 @@ import io.kairo.code.service.agent.AgentRuntimeContext;
 import io.kairo.code.service.agent.AgentSessionPayload;
 import io.kairo.code.service.agent.MessageRequest;
 import io.kairo.code.service.agent.SessionPayload;
+import io.kairo.code.service.agent.ExpertsSessionPayload;
 import io.kairo.code.service.agent.TeamSessionPayload;
 import io.kairo.code.service.concurrency.AgentConcurrencyController;
 import io.kairo.code.service.team.TriageGate;
@@ -149,6 +150,13 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     @Autowired(required = false)
     private TriageGate triageGate;
+
+    /** Team-mode primitives — null when the kairo-code-server beans aren't on the classpath. */
+    @Autowired(required = false)
+    private io.kairo.code.core.team.TeamManager teamManager;
+
+    @Autowired(required = false)
+    private io.kairo.code.core.team.MessageBus messageBus;
 
     @Autowired
     private WorktreeManager worktreeManager;
@@ -300,7 +308,7 @@ public class AgentService implements DisposableBean, InitializingBean {
                     .withApprovalHandler(approvalHandler)
                     .withHooks(List.of(bridgeHook, compactionHook, planHook));
             // SwarmCoordinator is intentionally NOT wired into Agent-mode sessions.
-            // Experts mode (TeamSessionPayload) uses it out-of-band as a session-level
+            // Experts mode (ExpertsSessionPayload) uses it out-of-band as a session-level
             // orchestrator; exposing it as a model-facing tool in Agent mode would
             // smuggle a multi-minute batch workflow into a tool-result loop. See
             // kairo-code/docs/adr/ADR-001-mode-architecture.md.
@@ -313,6 +321,13 @@ public class AgentService implements DisposableBean, InitializingBean {
                         new io.kairo.code.core.observability.SessionAwareTracer(
                                 tracer, sessionId, workspaceId));
             }
+            // M-Team (#60): plumb team primitives into the agent's tool registry only
+            // when this is a team-mode session. Agent / Experts modes deliberately do
+            // not expose team_create / send_message / team_delete — those are the
+            // primitives that distinguish Team mode per ADR-001.
+            if ("team".equals(normalizedMode) && teamManager != null && messageBus != null) {
+                opts = opts.withTeamPrimitives(teamManager, messageBus);
+            }
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts);
 
             // ── Payload creation via switch expression ───────────────────────────────
@@ -323,10 +338,17 @@ public class AgentService implements DisposableBean, InitializingBean {
                                 "experts mode unavailable: SwarmCoordinator not configured");
                     }
                     AgentSessionPayload fb = new AgentSessionPayload(config, session, ctx);
-                    TeamSessionPayload teamPayload = new TeamSessionPayload(
+                    ExpertsSessionPayload expertsPayload = new ExpertsSessionPayload(
                             swarmCoordinator, io.kairo.api.team.TeamConfig.defaults(),
                             sessionId, triageGate, ctx, fb);
-                    yield teamPayload;
+                    yield expertsPayload;
+                }
+                case "team" -> {
+                    if (teamManager == null || messageBus == null) {
+                        throw new IllegalStateException(
+                                "team mode unavailable: TeamManager/MessageBus not configured");
+                    }
+                    yield new TeamSessionPayload(config, session, ctx, teamManager, messageBus);
                 }
                 case "agent" -> new AgentSessionPayload(config, session, ctx);
                 default -> throw new IllegalArgumentException(
@@ -461,8 +483,8 @@ public class AgentService implements DisposableBean, InitializingBean {
         Agent agent;
         if (entry.payload() instanceof AgentSessionPayload asp) {
             agent = asp.session().agent();
-        } else if (entry.payload() instanceof TeamSessionPayload tsp) {
-            agent = tsp.fallback().session().agent();
+        } else if (entry.payload() instanceof ExpertsSessionPayload esp) {
+            agent = esp.fallback().session().agent();
         } else {
             log.warn("confirmBuild: unknown payload type for session {}", sessionId);
             running.set(false);
@@ -1030,6 +1052,12 @@ public class AgentService implements DisposableBean, InitializingBean {
                     new io.kairo.code.core.observability.SessionAwareTracer(
                             tracer, sid, entry.workspaceId()));
         }
+        // M-Team (#60): mirror the createSession wiring — team-mode rebuilds need the
+        // team tools too, otherwise the model loses team_create / send_message after
+        // credential refresh.
+        if ("team".equals(entry.sessionMode()) && teamManager != null && messageBus != null) {
+            opts = opts.withTeamPrimitives(teamManager, messageBus);
+        }
 
         try {
             CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts);
@@ -1043,11 +1071,21 @@ public class AgentService implements DisposableBean, InitializingBean {
     
             // Pattern-match on sealed payload type
             SessionPayload newPayload;
-            if (entry.payload() instanceof TeamSessionPayload t) {
+            if (entry.payload() instanceof ExpertsSessionPayload e) {
                 AgentSessionPayload newFallback = new AgentSessionPayload(rebuilt, newSession, newCtx);
-                newPayload = new TeamSessionPayload(
-                        t.coordinator(), t.teamConfig(), sid,
+                newPayload = new ExpertsSessionPayload(
+                        e.coordinator(), e.teamConfig(), sid,
                         triageGate, newCtx, newFallback);
+            } else if (entry.payload() instanceof TeamSessionPayload t) {
+                // Team mode rebuild: re-create the live multi-agent payload around the
+                // freshly built CodeAgentSession; new poller picks up the same session id.
+                if (teamManager == null || messageBus == null) {
+                    log.warn("Cannot rebuild team-mode session {}: team primitives missing",
+                            entry.sessionId());
+                    return entry;
+                }
+                newPayload = new TeamSessionPayload(rebuilt, newSession, newCtx,
+                        teamManager, messageBus);
             } else {
                 newPayload = new AgentSessionPayload(rebuilt, newSession, newCtx);
             }
@@ -1582,16 +1620,20 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         /**
          * Payload-agnostic config accessor. Returns the underlying agent config for
-         * either chat-mode sessions (AgentSessionPayload) or experts-mode sessions
-         * (via TeamSessionPayload.fallback). Returns null if no config is reachable.
+         * chat-mode sessions (AgentSessionPayload), experts-mode sessions
+         * (via ExpertsSessionPayload.fallback), or team-mode sessions
+         * (via TeamSessionPayload.config). Returns null if no config is reachable.
          */
         public CodeAgentConfig configOrNull() {
             if (payload instanceof AgentSessionPayload asp) {
                 return asp.config();
             }
-            if (payload instanceof TeamSessionPayload tsp) {
-                AgentSessionPayload fb = tsp.fallback();
+            if (payload instanceof ExpertsSessionPayload esp) {
+                AgentSessionPayload fb = esp.fallback();
                 return fb != null ? fb.config() : null;
+            }
+            if (payload instanceof TeamSessionPayload tsp) {
+                return tsp.config();
             }
             return null;
         }

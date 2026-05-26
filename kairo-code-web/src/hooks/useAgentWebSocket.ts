@@ -122,6 +122,19 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 type: 'MODE_DEMOTED', sessionId, timestamp: ts,
                 payload: { reason: (raw.content as string) ?? '' },
             };
+        case 'PEER_MESSAGE': {
+            // M-Team / #60: peer-to-peer message relayed via the in-process MessageBus.
+            // Backend stamps fromSessionId + messageId on resultMetadata (Map<String,Object>).
+            const meta = (raw.resultMetadata as Record<string, unknown>) ?? {};
+            return {
+                type: 'PEER_MESSAGE', sessionId, timestamp: ts,
+                payload: {
+                    fromSessionId: (meta.fromSessionId as string) ?? '',
+                    content: (raw.content as string) ?? '',
+                    messageId: (meta.messageId as string) ?? '',
+                },
+            };
+        }
         default:
             return {
                 type: 'AGENT_ERROR', sessionId, timestamp: ts,

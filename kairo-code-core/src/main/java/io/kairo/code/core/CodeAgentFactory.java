@@ -52,7 +52,12 @@ import io.kairo.core.model.DefaultProviderRegistry;
 import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.TaskTool;
 import io.kairo.code.core.task.TaskToolDependencies;
+import io.kairo.code.core.team.MessageBus;
 import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.code.core.team.TeamManager;
+import io.kairo.code.core.team.tools.SendMessageTool;
+import io.kairo.code.core.team.tools.TeamCreateTool;
+import io.kairo.code.core.team.tools.TeamDeleteTool;
 import io.kairo.core.tool.DefaultPermissionGuard;
 import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
@@ -249,13 +254,30 @@ public final class CodeAgentFactory {
         }
 
         // Note: SessionOptions.swarmCoordinator is intentionally NOT exposed to Agent mode
-        // as a model-facing tool. Experts mode (TeamSessionPayload) uses SwarmCoordinator
+        // as a model-facing tool. Experts mode (ExpertsSessionPayload) uses SwarmCoordinator
         // out-of-band as a session-level orchestrator; making it a tool call in Agent mode
         // would smuggle a multi-minute batch workflow into a tool-result loop, which
         // breaks both UX (looks like a hang) and qoder's own use-case split
         // ("Agent mode is more efficient for simple, well-defined edits"). The field is
         // retained on SessionOptions for the future Team mode (claude-style long-lived
         // P2P agents) — see ADR-001 in kairo-code/docs/adr/.
+
+        // M-Team (#60): register team-collaboration tools (team_create / send_message /
+        // team_delete) only when team primitives are wired AND this is not a child session.
+        // Child sessions never get team tools — recursion guard mirrors TaskTool, so a worker
+        // spawned via the `task` tool cannot itself spin up a sub-team. Per ADR-001 §"Non-goals":
+        // nested teams are out of scope and mirror Claude Code's Task/Team child-session guard.
+        TeamManager teamManager = options.teamManager();
+        MessageBus teamMessageBus = options.teamMessageBus();
+        if (teamManager != null && teamMessageBus != null && !options.childSession()) {
+            registry.registerTool(TeamCreateTool.class);
+            registry.registerInstance("team_create", new TeamCreateTool(teamManager));
+            registry.registerTool(SendMessageTool.class);
+            registry.registerInstance("send_message",
+                    new SendMessageTool(teamManager, teamMessageBus));
+            registry.registerTool(TeamDeleteTool.class);
+            registry.registerInstance("team_delete", new TeamDeleteTool(teamManager));
+        }
 
         // Wire MCP tools from config if present.
         McpClientRegistry mcpRegistry = registerMcpTools(registry, config);
@@ -896,7 +918,9 @@ public final class CodeAgentFactory {
             Msg checkpointInitialMessage,
             MemoryStore memoryStore,
             Tracer tracer,
-            SwarmCoordinator swarmCoordinator) {
+            SwarmCoordinator swarmCoordinator,
+            TeamManager teamManager,
+            MessageBus teamMessageBus) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -905,7 +929,8 @@ public final class CodeAgentFactory {
 
         public static SessionOptions empty() {
             return new SessionOptions(
-                    null, null, List.of(), null, Set.of(), null, null, false, null, null, null, false, null, null, null, null);
+                    null, null, List.of(), null, Set.of(), null, null, false, null, null, null,
+                    false, null, null, null, null, null, null);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
@@ -913,7 +938,7 @@ public final class CodeAgentFactory {
                     provider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
@@ -921,7 +946,7 @@ public final class CodeAgentFactory {
                     modelProvider, handler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -930,7 +955,8 @@ public final class CodeAgentFactory {
                     hookList == null ? List.of() : List.copyOf(hookList),
                     skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
                     childSession, textDeltaConsumer, toolUsageTracker, turnMetricsCollector,
-                    isRepl, checkpointInitialMessage, memoryStore, tracer, swarmCoordinator);
+                    isRepl, checkpointInitialMessage, memoryStore, tracer, swarmCoordinator,
+                    teamManager, teamMessageBus);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
@@ -939,7 +965,7 @@ public final class CodeAgentFactory {
                     active == null ? Set.of() : Set.copyOf(active),
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
@@ -947,7 +973,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     snapshot, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions withTaskTool(TaskToolDependencies deps) {
@@ -955,7 +981,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker,
                     turnMetricsCollector, isRepl, checkpointInitialMessage, memoryStore, tracer,
-                    swarmCoordinator);
+                    swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions withTextDeltaConsumer(
@@ -964,7 +990,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, consumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions asChildSession() {
@@ -972,7 +998,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, true, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions withToolUsageTracker(ToolUsageTracker tracker) {
@@ -980,7 +1006,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     tracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions withTurnMetricsCollector(TurnMetricsCollector collector) {
@@ -988,7 +1014,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, collector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         public SessionOptions asReplSession() {
@@ -996,7 +1022,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, true, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         /**
@@ -1009,7 +1035,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, msg,
-                    memoryStore, tracer, swarmCoordinator);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         /**
@@ -1022,7 +1048,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    store, tracer, swarmCoordinator);
+                    store, tracer, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         /**
@@ -1033,7 +1059,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, t, swarmCoordinator);
+                    memoryStore, t, swarmCoordinator, teamManager, teamMessageBus);
         }
 
         /**
@@ -1042,19 +1068,36 @@ public final class CodeAgentFactory {
          * <p><b>Not used by Agent mode.</b> Per ADR-001, Agent-mode sessions never
          * surface the expert team as a model-facing tool — a multi-minute batch
          * inside a tool-result loop would look like a hang. Experts mode uses
-         * {@link SwarmCoordinator} out-of-band via {@code TeamSessionPayload}.
+         * {@link SwarmCoordinator} out-of-band via {@code ExpertsSessionPayload}.
          *
-         * <p>This setter is retained on {@code SessionOptions} for the future
-         * Claude-style Team mode (long-lived multi-agent + P2P + shared task list),
-         * which will plumb the coordinator into a different payload type rather
-         * than the model's tool registry.
+         * <p>This setter is retained on {@code SessionOptions} for use by the live
+         * Claude-style Team mode ({@code TeamSessionPayload}, M-Team / #60), which
+         * plumbs peer-to-peer messaging and shared task lists via {@code TeamManager}
+         * + {@code MessageBus} rather than through the model's tool registry.
          */
         public SessionOptions withSwarmCoordinator(SwarmCoordinator coord) {
             return new SessionOptions(
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, coord);
+                    memoryStore, tracer, coord, teamManager, teamMessageBus);
+        }
+
+        /**
+         * Wire the live multi-agent Team-mode primitives — {@link TeamManager} for the team
+         * registry + shared {@code SharedTaskList} and {@link MessageBus} for in-process peer
+         * messaging. When both are non-null AND this is not a child session, the agent's tool
+         * registry gains {@code team_create} / {@code send_message} / {@code team_delete}.
+         *
+         * <p>Introduced by M-Team (task #60). Child sessions never get these tools — the
+         * recursion guard mirrors {@link TaskTool}'s and matches ADR-001 §"Non-goals".
+         */
+        public SessionOptions withTeamPrimitives(TeamManager mgr, MessageBus bus) {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
+                    memoryStore, tracer, swarmCoordinator, mgr, bus);
         }
     }
 }
