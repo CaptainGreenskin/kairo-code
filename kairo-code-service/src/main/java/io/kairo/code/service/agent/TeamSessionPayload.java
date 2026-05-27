@@ -113,6 +113,7 @@ public final class TeamSessionPayload implements SessionPayload {
 
     private final AtomicReference<Disposable> currentRun = new AtomicReference<>();
     private final AtomicReference<Disposable> peerPoller = new AtomicReference<>();
+    private final AtomicBoolean doneEmitted = new AtomicBoolean(false);
 
     /**
      * Default Team-mode constructor. Preserved bit-for-bit for the M-Team call sites at
@@ -336,7 +337,7 @@ public final class TeamSessionPayload implements SessionPayload {
                     ctx.runningState().set(false);
                     phaseRef.set(SessionPhase.COMPLETED);
                     ctx.persistPhase().accept(SessionPhase.COMPLETED);
-                    localSink.tryEmitNext(AgentEvent.done(sessionId, 0, 0));
+                    emitDoneOnce(sessionId);
                     localSink.tryEmitComplete();
                 })
                 .doOnError(err -> {
@@ -482,6 +483,12 @@ public final class TeamSessionPayload implements SessionPayload {
         return meta;
     }
 
+    private void emitDoneOnce(String sessionId) {
+        if (doneEmitted.compareAndSet(false, true)) {
+            ctx.sharedSink().tryEmitNext(AgentEvent.done(sessionId, 0, 0));
+        }
+    }
+
     // ── Swarm-event bridge (experts preset) ──────────────────────────────────────
 
     /**
@@ -521,6 +528,15 @@ public final class TeamSessionPayload implements SessionPayload {
                     if (narrator != null) {
                         narrator.enqueue(new PeerEventSummary(
                                 fromTag, content, eventId, envelope.timestamp().toEpochMilli()));
+                    }
+                    // Safety net: if TEAM_COMPLETED arrives but confirmAndExecute() Mono
+                    // hasn't signalled onSuccess yet, emit AGENT_DONE so the frontend
+                    // transitions running=false and doesn't show a stalled session.
+                    if (te.type() == TeamEventType.TEAM_COMPLETED) {
+                        ctx.runningState().set(false);
+                        ctx.phaseRef().set(SessionPhase.COMPLETED);
+                        ctx.persistPhase().accept(SessionPhase.COMPLETED);
+                        emitDoneOnce(sessionId);
                     }
                 }, err -> log.warn(
                         "swarm-event bridge subscription error (session={}): {}",

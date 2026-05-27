@@ -513,6 +513,31 @@ function App() {
         return unsub;
     }, [connect, createSession, stopAgent, switchSession, addToast]);
 
+    // When the user switches workspaces, the active session (bound to the old
+    // workspace's workingDir) is stale. Stop any in-flight agent, clear session
+    // state, and create a fresh session for the new workspace.
+    const prevWorkspaceRef = useRef(currentWorkspaceId);
+    useEffect(() => {
+        if (currentWorkspaceId === prevWorkspaceRef.current) return;
+        prevWorkspaceRef.current = currentWorkspaceId;
+        if (!currentWorkspaceId) return;
+
+        const oldSid = useSessionStore.getState().activeSessionId;
+        if (oldSid) stopAgent(oldSid);
+
+        disconnect();
+        setSessionId(null);
+        clearMessages();
+        assistantMsgRef.current = {};
+        setStreamingMsgId(null);
+        setAgentPhase('thinking');
+        setCurrentToolName(undefined);
+        sessionStorage.removeItem('kairo-code-session-id');
+        clearLastSessionId();
+        useBuildPhaseStore.getState().setPhase('idle');
+        useExpertTeamStore.getState().setCanvasTeamId(null);
+    }, [currentWorkspaceId, disconnect, setSessionId, clearMessages, stopAgent]);
+
     // Cross-tab sync: when another tab creates or switches a session,
     // refresh the sidebar's persisted session list. Do not switch the
     // current tab's active session to avoid interrupting the user.
@@ -1491,11 +1516,6 @@ ${content}
                                     else connect();
                                 }}
                             />
-                            <TodoListPanel
-                                todos={todos}
-                                collapsed={todoPanelCollapsed}
-                                onToggleCollapse={() => setTodoPanelCollapsed((v) => !v)}
-                            />
                             {messages.length === 0 && connectionStatus === 'connecting' ? (
                                 <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
                                     <div className="text-sm">Connecting…</div>
@@ -1659,6 +1679,11 @@ ${content}
                             <PendingApprovalBanner
                                 count={pendingToolCount}
                                 onScrollToPending={handleScrollToPending}
+                            />
+                            <TodoListPanel
+                                todos={todos}
+                                collapsed={todoPanelCollapsed}
+                                onToggleCollapse={() => setTodoPanelCollapsed((v) => !v)}
                             />
                             <ChatInput
                                 key={sessionId ?? 'no-session'}
