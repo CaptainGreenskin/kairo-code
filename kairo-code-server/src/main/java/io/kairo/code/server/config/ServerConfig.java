@@ -1,7 +1,9 @@
 package io.kairo.code.server.config;
 
+import io.kairo.api.agent.AgentBuilderCustomizer;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.LlmClassifierConfig;
+import io.kairo.core.agent.AgentBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -88,6 +90,27 @@ public class ServerConfig {
                 props.thinkingBudget(),
                 props.llmClassifier()
         );
+    }
+
+    /**
+     * Override the auto-configured {@code openaiModelProvider} so SwarmCoordinator workers (and any
+     * other {@code @Autowired ModelProvider} consumers) see the GLM-aware build. The upstream
+     * starter's 2-arg {@code OpenAIProvider} forces a {@code /v1/chat/completions} suffix, which
+     * collides with GLM's {@code /api/coding/paas/v4} base (404 on {@code /v4/v1/chat/completions}).
+     * {@link CodeAgentFactory#buildModelProvider} already routes URLs ending in {@code /v\d+} to the
+     * 3-arg constructor with an explicit {@code /chat/completions} path; reuse it here so server
+     * and session agents share one provider-resolution policy.
+     */
+    @Bean
+    public io.kairo.api.model.ModelProvider modelProvider() {
+        ServerProperties props = serverProperties();
+        return io.kairo.code.core.CodeAgentFactory.buildModelProvider(
+                props.apiKey(), props.baseUrl());
+    }
+
+    @Bean
+    AgentBuilderCustomizer modelNameCustomizer(ServerProperties props) {
+        return builder -> ((AgentBuilder) builder).modelName(props.model());
     }
 
     @Bean

@@ -532,6 +532,19 @@ public class AgentService implements DisposableBean, InitializingBean {
     }
 
     /**
+     * Return a hot Flux of all events for the given session. The returned Flux stays alive until
+     * the session is destroyed. Used by the WS handler to receive async events (PEER_MESSAGE from
+     * swarm bridge, confirmBuild terminal events) that arrive outside of handleMessage lifecycles.
+     */
+    public Flux<AgentEvent> sessionEvents(String sessionId) {
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        if (sink == null) {
+            return Flux.empty();
+        }
+        return sink.asFlux();
+    }
+
+    /**
      * Approve or reject a pending tool call.
      */
     public boolean approveTool(String sessionId, String toolCallId, boolean approved, String reason) {

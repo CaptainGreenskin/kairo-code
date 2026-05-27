@@ -291,6 +291,10 @@ public final class TeamSessionPayload implements SessionPayload {
         }
         ctx.persistPhase().accept(SessionPhase.EXECUTING);
 
+        if (narrator != null) {
+            narrator.resume();
+        }
+
         String teamId = pendingTeamId;
         if (teamId == null) {
             phaseRef.set(SessionPhase.PLAN_PENDING);

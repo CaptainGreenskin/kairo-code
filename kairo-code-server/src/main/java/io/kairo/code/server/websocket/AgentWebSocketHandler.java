@@ -240,9 +240,11 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         if (accepted) {
             sendAck(session, "confirmBuild");
             log.info("confirmBuild accepted for session {}", sid);
+            agentService.sessionEvents(sid)
+                    .subscribe(
+                            event -> broadcast(sid, event),
+                            err -> log.error("sessionEvents error for session {}", sid, err));
         } else {
-            // Benign: session not in PLAN_PENDING (e.g. user double-clicked, or phase already
-            // moved). Log at debug; surfacing as ERR clutters the chat with a phantom error card.
             log.debug("confirmBuild ignored for session {} (not in PLAN_PENDING)", sid);
         }
     }
