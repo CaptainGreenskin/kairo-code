@@ -6,10 +6,17 @@ import io.kairo.api.event.KairoEventBus;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.api.model.ModelConfig;
+import io.kairo.api.model.ModelProvider;
+import io.kairo.api.model.ModelResponse;
 import io.kairo.api.team.TeamConfig;
 import io.kairo.api.team.TeamEvent;
 import io.kairo.api.team.TeamEventType;
 import io.kairo.api.team.TeamResult;
+import io.kairo.api.tool.JsonSchema;
+import io.kairo.api.tool.ToolCategory;
+import io.kairo.api.tool.ToolDefinition;
+import io.kairo.api.tool.ToolSideEffect;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.team.MessageBus;
@@ -33,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -312,8 +320,16 @@ public final class TeamSessionPayload implements SessionPayload {
 
         Sinks.Many<AgentEvent> localSink = Sinks.many().multicast().onBackpressureBuffer();
 
+        // Bind the session workspace so worker agents resolve tool paths correctly
+        if (config.workingDir() != null && !config.workingDir().isBlank()) {
+            preset.coordinator().setActiveWorkspace(new SessionWorkspace(config.workingDir()));
+        }
+
         Disposable disposable = preset.coordinator().confirmAndExecute(teamId)
+                .doOnSubscribe(sub -> log.debug("confirmAndExecute subscribed (session={})", sessionId))
                 .doOnSuccess(result -> {
+                    log.debug("confirmAndExecute completed (session={}), result={}",
+                            sessionId, result != null ? result.status() : "null");
                     ctx.runningState().set(false);
                     phaseRef.set(SessionPhase.COMPLETED);
                     ctx.persistPhase().accept(SessionPhase.COMPLETED);
@@ -582,6 +598,8 @@ public final class TeamSessionPayload implements SessionPayload {
      * @param demotionFallback single-agent payload invoked when triage rejects the message
      * @param narrator narrator settings — pass {@link NarratorSettings#disabled()} to skip
      * @param eventBus bus carrying swarm lifecycle events for the bridge; may be {@code null}
+     * @param narratorModelProvider model provider for narrator calls; restricted to no_narration
+     *     tool only (avoids unintended tool execution from the full session agent)
      */
     public record ExpertsPresetConfig(
             SwarmCoordinator coordinator,
@@ -589,7 +607,8 @@ public final class TeamSessionPayload implements SessionPayload {
             TriageGate triageGate,
             AgentSessionPayload demotionFallback,
             NarratorSettings narrator,
-            KairoEventBus eventBus) {
+            KairoEventBus eventBus,
+            ModelProvider narratorModelProvider) {
 
         public ExpertsPresetConfig {
             Objects.requireNonNull(coordinator, "coordinator");
@@ -598,6 +617,18 @@ public final class TeamSessionPayload implements SessionPayload {
             Objects.requireNonNull(demotionFallback, "demotionFallback");
             Objects.requireNonNull(narrator, "narrator");
             // eventBus intentionally nullable — the bridge degrades to a warning + no projection.
+            // narratorModelProvider intentionally nullable — narrator disabled or not yet wired.
+        }
+
+        /** Backward-compatible 6-arg constructor for existing call sites (narrator disabled). */
+        public ExpertsPresetConfig(
+                SwarmCoordinator coordinator,
+                TeamConfig teamConfig,
+                TriageGate triageGate,
+                AgentSessionPayload demotionFallback,
+                NarratorSettings narrator,
+                KairoEventBus eventBus) {
+            this(coordinator, teamConfig, triageGate, demotionFallback, narrator, eventBus, null);
         }
     }
 
@@ -732,25 +763,36 @@ public final class TeamSessionPayload implements SessionPayload {
                 dispatchInFlight.set(false);
                 return;
             }
-            Msg narratorPrompt = buildNarratorPrompt(settings, batch);
             String sessionId = ctx.sessionId();
             Sinks.Many<AgentEvent> sink = ctx.sharedSink();
+            ModelProvider modelProvider = preset != null ? preset.narratorModelProvider() : null;
+            if (modelProvider == null) {
+                // Fallback: narrator model not wired — emit nothing and release latch.
+                dispatchInFlight.set(false);
+                return;
+            }
+            List<Msg> messages = buildNarratorMessages(settings, batch);
+            ModelConfig modelCfg = ModelConfig.builder()
+                    .model(config.modelName())
+                    .maxTokens(512)
+                    .temperature(0.3)
+                    .addTool(NO_NARRATION_TOOL_DEF)
+                    .build();
             ctx.concurrency().enqueueNarrator(sessionId, slot ->
-                    agent.call(narratorPrompt)
+                    modelProvider.call(messages, modelCfg)
                             .subscribeOn(Schedulers.boundedElastic())
                             .doFinally(s -> {
                                 slot.close();
                                 dispatchInFlight.set(false);
                             })
                             .subscribe(
-                                    response -> emitOrSuppress(response, sessionId, sink),
+                                    response -> emitOrSuppressModel(response, sessionId, sink),
                                     err -> log.warn(
                                             "narrator.call failed (session={}): {}",
                                             sessionId, err.getMessage())));
             // If enqueueNarrator dropped the dispatch on contention, the doFinally above never
             // runs — release the latch so the next batch isn't permanently blocked.
             if (!dispatchInFlight.get()) {
-                // No-op: doFinally already ran (re-entrant subscribe in some impls).
                 return;
             }
         }
@@ -764,12 +806,20 @@ public final class TeamSessionPayload implements SessionPayload {
             return out;
         }
 
-        private void emitOrSuppress(Msg response, String sessionId, Sinks.Many<AgentEvent> sink) {
-            if (containsNoNarrationToolCall(response)) {
-                log.debug("narrator.dispatch suppressed=true session={}", sessionId);
-                return;
+        private void emitOrSuppressModel(ModelResponse response, String sessionId,
+                Sinks.Many<AgentEvent> sink) {
+            for (Content c : response.contents()) {
+                if (c instanceof Content.ToolUseContent t
+                        && NoNarrationTool.NAME.equals(t.toolName())) {
+                    log.debug("narrator.dispatch suppressed=true session={}", sessionId);
+                    return;
+                }
             }
-            String text = response.text();
+            String text = response.contents().stream()
+                    .filter(Content.TextContent.class::isInstance)
+                    .map(c -> ((Content.TextContent) c).text())
+                    .findFirst()
+                    .orElse(null);
             if (text == null || text.isBlank()) {
                 return;
             }
@@ -778,23 +828,26 @@ public final class TeamSessionPayload implements SessionPayload {
             sink.tryEmitNext(AgentEvent.textChunk(sessionId, text));
         }
 
-        private boolean containsNoNarrationToolCall(Msg response) {
-            for (Content c : response.contents()) {
-                if (c instanceof Content.ToolUseContent t
-                        && NoNarrationTool.NAME.equals(t.toolName())) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private Msg buildNarratorPrompt(NarratorSettings settings, List<PeerEventSummary> batch) {
-            StringBuilder body = new StringBuilder(settings.narratorSystemPrompt())
-                    .append("\n\nRecent expert updates:");
+        private List<Msg> buildNarratorMessages(NarratorSettings settings,
+                List<PeerEventSummary> batch) {
+            StringBuilder body = new StringBuilder("Recent expert updates:");
             for (PeerEventSummary e : batch) {
                 body.append("\n- [").append(e.role()).append("] ").append(e.content());
             }
-            return Msg.of(MsgRole.USER, body.toString());
+            return List.of(
+                    Msg.of(MsgRole.SYSTEM, settings.narratorSystemPrompt()),
+                    Msg.of(MsgRole.USER, body.toString()));
         }
     }
+
+    private static final ToolDefinition NO_NARRATION_TOOL_DEF = new ToolDefinition(
+            NoNarrationTool.NAME,
+            "Skip surfacing this batch of expert updates to the user. Call with no arguments "
+                    + "when the batched expert progress is routine in-progress noise.",
+            ToolCategory.GENERAL,
+            new JsonSchema("object", Map.of(), List.of(), "No parameters required"),
+            NoNarrationTool.class,
+            null,
+            ToolSideEffect.READ_ONLY,
+            "");
 }

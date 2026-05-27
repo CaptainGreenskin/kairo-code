@@ -368,16 +368,16 @@ public class AgentService implements DisposableBean, InitializingBean {
                         throw new IllegalStateException(
                                 "experts mode unavailable: team primitives missing");
                     }
-                    // Register no_narration into the session's tool registry BEFORE the
-                    // NarratorDispatcher fires; the dispatcher relies on the tool being
-                    // callable from agent.call(). Mode-isolation: this registration only
-                    // ever runs on the experts arm.
+                    // Narrator uses a direct ModelProvider.call() with only the no_narration
+                    // tool definition — no registration into the session's tool registry needed.
+                    // This prevents the session agent from accidentally executing tools during
+                    // narrator calls.
                     TeamSessionPayload.NarratorSettings narratorSettings =
                             TeamSessionPayload.NarratorSettings.defaults();
-                    if (narratorSettings.enabled()) {
-                        session.toolRegistry().registerTool(NoNarrationTool.class);
-                    }
                     AgentSessionPayload fb = new AgentSessionPayload(config, session, ctx);
+                    io.kairo.api.model.ModelProvider narratorModel = narratorSettings.enabled()
+                            ? CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl())
+                            : null;
                     TeamSessionPayload.ExpertsPresetConfig presetCfg =
                             new TeamSessionPayload.ExpertsPresetConfig(
                                     swarmCoordinator,
@@ -385,7 +385,8 @@ public class AgentService implements DisposableBean, InitializingBean {
                                     triageGate,
                                     fb,
                                     narratorSettings,
-                                    eventBus);
+                                    eventBus,
+                                    narratorModel);
                     yield new TeamSessionPayload(config, session, ctx,
                             teamManager, messageBus, presetCfg);
                 }
@@ -1107,10 +1108,8 @@ public class AgentService implements DisposableBean, InitializingBean {
                                     existingPreset.triageGate(),
                                     newFallback,
                                     existingPreset.narrator(),
-                                    existingPreset.eventBus());
-                    if (rebuiltPreset.narrator().enabled()) {
-                        newSession.toolRegistry().registerTool(NoNarrationTool.class);
-                    }
+                                    existingPreset.eventBus(),
+                                    existingPreset.narratorModelProvider());
                     newPayload = new TeamSessionPayload(rebuilt, newSession, newCtx,
                             teamManager, messageBus, rebuiltPreset);
                 } else {

@@ -134,7 +134,7 @@ class AgentServiceTeamModeTest {
     }
 
     @Test
-    void createSession_expertsMode_registersNoNarrationTool() throws Exception {
+    void createSession_expertsMode_wiresNarratorModelProvider() throws Exception {
         AgentService service = new AgentService();
         injectTeamPrimitives(service, new TeamManager(), new MessageBus());
         injectExpertsPrimitives(service, newStubSwarmCoordinator(), goal -> true);
@@ -143,13 +143,17 @@ class AgentServiceTeamModeTest {
         try {
             AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
             assertThat(entry).isNotNull();
-            // entry.session() is gated to agent-mode; reach the registry via the experts payload.
             TeamSessionPayload payload = (TeamSessionPayload) entry.payload();
+            assertThat(payload.preset()).isNotNull();
+            assertThat(payload.preset().narratorModelProvider())
+                    .as("experts arm must wire a dedicated ModelProvider for narrator calls")
+                    .isNotNull();
+            // no_narration should NOT be in the session agent's tool registry (direct model call)
             boolean hasNoNarration = payload.session().toolRegistry().getAll().stream()
                     .anyMatch(t -> NoNarrationTool.NAME.equals(t.name()));
             assertThat(hasNoNarration)
-                    .as("experts arm must register no_narration into the session tool registry")
-                    .isTrue();
+                    .as("no_narration must not pollute the session agent's tool registry")
+                    .isFalse();
         } finally {
             service.destroySession(sid);
         }

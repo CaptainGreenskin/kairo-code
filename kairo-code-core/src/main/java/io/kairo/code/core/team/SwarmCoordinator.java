@@ -22,6 +22,7 @@ import io.kairo.api.team.TeamConfig;
 import io.kairo.api.team.TeamExecutionRequest;
 import io.kairo.api.team.TeamResult;
 import io.kairo.api.team.TeamStatus;
+import io.kairo.api.workspace.Workspace;
 import io.kairo.code.core.team.persistence.TeamManifest;
 import io.kairo.expertteam.ExpertTeamCoordinator;
 import io.kairo.expertteam.role.ExpertRoleRegistry;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
@@ -47,6 +49,7 @@ public class SwarmCoordinator {
     private final io.kairo.api.team.MessageBus messageBus;
     private final List<Agent> agents;
     private volatile String lastTeamId;
+    private final AtomicReference<Workspace> activeWorkspace = new AtomicReference<>();
 
     public SwarmCoordinator(ExpertTeamCoordinator coordinator,
                             ExpertRoleRegistry roleRegistry,
@@ -56,6 +59,19 @@ public class SwarmCoordinator {
         this.roleRegistry = Objects.requireNonNull(roleRegistry, "roleRegistry");
         this.messageBus = Objects.requireNonNull(messageBus, "messageBus");
         this.agents = List.copyOf(Objects.requireNonNull(agents, "agents"));
+    }
+
+    /**
+     * Set the active workspace for the current execution. Workers read this at call time
+     * to resolve tool working directory. Must be called before {@link #confirmAndExecute}.
+     */
+    public void setActiveWorkspace(Workspace workspace) {
+        activeWorkspace.set(workspace);
+    }
+
+    /** Returns the active workspace (may be null before any session binds one). */
+    public Workspace getActiveWorkspace() {
+        return activeWorkspace.get();
     }
 
     /**

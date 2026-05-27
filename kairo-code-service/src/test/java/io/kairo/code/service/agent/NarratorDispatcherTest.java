@@ -6,6 +6,9 @@ import io.kairo.api.event.KairoEventBus;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.api.model.ModelConfig;
+import io.kairo.api.model.ModelProvider;
+import io.kairo.api.model.ModelResponse;
 import io.kairo.api.team.TeamConfig;
 import io.kairo.api.team.TeamEvent;
 import io.kairo.api.team.TeamEventType;
@@ -27,6 +30,7 @@ import io.kairo.core.tool.DefaultToolExecutor;
 import io.kairo.core.tool.DefaultToolRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
@@ -48,9 +52,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * M-Experts-Upgrade / #61: focused tests for the private {@code NarratorDispatcher} inner class.
  *
  * <p>The dispatcher is private; tests drive it through the public seam — push {@link TeamEvent}s
- * to the {@link KairoEventBus} and let the swarm-event bridge enqueue them. The Team Lead {@link
- * Agent} is a recording stub, so we can assert exactly which prompts hit the LLM and how many
- * dispatches fired.
+ * to the {@link KairoEventBus} and let the swarm-event bridge enqueue them. The narrator uses a
+ * direct {@link ModelProvider#call} with only the no_narration tool definition — tests supply a
+ * recording ModelProvider to assert prompt contents and dispatch counts.
  */
 @Timeout(value = 15, unit = TimeUnit.SECONDS)
 class NarratorDispatcherTest {
@@ -67,14 +71,13 @@ class NarratorDispatcherTest {
             h.publishStepCompleted("coder", "drafted patch v1");
             h.publishStepCompleted("reviewer", "approved the patch");
 
-            // First dispatch must wait for the debounce window before firing.
             sleepQuietly(80);
-            assertThat(h.agent.calls).as("must wait for debounce").isEmpty();
+            assertThat(h.model.calls).as("must wait for debounce").isEmpty();
 
-            await(() -> !h.agent.calls.isEmpty(), Duration.ofSeconds(2));
+            await(() -> !h.model.calls.isEmpty(), Duration.ofSeconds(2));
 
-            assertThat(h.agent.calls).hasSize(1);
-            String prompt = h.agent.calls.get(0);
+            assertThat(h.model.calls).hasSize(1);
+            String prompt = h.model.calls.get(0);
             assertThat(prompt).contains("found three callers");
             assertThat(prompt).contains("drafted patch v1");
             assertThat(prompt).contains("approved the patch");
@@ -89,8 +92,11 @@ class NarratorDispatcherTest {
     void narrate_emitsTextChunk() {
         Harness h = Harness.builder()
                 .withNarratorDebounce(Duration.ofMillis(150))
-                .withAgentResponse(prompt -> Msg.of(MsgRole.ASSISTANT,
-                        "Researcher confirmed three callers; recommend Coder focus next."))
+                .withModelResponse(msgs -> new ModelResponse(
+                        "resp-1",
+                        List.of(new Content.TextContent(
+                                "Researcher confirmed three callers; recommend Coder focus next.")),
+                        null, null, "test-model"))
                 .build();
         try {
             h.publishStepCompleted("researcher", "found three callers");
@@ -116,28 +122,26 @@ class NarratorDispatcherTest {
     void noNarration_suppressesEmission() {
         Harness h = Harness.builder()
                 .withNarratorDebounce(Duration.ofMillis(150))
-                .withAgentResponse(prompt -> Msg.builder()
-                        .role(MsgRole.ASSISTANT)
-                        .addContent(new Content.TextContent(""))
-                        .addContent(new Content.ToolUseContent(
-                                "tu-1", NoNarrationTool.NAME, Map.of()))
-                        .build())
+                .withModelResponse(msgs -> new ModelResponse(
+                        "resp-1",
+                        List.of(new Content.TextContent(""),
+                                new Content.ToolUseContent("tu-1", NoNarrationTool.NAME, Map.of())),
+                        null, null, "test-model"))
                 .build();
         try {
             h.publishStepCompleted("coder", "low-value chatter");
 
-            await(() -> !h.agent.calls.isEmpty(), Duration.ofSeconds(2));
-            // After the call fired, give a small window for any TEXT_CHUNK to (not) appear.
+            await(() -> !h.model.calls.isEmpty(), Duration.ofSeconds(2));
             sleepQuietly(150);
 
-            assertThat(h.agent.calls).hasSize(1);
+            assertThat(h.model.calls).hasSize(1);
             assertThat(h.events).noneMatch(e -> e.type() == AgentEvent.EventType.TEXT_CHUNK);
         } finally {
             h.payload.stop();
         }
     }
 
-    // ── #4 disabled narrator never invokes the agent ───────────────────────────
+    // ── #4 disabled narrator never invokes the model ──────────────────────────
 
     @Test
     void disabledNarrator_neverCalls() {
@@ -148,8 +152,7 @@ class NarratorDispatcherTest {
             }
             sleepQuietly(400);
 
-            assertThat(h.agent.calls).as("disabled narrator must not invoke agent").isEmpty();
-            // PEER_MESSAGE still fires from the bridge — that's M-Team behavior, not narrator-gated.
+            assertThat(h.model.calls).as("disabled narrator must not invoke model").isEmpty();
             assertThat(h.events).anyMatch(e -> e.type() == AgentEvent.EventType.PEER_MESSAGE);
         } finally {
             h.payload.stop();
@@ -158,17 +161,8 @@ class NarratorDispatcherTest {
 
     // ── #71 high-water-mark fires ahead of the debounce window ──────────────────
 
-    /**
-     * Regression for #71: previously {@code bufferTimeout(maxBatchSize, ...)} meant the
-     * high-water-mark "force flush" was dead code, and the dispatcher always waited the
-     * full debounce window. Fix wires the buffer's count threshold to
-     * {@code queueHighWaterMark}, so {@code highWater} consecutive enqueues fire well
-     * before the debounce window elapses.
-     */
     @Test
     void highWaterMark_firesEarly() {
-        // 2 s debounce, fire after 3 events queued — the dispatch should land in well under
-        // a second once we publish the 3rd event.
         Harness h = Harness.builder()
                 .withNarratorDebounce(Duration.ofSeconds(2))
                 .withMaxBatchSize(10)
@@ -180,15 +174,15 @@ class NarratorDispatcherTest {
                 h.publishStepCompleted("researcher", "event-" + i);
             }
 
-            await(() -> !h.agent.calls.isEmpty(), Duration.ofMillis(800));
+            await(() -> !h.model.calls.isEmpty(), Duration.ofMillis(800));
             long elapsedMs = System.currentTimeMillis() - start;
 
-            assertThat(h.agent.calls).hasSize(1);
+            assertThat(h.model.calls).hasSize(1);
             assertThat(elapsedMs)
                     .as("must fire well before the 2s debounce window")
                     .isLessThan(1500);
 
-            String prompt = h.agent.calls.get(0);
+            String prompt = h.model.calls.get(0);
             assertThat(prompt).contains("event-0");
             assertThat(prompt).contains("event-1");
             assertThat(prompt).contains("event-2");
@@ -208,7 +202,27 @@ class NarratorDispatcherTest {
         h.publishStepCompleted("researcher", "post-stop event");
         Thread.sleep(400);
 
-        assertThat(h.agent.calls).as("stopped dispatcher must not invoke agent").isEmpty();
+        assertThat(h.model.calls).as("stopped dispatcher must not invoke model").isEmpty();
+    }
+
+    // ── #6 model call only has no_narration tool (no Bash/Write/etc.) ──────────
+
+    @Test
+    void modelCall_onlyHasNoNarrationTool() {
+        Harness h = Harness.builder()
+                .withNarratorDebounce(Duration.ofMillis(100))
+                .build();
+        try {
+            h.publishStepCompleted("researcher", "found something");
+
+            await(() -> !h.model.configs.isEmpty(), Duration.ofSeconds(2));
+
+            ModelConfig config = h.model.configs.get(0);
+            assertThat(config.tools()).hasSize(1);
+            assertThat(config.tools().get(0).name()).isEqualTo(NoNarrationTool.NAME);
+        } finally {
+            h.payload.stop();
+        }
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -229,18 +243,18 @@ class NarratorDispatcherTest {
         }
     }
 
-    /** Per-test wiring: builds a TeamSessionPayload with experts preset + recording agent. */
+    /** Per-test wiring: builds a TeamSessionPayload with experts preset + recording model. */
     private static final class Harness {
         final TeamSessionPayload payload;
-        final RecordingAgent agent;
+        final RecordingModelProvider model;
         final KairoEventBus bus;
         final List<AgentEvent> events;
         private final String teamId;
 
-        Harness(TeamSessionPayload payload, RecordingAgent agent, KairoEventBus bus,
+        Harness(TeamSessionPayload payload, RecordingModelProvider model, KairoEventBus bus,
                 List<AgentEvent> events, String teamId) {
             this.payload = payload;
-            this.agent = agent;
+            this.model = model;
             this.bus = bus;
             this.events = events;
             this.teamId = teamId;
@@ -265,17 +279,23 @@ class NarratorDispatcherTest {
             private int maxBatch = 10;
             private int highWater = 5;
             private boolean narratorEnabled = true;
-            private Function<Msg, Msg> agentResponse =
-                    prompt -> Msg.of(MsgRole.ASSISTANT, "stub-narration");
+            private Function<List<Msg>, ModelResponse> modelResponse =
+                    msgs -> new ModelResponse("resp-1",
+                            List.of(new Content.TextContent("stub-narration")),
+                            null, null, "test-model");
 
             Builder withNarratorDebounce(Duration d) { this.debounce = d; return this; }
             Builder withMaxBatchSize(int n) { this.maxBatch = n; return this; }
             Builder withQueueHighWaterMark(int n) { this.highWater = n; return this; }
-            Builder withAgentResponse(Function<Msg, Msg> fn) { this.agentResponse = fn; return this; }
+            Builder withModelResponse(Function<List<Msg>, ModelResponse> fn) {
+                this.modelResponse = fn;
+                return this;
+            }
             Builder disableNarrator() { this.narratorEnabled = false; return this; }
 
             Harness build() {
-                RecordingAgent agent = new RecordingAgent(agentResponse);
+                RecordingModelProvider model = new RecordingModelProvider(modelResponse);
+                Agent stubAgent = new StubAgent();
                 KairoEventBus bus = new DefaultKairoEventBus();
                 List<AgentEvent> events = new CopyOnWriteArrayList<>();
 
@@ -296,13 +316,13 @@ class NarratorDispatcherTest {
                 TeamSessionPayload.ExpertsPresetConfig preset =
                         new TeamSessionPayload.ExpertsPresetConfig(
                                 noopCoordinator(), TeamConfig.defaults(), anyTriage(),
-                                fallback, narratorSettings, bus);
+                                fallback, narratorSettings, bus,
+                                narratorEnabled ? model : null);
 
-                CodeAgentSession session = newSession(agent);
+                CodeAgentSession session = newSession(stubAgent);
                 TeamSessionPayload payload = new TeamSessionPayload(
                         newConfig(), session, ctx, new TeamManager(), new MessageBus(), preset);
 
-                // Subscribe AFTER construction so we receive the bridge's projected PEER_MESSAGEs.
                 sink.asFlux().subscribe(events::add);
 
                 String teamId = "team-" + System.nanoTime();
@@ -313,7 +333,7 @@ class NarratorDispatcherTest {
                 } catch (ReflectiveOperationException e) {
                     throw new AssertionError("Failed to inject pendingTeamId", e);
                 }
-                return new Harness(payload, agent, bus, events, teamId);
+                return new Harness(payload, model, bus, events, teamId);
             }
         }
     }
@@ -331,15 +351,7 @@ class NarratorDispatcherTest {
     }
 
     private static AgentSessionPayload newFallback() {
-        Agent stub = new Agent() {
-            @Override public Mono<Msg> call(Msg input) {
-                return Mono.just(Msg.of(MsgRole.ASSISTANT, "fallback"));
-            }
-            @Override public String id() { return "fallback"; }
-            @Override public String name() { return "fallback"; }
-            @Override public AgentState state() { return AgentState.IDLE; }
-            @Override public void interrupt() {}
-        };
+        Agent stub = new StubAgent();
         CodeAgentSession session = newSession(stub);
         AgentRuntimeContext ctx = new AgentRuntimeContext(
                 "fallback",
@@ -355,7 +367,6 @@ class NarratorDispatcherTest {
         return goal -> true;
     }
 
-    /** No-op SwarmCoordinator — never delegated to by the narrator tests. */
     private static SwarmCoordinator noopCoordinator() {
         var registry = new io.kairo.expertteam.role.ExpertRoleRegistry();
         var planner = new io.kairo.expertteam.internal.DefaultPlanner(registry, null, null);
@@ -374,29 +385,49 @@ class NarratorDispatcherTest {
         };
     }
 
-    /**
-     * Recording Agent — captures the prompt text of every {@code call(Msg)} and lets the test
-     * customize the returned {@link Msg} (text-only, no_narration tool call, etc.).
-     */
-    private static final class RecordingAgent implements Agent {
-        final List<String> calls = new CopyOnWriteArrayList<>();
-        final AtomicInteger callCount = new AtomicInteger();
-        private final Function<Msg, Msg> responder;
+    private static final class StubAgent implements Agent {
+        @Override public Mono<Msg> call(Msg input) {
+            return Mono.just(Msg.of(MsgRole.ASSISTANT, "stub"));
+        }
+        @Override public String id() { return "stub-agent"; }
+        @Override public String name() { return "stub-agent"; }
+        @Override public AgentState state() { return AgentState.IDLE; }
+        @Override public void interrupt() {}
+    }
 
-        RecordingAgent(Function<Msg, Msg> responder) {
+    /**
+     * Recording ModelProvider — captures the user message text of every call and lets the test
+     * customize the returned {@link ModelResponse} (text-only, no_narration tool call, etc.).
+     */
+    private static final class RecordingModelProvider implements ModelProvider {
+        final List<String> calls = new CopyOnWriteArrayList<>();
+        final List<ModelConfig> configs = new CopyOnWriteArrayList<>();
+        final AtomicInteger callCount = new AtomicInteger();
+        private final Function<List<Msg>, ModelResponse> responder;
+
+        RecordingModelProvider(Function<List<Msg>, ModelResponse> responder) {
             this.responder = responder;
         }
 
         @Override
-        public Mono<Msg> call(Msg input) {
-            calls.add(input.text());
+        public Mono<ModelResponse> call(List<Msg> messages, ModelConfig config) {
+            String userText = messages.stream()
+                    .filter(m -> m.role() == MsgRole.USER)
+                    .map(Msg::text)
+                    .findFirst()
+                    .orElse("");
+            calls.add(userText);
+            configs.add(config);
             callCount.incrementAndGet();
-            return Mono.just(responder.apply(input));
+            return Mono.just(responder.apply(messages));
         }
 
-        @Override public String id() { return "narrator-stub"; }
-        @Override public String name() { return "narrator-stub"; }
-        @Override public AgentState state() { return AgentState.IDLE; }
-        @Override public void interrupt() {}
+        @Override
+        public Flux<ModelResponse> stream(List<Msg> messages, ModelConfig config) {
+            return Flux.from(call(messages, config));
+        }
+
+        @Override
+        public String name() { return "recording-stub"; }
     }
 }

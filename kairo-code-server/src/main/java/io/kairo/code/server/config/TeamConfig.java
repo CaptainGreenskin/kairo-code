@@ -16,8 +16,13 @@
 package io.kairo.code.server.config;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.api.agent.AgentBuilderCustomizer;
 import io.kairo.api.event.KairoEventBus;
+import io.kairo.api.model.ModelProvider;
 import io.kairo.api.team.MessageBus;
+import io.kairo.api.tool.ToolExecutor;
+import io.kairo.api.tool.ToolRegistry;
+import io.kairo.api.workspace.Workspace;
 import io.kairo.code.core.team.SwarmCoordinator;
 import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.core.team.persistence.JsonFileTeamRepository;
@@ -25,6 +30,8 @@ import io.kairo.code.core.team.persistence.TeamRepository;
 import io.kairo.code.core.team.tools.ExpertTeamTool;
 import io.kairo.core.a2a.InProcessA2aClient;
 import io.kairo.core.a2a.InProcessAgentCardResolver;
+import io.kairo.core.agent.AgentBuilder;
+import io.kairo.core.shutdown.GracefulShutdownManager;
 import io.kairo.expertteam.ExpertTeamCoordinator;
 import io.kairo.expertteam.SimpleEvaluationStrategy;
 import io.kairo.expertteam.internal.DefaultPlanner;
@@ -37,6 +44,7 @@ import io.kairo.multiagent.team.InProcessMessageBus;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -141,12 +149,34 @@ public class TeamConfig {
             ExpertTeamCoordinator coordinator,
             ExpertRoleRegistry registry,
             MessageBus messageBus,
-            @Autowired(required = false) List<Agent> agents) {
-        return new SwarmCoordinator(
+            ModelProvider modelProvider,
+            ToolRegistry toolRegistry,
+            ToolExecutor toolExecutor,
+            GracefulShutdownManager shutdownManager,
+            @Autowired(required = false) List<AgentBuilderCustomizer> customizers) {
+        AtomicReference<SwarmCoordinator> coordRef = new AtomicReference<>();
+        Agent workerProxy = new StatelessAgentProxy("expert-worker", () -> {
+            SwarmCoordinator sc = coordRef.get();
+            Workspace ws = sc != null ? sc.getActiveWorkspace() : null;
+            AgentBuilder builder = AgentBuilder.create()
+                    .name("expert-worker")
+                    .workspace(ws)
+                    .model(modelProvider)
+                    .tools(toolRegistry)
+                    .toolExecutor(toolExecutor)
+                    .shutdownManager(shutdownManager);
+            if (customizers != null) {
+                customizers.forEach(c -> c.customize(builder));
+            }
+            return builder.build();
+        });
+        SwarmCoordinator sc = new SwarmCoordinator(
                 coordinator,
                 registry,
                 messageBus,
-                agents != null ? agents : List.of());
+                List.of(workerProxy));
+        coordRef.set(sc);
+        return sc;
     }
 
     @Bean
