@@ -3,6 +3,25 @@ import { persist } from 'zustand/middleware';
 
 export type SessionMode = 'agent' | 'experts' | 'team';
 
+// Seed initial state synchronously from localStorage so the very first render
+// already has persisted modes. Zustand persist rehydrates asynchronously (even
+// with localStorage), which would otherwise cause a flash-of-default-'agent'.
+const STORAGE_KEY = 'kairo-session-mode';
+function readPersistedState(): { modes: Record<string, SessionMode>; sessionModes: Record<string, SessionMode> } {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        modes: parsed?.state?.modes ?? {},
+        sessionModes: parsed?.state?.sessionModes ?? {},
+      };
+    }
+  } catch { /* ignore corrupt data */ }
+  return { modes: {}, sessionModes: {} };
+}
+const _seed = readPersistedState();
+
 interface SessionModeState {
   modes: Record<string, SessionMode>;  // workspaceId -> mode (used at create time)
   sessionModes: Record<string, SessionMode>;  // sessionId -> mode (fixed at create)
@@ -25,8 +44,8 @@ interface SessionModeState {
 export const useSessionModeStore = create<SessionModeState>()(
   persist(
     (set, get) => ({
-      modes: {},
-      sessionModes: {},
+      modes: _seed.modes,
+      sessionModes: _seed.sessionModes,
       sessionRestartRequested: 0,
       restartWorkspaceId: null,
       getMode: (wid) => {
@@ -54,7 +73,7 @@ export const useSessionModeStore = create<SessionModeState>()(
       })),
     }),
     {
-      name: 'kairo-session-mode',
+      name: STORAGE_KEY,
       // Persist both workspace defaults and per-session mode; skip transient restart signal
       partialize: (state) => ({ modes: state.modes, sessionModes: state.sessionModes }),
     }
