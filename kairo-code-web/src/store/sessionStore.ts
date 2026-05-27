@@ -64,6 +64,8 @@ interface SessionsState {
     ensureSession: (sid: string) => void;
     openSession: (sid: string) => void;
     closeSession: (sid: string) => void;
+    closeOtherSessions: (keepSid: string) => void;
+    closeAllSessions: () => void;
     setActiveSession: (sid: string | null) => void;
     setSessionTitle: (sid: string, title: string) => void;
 
@@ -193,6 +195,25 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
             delete sessions[sid];
             return { sessions, openTabs, activeSessionId: nextActive, ...activeMirror(sessions, nextActive) };
         }),
+
+    closeOtherSessions: (keepSid) =>
+        set((state) => {
+            const sessions = { ...state.sessions };
+            for (const sid of state.openTabs) {
+                if (sid !== keepSid) delete sessions[sid];
+            }
+            const openTabs = state.openTabs.includes(keepSid) ? [keepSid] : [];
+            const active = openTabs[0] ?? null;
+            return { sessions, openTabs, activeSessionId: active, ...activeMirror(sessions, active) };
+        }),
+
+    closeAllSessions: () =>
+        set(() => ({
+            sessions: {},
+            openTabs: [],
+            activeSessionId: null,
+            ...activeMirror({}, null),
+        })),
 
     setActiveSession: (sid) =>
         set((state) => {

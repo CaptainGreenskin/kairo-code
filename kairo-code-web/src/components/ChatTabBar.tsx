@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { X, MessageSquare, Plus, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 import { useLayoutStore } from '@store/layoutStore';
@@ -25,6 +26,12 @@ function sessionLabel(sid: string, title: string | undefined, firstUserContent: 
     return `Session ${sid.slice(0, 6)}`;
 }
 
+interface ContextMenuState {
+    x: number;
+    y: number;
+    sid: string;
+}
+
 /**
  * VS Code / Cursor-style horizontal tab bar for open chat sessions.
  * Mirrors `EditorArea` tab UI; data source is `sessionStore.openTabs`.
@@ -35,8 +42,22 @@ export function ChatTabBar({ onNew, onActivate, onClose }: ChatTabBarProps) {
     const sessions = useSessionStore((s) => s.sessions);
     const setActiveSession = useSessionStore((s) => s.setActiveSession);
     const closeSession = useSessionStore((s) => s.closeSession);
+    const closeOtherSessions = useSessionStore((s) => s.closeOtherSessions);
+    const closeAllSessions = useSessionStore((s) => s.closeAllSessions);
     const chatSessionsOpen = useLayoutStore((s) => s.chatSessionsOpen);
     const toggleChatSessions = useLayoutStore((s) => s.toggleChatSessions);
+
+    const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!ctxMenu) return;
+        const handler = (e: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) setCtxMenu(null);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [ctxMenu]);
 
     const handleClick = (sid: string) => {
         if (sid !== activeSessionId) {
@@ -48,6 +69,11 @@ export function ChatTabBar({ onNew, onActivate, onClose }: ChatTabBarProps) {
     const handleClose = (sid: string) => {
         closeSession(sid);
         onClose?.(sid);
+    };
+
+    const handleContextMenu = (e: React.MouseEvent, sid: string) => {
+        e.preventDefault();
+        setCtxMenu({ x: e.clientX, y: e.clientY, sid });
     };
 
     return (
@@ -69,6 +95,7 @@ export function ChatTabBar({ onNew, onActivate, onClose }: ChatTabBarProps) {
                     <div
                         key={sid}
                         onClick={() => handleClick(sid)}
+                        onContextMenu={(e) => handleContextMenu(e, sid)}
                         className={`group flex items-center gap-1.5 px-3 cursor-pointer border-r border-[var(--border)] text-xs whitespace-nowrap min-w-0 transition-colors ${
                             isActive
                                 ? 'bg-[var(--bg-primary)] text-[var(--text-primary)]'
@@ -100,6 +127,34 @@ export function ChatTabBar({ onNew, onActivate, onClose }: ChatTabBarProps) {
                 >
                     <Plus size={13} />
                 </button>
+            )}
+
+            {ctxMenu && (
+                <div
+                    ref={menuRef}
+                    className="fixed z-[100] py-1 rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] shadow-xl text-xs min-w-[140px]"
+                    style={{ left: ctxMenu.x, top: ctxMenu.y }}
+                >
+                    <button
+                        onClick={() => { handleClose(ctxMenu.sid); setCtxMenu(null); }}
+                        className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg-hover)] text-[var(--text-primary)]"
+                    >
+                        Close
+                    </button>
+                    <button
+                        onClick={() => { closeOtherSessions(ctxMenu.sid); setCtxMenu(null); }}
+                        disabled={openTabs.length <= 1}
+                        className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg-hover)] text-[var(--text-primary)] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        Close Others
+                    </button>
+                    <button
+                        onClick={() => { closeAllSessions(); setCtxMenu(null); }}
+                        className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg-hover)] text-[var(--text-primary)]"
+                    >
+                        Close All
+                    </button>
+                </div>
             )}
         </div>
     );
