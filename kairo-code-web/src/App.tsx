@@ -525,6 +525,7 @@ function App() {
         const oldSid = useSessionStore.getState().activeSessionId;
         if (oldSid) stopAgent(oldSid);
 
+        wasConnectedRef.current = false;
         disconnect();
         setSessionId(null);
         clearMessages();
@@ -536,7 +537,8 @@ function App() {
         clearLastSessionId();
         useBuildPhaseStore.getState().setPhase('idle');
         useExpertTeamStore.getState().setCanvasTeamId(null);
-    }, [currentWorkspaceId, disconnect, setSessionId, clearMessages, stopAgent]);
+        connect();
+    }, [currentWorkspaceId, disconnect, connect, setSessionId, clearMessages, stopAgent]);
 
     // Cross-tab sync: when another tab creates or switches a session,
     // refresh the sidebar's persisted session list. Do not switch the
