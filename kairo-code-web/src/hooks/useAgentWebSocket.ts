@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentEvent, ConnectionStatus } from '@/types/agent';
+import type { AgentEvent, ConnectionStatus, PlanReadyPayload } from '@/types/agent';
 import { useSessionStore } from '@store/sessionStore';
 import { useSessionModeStore } from '@store/sessionModeStore';
 
@@ -108,13 +108,18 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
             return { type: 'CONTEXT_COMPACTED', sessionId, timestamp: ts, payload: parsed };
         }
         case 'PLAN_READY': {
-            // Experts preset stamps teamId on resultMetadata so the Canvas can auto-attach.
+            // Experts preset stamps teamId + DAG steps on resultMetadata so the
+            // Canvas can auto-attach and populate the DAG immediately.
             const meta = (raw.resultMetadata as Record<string, unknown>) ?? {};
             return {
                 type: 'PLAN_READY', sessionId, timestamp: ts,
                 payload: {
                     planSummary: (raw.content as string) ?? '',
                     teamId: (meta.teamId as string) ?? undefined,
+                    steps: meta.steps as PlanReadyPayload['steps'],
+                    mode: (meta.mode as string) ?? undefined,
+                    planId: (meta.planId as string) ?? undefined,
+                    totalSteps: (meta.totalSteps as number) ?? undefined,
                 },
             };
         }

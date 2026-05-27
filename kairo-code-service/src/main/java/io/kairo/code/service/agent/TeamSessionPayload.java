@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
@@ -39,6 +40,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -105,6 +107,7 @@ public final class TeamSessionPayload implements SessionPayload {
     // ── Experts preset (null in default Team mode) ──
     private final ExpertsPresetConfig preset;
     private volatile String pendingTeamId;
+    private volatile Map<String, Object> lastPlanReadyAttributes;
     private final Disposable swarmEventBridge;
     private final NarratorDispatcher narrator;
 
@@ -399,18 +402,44 @@ public final class TeamSessionPayload implements SessionPayload {
         ctx.persistPhase().accept(SessionPhase.PLANNING);
         ctx.runningState().set(true);
 
+        // Eagerly subscribe to the bus for PLAN_READY BEFORE starting the coordinator.
+        // The coordinator's deterministic planner runs synchronously and publishes
+        // PLAN_READY inline. With multicast semantics, the event is only delivered to
+        // active subscribers — so the bus listener must be subscribed first.
+        // .cache() makes this a hot Mono: subscription happens now, not when zip subscribes.
+        Mono<Map<String, Object>> planAttrsMono = preset.eventBus() != null
+                ? preset.eventBus().subscribe(KairoEvent.DOMAIN_TEAM)
+                        .filter(e -> e.payload() instanceof TeamEvent te
+                                && te.type() == TeamEventType.PLAN_READY)
+                        .next()
+                        .map(e -> ((TeamEvent) e.payload()).attributes())
+                        .defaultIfEmpty(Map.of())
+                        .timeout(java.time.Duration.ofMinutes(5), Mono.just(Map.of()))
+                        .cache()
+                : Mono.just(Map.of());
+
+        // Force the bus subscription to start NOW (before the coordinator publishes).
+        planAttrsMono.subscribe();
+
         Sinks.Many<AgentEvent> localSink = Sinks.many().multicast().onBackpressureBuffer();
         localSink.tryEmitNext(AgentEvent.thinking(sessionId));
 
-        Disposable disposable = preset.coordinator()
-                .startExpertTeam(goal, preset.teamConfig(), List.<String>of(), true)
-                .doOnSuccess(result -> {
+        Mono<TeamResult> resultMono = preset.coordinator()
+                .startExpertTeam(goal, preset.teamConfig(), List.<String>of(), true);
+
+        Disposable disposable = Mono.zip(resultMono, planAttrsMono)
+                .doOnSuccess(tuple -> {
                     ctx.runningState().set(false);
                     pendingTeamId = preset.coordinator().lastTeamId();
                     ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
                     ctx.persistPhase().accept(SessionPhase.PLAN_PENDING);
+                    TeamResult result = tuple.getT1();
+                    Map<String, Object> planAttrs = tuple.getT2();
+                    lastPlanReadyAttributes = planAttrs.isEmpty() ? null : planAttrs;
+                    Map<String, Object> meta = buildPlanReadyMeta(pendingTeamId,
+                            planAttrs.isEmpty() ? null : planAttrs);
                     localSink.tryEmitNext(AgentEvent.planReady(sessionId,
-                            extractPlanSummary(result), pendingTeamId));
+                            extractPlanSummary(result), meta));
                     localSink.tryEmitComplete();
                 })
                 .doOnError(err -> {
@@ -438,6 +467,19 @@ public final class TeamSessionPayload implements SessionPayload {
 
     private static String extractPlanSummary(TeamResult result) {
         return result.finalOutput().orElse("Plan generated successfully");
+    }
+
+    private static Map<String, Object> buildPlanReadyMeta(String teamId,
+                                                           Map<String, Object> planAttrs) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("teamId", teamId);
+        if (planAttrs != null) {
+            meta.put("steps", planAttrs.get("steps"));
+            meta.put("mode", planAttrs.get("mode"));
+            meta.put("planId", planAttrs.get("planId"));
+            meta.put("totalSteps", planAttrs.get("totalSteps"));
+        }
+        return meta;
     }
 
     // ── Swarm-event bridge (experts preset) ──────────────────────────────────────

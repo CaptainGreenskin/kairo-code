@@ -182,6 +182,18 @@ public record AgentEvent(
                 System.currentTimeMillis());
     }
 
+    /**
+     * PLAN_READY variant that carries full plan metadata (teamId + DAG steps) so the
+     * frontend Canvas can populate the DAG immediately without waiting for a separate
+     * TEAM_EVENT subscription.
+     */
+    public static AgentEvent planReady(String sessionId, String planOverview,
+                                       Map<String, Object> metadata) {
+        return new AgentEvent(EventType.PLAN_READY, sessionId, planOverview, null, null,
+                false, null, null, null, null, null, null, metadata,
+                System.currentTimeMillis());
+    }
+
     /** Create a REVERTED event signalling that the workspace was successfully reverted. */
     public static AgentEvent reverted(String sessionId) {
         return new AgentEvent(EventType.REVERTED, sessionId, null, null, null,

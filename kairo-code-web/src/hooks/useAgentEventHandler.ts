@@ -513,13 +513,27 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
 
                 case 'PLAN_READY': {
                     useBuildPhaseStore.getState().setPhase('PLAN_PENDING');
-                    // M-Experts-Upgrade / #69: when the experts preset emits PLAN_READY it
-                    // stamps teamId on the payload so the always-on Canvas pane can attach
-                    // without command-palette interaction. App.tsx watches canvasTeamId and
-                    // calls teamSubscribe(...) — keeping WS-side effects out of the handler.
                     const planPayload = event.payload as PlanReadyPayload;
                     if (planPayload.teamId) {
                         useExpertTeamStore.getState().setCanvasTeamId(planPayload.teamId);
+                        // Populate DAG immediately from embedded plan data — bypasses the
+                        // TeamEventBridge subscription timing issue where the TEAM_EVENT
+                        // PLAN_READY fires before the frontend subscribes to that teamId.
+                        if (planPayload.steps) {
+                            useExpertTeamStore.getState().handleTeamEvent({
+                                type: 'TEAM_EVENT',
+                                teamId: planPayload.teamId,
+                                eventType: 'PLAN_READY',
+                                seq: 1,
+                                attributes: {
+                                    mode: planPayload.mode ?? 'dag',
+                                    steps: planPayload.steps,
+                                    planId: planPayload.planId,
+                                    totalSteps: planPayload.totalSteps,
+                                },
+                                timestamp: new Date().toISOString(),
+                            });
+                        }
                     }
                     break;
                 }

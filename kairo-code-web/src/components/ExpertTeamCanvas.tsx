@@ -1,29 +1,61 @@
-import { Users } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Users, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useExpertTeamStore } from '@store/expertTeamStore';
 import { useSessionStore } from '@store/sessionStore';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
 import { ExpertTeamPanel } from './ExpertTeamPanel';
 
+const COLLAPSED_KEY = 'kairo-experts-canvas-collapsed';
+
 interface ExpertTeamCanvasProps {
     sendAction?: (payload: Record<string, unknown>) => boolean;
 }
 
-/**
- * M-Experts-Upgrade / #69: always-on inline Canvas pane for {@code mode === 'experts'}.
- *
- * <p>Thin wrapper around {@link ExpertTeamPanel} — auto-attaches to the team whose
- * {@code teamId} the experts-preset backend stamped onto the most recent {@code PLAN_READY}
- * (see {@link useExpertTeamStore.canvasTeamId}). When no team is active yet (the user
- * hasn't sent a message, or triage demoted to single-agent), renders a minimal empty
- * state so the layout slot doesn't collapse.
- *
- * <p>This is distinct from the modal {@link ExpertTeamPanel} flow used by the
- * command-palette "Browse Teams" entry — that path still uses {@code activeTeamId}.
- */
 export function ExpertTeamCanvas({ sendAction }: ExpertTeamCanvasProps) {
     const teamId = useExpertTeamStore((s) => s.canvasTeamId);
     const sessionId = useSessionStore((s) => s.activeSessionId);
     const buildPhase = useBuildPhaseStore((s) => s.phase);
+
+    const [collapsed, setCollapsed] = useState(() => {
+        try {
+            return localStorage.getItem(COLLAPSED_KEY) === 'true';
+        } catch {
+            return false;
+        }
+    });
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(COLLAPSED_KEY, String(collapsed));
+        } catch { /* ignore */ }
+    }, [collapsed]);
+
+    // Auto-expand when a team becomes active
+    useEffect(() => {
+        if (teamId && collapsed) {
+            setCollapsed(false);
+        }
+    }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (collapsed) {
+        return (
+            <div className="flex flex-col h-full bg-[var(--bg-primary)] border-l border-[var(--border)]"
+                 style={{ width: 36 }}>
+                <button
+                    onClick={() => setCollapsed(false)}
+                    className="flex flex-col items-center gap-1 py-3 px-1 hover:bg-[var(--bg-tertiary)] transition-colors"
+                    title="Expand Canvas"
+                >
+                    <ChevronLeft size={12} className="text-[var(--text-muted)]" />
+                    <Users size={14} className="text-violet-400" />
+                    <span className="text-[9px] text-[var(--text-muted)] font-medium"
+                          style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>
+                        Experts
+                    </span>
+                </button>
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col h-full bg-[var(--bg-primary)] border-l border-[var(--border)] min-w-0">
@@ -35,6 +67,13 @@ export function ExpertTeamCanvas({ sendAction }: ExpertTeamCanvasProps) {
                         {teamId.substring(0, 12)}…
                     </span>
                 )}
+                <button
+                    onClick={() => setCollapsed(true)}
+                    className="ml-auto p-0.5 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                    title="Collapse Canvas"
+                >
+                    <ChevronRight size={13} className="text-[var(--text-muted)]" />
+                </button>
             </div>
 
             {buildPhase === 'PLAN_PENDING' && sessionId && (

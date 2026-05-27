@@ -303,6 +303,17 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
               thinkingStartedAt: null,
               thinkingDuration: null,
             };
+            if (!updatedTeam.dag.some((n) => n.stepId === stepId)) {
+              updatedTeam.dag = [
+                ...updatedTeam.dag,
+                {
+                  stepId,
+                  roleId: (attributes.roleId as string) ?? '',
+                  instruction: (attributes.instruction as string) ?? '',
+                  dependsOn: (attributes.dependsOn as string[]) ?? [],
+                },
+              ];
+            }
           }
           updatedTeam.status = 'executing';
           break;

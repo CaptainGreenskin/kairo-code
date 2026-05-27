@@ -224,6 +224,17 @@ export interface SessionInfo {
 export interface PlanReadyPayload {
     planSummary?: string;
     teamId?: string;
+    steps?: Array<{
+        stepId: string;
+        roleId: string;
+        roleName: string;
+        instruction: string;
+        dependsOn: string[];
+        stepIndex: number;
+    }>;
+    mode?: string;
+    planId?: string;
+    totalSteps?: number;
 }
 
 /**

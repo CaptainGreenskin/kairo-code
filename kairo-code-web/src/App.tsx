@@ -1690,7 +1690,7 @@ ${content}
                 {!isMobile && activeMode === 'experts' && (
                     <aside
                         className="relative flex flex-col h-full min-w-0"
-                        style={{ flex: '0 1 480px', minWidth: 360 }}
+                        style={{ flex: '0 1 380px', minWidth: 36 }}
                         aria-label="Experts Canvas"
                     >
                         <ExpertTeamCanvas sendAction={send} />
