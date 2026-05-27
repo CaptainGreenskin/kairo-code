@@ -552,12 +552,43 @@ public final class TeamSessionPayload implements SessionPayload {
     }
 
     private static String summarize(TeamEvent te) {
-        Object summary = te.attributes().get("summary");
+        Map<String, Object> attrs = te.attributes();
+        Object summary = attrs.get("summary");
         if (summary != null) return summary.toString();
-        Object output = te.attributes().get("output");
+        Object output = attrs.get("output");
         if (output != null) return output.toString();
-        Object stepId = te.attributes().get("stepId");
-        return te.type().name() + (stepId != null ? " step=" + stepId : "");
+
+        String stepId = attrs.get("stepId") != null ? attrs.get("stepId").toString() : null;
+        switch (te.type()) {
+            case STEP_ASSIGNED:
+                String roleId = attrs.get("roleId") != null
+                        ? attrs.get("roleId").toString() : "expert";
+                return "Expert **" + roleId + "** started working"
+                        + (stepId != null ? " on step " + stepId : "");
+            case EVALUATION_STARTED:
+                return "Evaluating output" + (stepId != null ? " for step " + stepId : "") + "…";
+            case EVALUATION_RESULT:
+                Object verdict = attrs.get("verdict");
+                Object score = attrs.get("score");
+                Object feedback = attrs.get("feedback");
+                StringBuilder sb = new StringBuilder("Evaluation: ");
+                if (verdict != null) sb.append("**").append(verdict).append("**");
+                if (score != null) sb.append(" (score ").append(score).append(")");
+                if (feedback != null && !feedback.toString().isBlank()) {
+                    sb.append("\n").append(feedback);
+                }
+                return sb.toString();
+            case STEP_COMPLETED:
+                Object attempts = attrs.get("attempts");
+                return "Step " + (stepId != null ? stepId : "") + " completed"
+                        + (attempts != null ? " in " + attempts + " attempt(s)" : "");
+            case TEAM_COMPLETED:
+                return "All experts finished — team execution complete.";
+            case TEAM_STARTED:
+                return "Expert team started.";
+            default:
+                return te.type().name() + (stepId != null ? " step=" + stepId : "");
+        }
     }
 
     // ── Peer-message poller ──────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
  *   <li>If goal matches any keyword (case-insensitive substring) → fan-out (return true).</li>
  *   <li>If goal length &gt; 120 chars → fan-out (return true).</li>
  *   <li>If goal length &lt; 10 chars → demote to ReAct (return false).</li>
- *   <li>Otherwise → demote to ReAct (return false).</li>
+ *   <li>Otherwise → fan-out (return true). User explicitly chose Experts mode.</li>
  * </ol>
  *
  * <p>Keywords are checked first to ensure CJK (Chinese/Japanese/Korean) text is
@@ -31,7 +31,10 @@ public class HeuristicTriageGate implements TriageGate {
     private static final List<String> DEFAULT_KEYWORDS = List.of(
             "plan", "refactor", "重构", "实现", "build", "design",
             "添加", "审查", "review", "test coverage", "迁移", "implement", "create",
-            "计划", "优化", "分析", "改进", "测试", "执行", "生成"
+            "计划", "优化", "分析", "改进", "测试", "执行", "生成",
+            "audit", "quality", "evaluate", "assess", "inspect", "diagnose",
+            "debug", "fix", "improve", "security", "performance", "architecture",
+            "检查", "评估", "诊断", "修复", "安全", "性能", "架构"
     );
 
     private final List<String> keywords;
@@ -78,6 +81,7 @@ public class HeuristicTriageGate implements TriageGate {
             return false;
         }
 
-        return false;
+        // User explicitly chose Experts mode — respect that for non-trivial messages.
+        return true;
     }
 }

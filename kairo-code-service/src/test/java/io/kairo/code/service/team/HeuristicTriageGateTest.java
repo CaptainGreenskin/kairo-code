@@ -94,37 +94,35 @@ class HeuristicTriageGateTest {
         assertThat(gate.shouldFanOut("improve test coverage for auth module")).isTrue();
     }
 
-    // ── No match, medium length ──
+    // ── No match, medium length → fan-out (user chose Experts) ──
 
     @Test
-    void noMatch_mediumLength_returnsFalse() {
+    void noMatch_mediumLength_returnsTrue() {
         String msg = "what is the weather like today in this city";
-        assertThat(msg.length()).isGreaterThanOrEqualTo(20);
+        assertThat(msg.length()).isGreaterThanOrEqualTo(10);
         assertThat(msg.length()).isLessThanOrEqualTo(120);
-        assertThat(gate.shouldFanOut(msg)).isFalse();
+        assertThat(gate.shouldFanOut(msg)).isTrue();
     }
 
     @Test
-    void noMatch_general_question() {
-        assertThat(gate.shouldFanOut("explain how this class works")).isFalse();
+    void noMatch_general_question_returnsTrue() {
+        assertThat(gate.shouldFanOut("explain how this class works")).isTrue();
     }
 
     // ── Edge cases ──
 
     @Test
-    void exactly10chars_noKeyword_returnsFalse() {
-        // Exactly 10 chars, no keyword → false (10 is NOT < 10)
+    void exactly10chars_noKeyword_returnsTrue() {
         String msg = "1234567890"; // 10 chars
         assertThat(msg.length()).isEqualTo(10);
-        assertThat(gate.shouldFanOut(msg)).isFalse();
+        assertThat(gate.shouldFanOut(msg)).isTrue();
     }
 
     @Test
-    void exactly120chars_noKeyword_returnsFalse() {
-        // Exactly 120 chars, no keyword → false (120 is NOT > 120)
+    void exactly120chars_noKeyword_returnsTrue() {
         String msg = "x".repeat(120);
         assertThat(msg.length()).isEqualTo(120);
-        assertThat(gate.shouldFanOut(msg)).isFalse();
+        assertThat(gate.shouldFanOut(msg)).isTrue();
     }
 
     @Test
@@ -143,9 +141,11 @@ class HeuristicTriageGateTest {
     @Test
     void customKeywords_override() {
         HeuristicTriageGate custom = new HeuristicTriageGate("deploy,migrate");
-        // "deploy" is a custom keyword
+        // "deploy" is a custom keyword → fast-path true
         assertThat(custom.shouldFanOut("deploy the application now")).isTrue();
-        // "refactor" is NOT in the custom set
-        assertThat(custom.shouldFanOut("refactor the module code")).isFalse();
+        // "refactor" is NOT in the custom set, but message ≥ 10 chars → still true
+        assertThat(custom.shouldFanOut("refactor the module code")).isTrue();
+        // Trivial message with no custom keyword → false
+        assertThat(custom.shouldFanOut("hello")).isFalse();
     }
 }
