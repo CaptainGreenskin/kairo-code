@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { ChevronDown, ChevronUp, Copy } from 'lucide-react';
+import '@xterm/xterm/css/xterm.css';
 
 const COLLAPSE_THRESHOLD = 20;
 
@@ -71,11 +72,12 @@ export function TerminalOutput({ output, streaming }: TerminalOutputProps) {
 
             const term = new Terminal({
                 disableStdin: true,
-                cursorBlink: true,
+                cursorBlink: false,
                 fontSize: 12,
                 fontFamily: 'var(--font-mono, ui-monospace, SF Mono, Monaco, monospace)',
                 allowProposedApi: true,
                 scrollback: 5000,
+                screenReaderMode: false,
             });
             const fitAddon = new FitAddon();
             term.loadAddon(fitAddon);

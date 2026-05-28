@@ -206,6 +206,9 @@ export interface ToolCall {
     progressElapsedMs?: number;
     /** Accumulated streaming output chunks (bash stdout/stderr). */
     partialOutput?: string;
+    /** Epoch ms when the TOOL_CALL event was received — used to compute duration
+     *  on the frontend when the backend doesn't provide it (streaming-eager tools). */
+    createdAt?: number;
 }
 
 export interface ServerConfig {

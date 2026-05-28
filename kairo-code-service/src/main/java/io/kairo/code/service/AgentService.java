@@ -362,10 +362,10 @@ public class AgentService implements DisposableBean, InitializingBean {
             // event sink so the frontend can render it incrementally.
             final String chunkSessionId = sessionId;
             final ToolProgressTracker chunkTracker = progressTracker;
-            java.util.function.BiConsumer<String, String> chunkSink = (toolName, chunkText) -> {
-                String callId = chunkTracker.findToolCallIdByName(toolName);
-                if (callId != null) {
-                    sink.tryEmitNext(AgentEvent.toolOutputChunk(chunkSessionId, callId, chunkText));
+            java.util.function.BiConsumer<String, String> chunkSink = (toolCallId, chunkText) -> {
+                if (toolCallId != null) {
+                    sink.tryEmitNext(
+                            AgentEvent.toolOutputChunk(chunkSessionId, toolCallId, chunkText));
                 }
             };
             Map<String, Object> extraToolDeps = Map.of(
@@ -1091,10 +1091,9 @@ public class AgentService implements DisposableBean, InitializingBean {
             ToolProgressTracker rebuildTracker = progressTrackers.get(sid);
             Map<String, Object> rebuildExtraDeps = Map.of();
             if (rebuildTracker != null) {
-                java.util.function.BiConsumer<String, String> rebuildChunkSink = (toolName, chunkText) -> {
-                    String callId = rebuildTracker.findToolCallIdByName(toolName);
-                    if (callId != null) {
-                        sink.tryEmitNext(AgentEvent.toolOutputChunk(sid, callId, chunkText));
+                java.util.function.BiConsumer<String, String> rebuildChunkSink = (toolCallId, chunkText) -> {
+                    if (toolCallId != null) {
+                        sink.tryEmitNext(AgentEvent.toolOutputChunk(sid, toolCallId, chunkText));
                     }
                 };
                 rebuildExtraDeps = Map.of(

@@ -39,6 +39,10 @@ public class AgentEventBridgeHook {
      *  TOOL_CALL dedupe between this hook and {@code WebSocketApprovalHandler}). */
     private final Map<String, String> emittedToolCalls = new ConcurrentHashMap<>();
 
+    /** Deduplicates TOOL_RESULT emissions: both POST_ACTING and TOOL_RESULT hooks fire for the
+     *  same tool — without this guard the second emission (missing durationMs) overwrites the first. */
+    private final Set<String> emittedToolResults = ConcurrentHashMap.newKeySet();
+
     /**
      * Set of toolCallIds the {@link WebSocketApprovalHandler} has already announced. When a tool
      * required ASK approval, WSAH emits the TOOL_CALL event before execution; if BridgeHook then
@@ -144,11 +148,10 @@ public class AgentEventBridgeHook {
                     // here, after the card exists, so it flips from "Running" to "done". Without
                     // this, every non-approval streaming-eager tool (tree, batch_read, glob, …)
                     // sticks at Running forever even though the agent has finished.
-                    if (eagerResult != null) {
-                        emit(AgentEvent.toolResult(sessionId, toolUseId, eagerResult.toString()));
-                        if (progressTracker != null) {
-                            progressTracker.unregister(toolUseId);
-                        }
+                    if (eagerResult != null && emittedToolResults.add(toolUseId)) {
+                        Map<String, Object> eagerMeta = enrichWithDuration(null, toolUseId);
+                        emit(AgentEvent.toolResult(
+                                sessionId, toolUseId, eagerResult.toString(), eagerMeta));
                         maybeEmitTodosSnapshot(toolName);
                     }
                 }
@@ -165,13 +168,12 @@ public class AgentEventBridgeHook {
     public HookResult<PostActingEvent> onPostActing(PostActingEvent event) {
         if (event.result() != null) {
             String toolUseId = event.result().toolUseId();
-            String resultContent = event.result().content();
-            emit(
-                    AgentEvent.toolResult(
-                            sessionId, toolUseId, resultContent, event.result().metadata()));
-            if (progressTracker != null) {
-                progressTracker.unregister(toolUseId);
+            if (!emittedToolResults.add(toolUseId)) {
+                return HookResult.proceed(event);
             }
+            String resultContent = event.result().content();
+            Map<String, Object> meta = enrichWithDuration(event.result().metadata(), toolUseId);
+            emit(AgentEvent.toolResult(sessionId, toolUseId, resultContent, meta));
             maybeEmitTodosSnapshot(event.toolName());
         }
         return HookResult.proceed(event);
@@ -184,13 +186,12 @@ public class AgentEventBridgeHook {
     public void onToolResult(ToolResultEvent event) {
         if (event.result() != null) {
             String toolUseId = event.result().toolUseId();
-            String resultContent = event.result().content();
-            emit(
-                    AgentEvent.toolResult(
-                            sessionId, toolUseId, resultContent, event.result().metadata()));
-            if (progressTracker != null) {
-                progressTracker.unregister(toolUseId);
+            if (!emittedToolResults.add(toolUseId)) {
+                return;
             }
+            String resultContent = event.result().content();
+            Map<String, Object> meta = enrichWithDuration(event.result().metadata(), toolUseId);
+            emit(AgentEvent.toolResult(sessionId, toolUseId, resultContent, meta));
             maybeEmitTodosSnapshot(event.toolName());
         }
     }
@@ -260,6 +261,26 @@ public class AgentEventBridgeHook {
             s = s.substring(0, 77) + "...";
         }
         return s.replace('\n', ' ').replace('\r', ' ');
+    }
+
+    /**
+     * Unregister the tool from the progress tracker and merge {@code durationMs} into the
+     * metadata map so the frontend can display actual execution time.
+     */
+    private Map<String, Object> enrichWithDuration(Map<String, Object> original, String toolUseId) {
+        long durationMs = -1;
+        if (progressTracker != null) {
+            durationMs = progressTracker.unregister(toolUseId);
+        }
+        if (durationMs < 0) {
+            return original;
+        }
+        Map<String, Object> enriched =
+                original != null
+                        ? new java.util.LinkedHashMap<>(original)
+                        : new java.util.LinkedHashMap<>();
+        enriched.put("durationMs", durationMs);
+        return enriched;
     }
 
     /**

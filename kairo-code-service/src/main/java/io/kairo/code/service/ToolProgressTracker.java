@@ -52,10 +52,16 @@ public final class ToolProgressTracker {
         inflight.computeIfPresent(toolCallId, (id, e) -> new Entry(e.toolName, e.startMs, phase));
     }
 
-    /** Remove a tool from tracking, e.g. on {@code TOOL_RESULT}. */
-    public void unregister(String toolCallId) {
-        if (toolCallId == null) return;
-        inflight.remove(toolCallId);
+    /**
+     * Remove a tool from tracking and return its elapsed time in milliseconds.
+     *
+     * @return elapsed ms since {@link #register}, or {@code -1} if the id was not tracked
+     */
+    public long unregister(String toolCallId) {
+        if (toolCallId == null) return -1;
+        Entry entry = inflight.remove(toolCallId);
+        if (entry == null) return -1;
+        return System.currentTimeMillis() - entry.startMs;
     }
 
     /** Drop all entries (called from {@code cancelAll} / session destroy paths). */

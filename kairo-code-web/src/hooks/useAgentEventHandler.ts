@@ -194,6 +194,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         input: payload.input,
                         status: payload.requiresApproval && !willAutoApprove ? 'pending' : 'approved',
                         requiresApproval: payload.requiresApproval,
+                        createdAt: Date.now(),
                     };
                     addToolCallTo(sid, curMsgId, toolCall);
                     trackToolCall(toolCall);
@@ -253,10 +254,14 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                                       | 'HANDLER_ERROR'
                                       | 'VALIDATION')
                                 : undefined;
+                        let resolvedDuration = payload.durationMs;
+                        if ((!resolvedDuration || resolvedDuration <= 0) && tc?.createdAt) {
+                            resolvedDuration = Date.now() - tc.createdAt;
+                        }
                         updateToolCallIn(sid, targetMsg.id, payload.toolCallId, {
                             result: payload.result,
                             status: 'done',
-                            durationMs: payload.durationMs,
+                            durationMs: resolvedDuration,
                             isError: payload.isError,
                             failureReason,
                             progressPhase: undefined,
