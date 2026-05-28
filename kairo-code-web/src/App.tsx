@@ -1527,9 +1527,11 @@ ${content}
                                         />
                                     )}
                                     <ErrorBoundary>
+                                        <div className="flex-1 min-h-0 overflow-hidden">
                                         <Virtuoso
                                             ref={virtuosoRef}
-                                            className="flex-1 pt-6 pb-3 overflow-x-hidden [scrollbar-gutter:stable]"
+                                            className="pt-6 pb-3 overflow-x-hidden [scrollbar-gutter:stable]"
+                                            style={{ height: '100%' }}
                                             data={filteredMessages}
                                             followOutput={(isAtBottom) => {
                                                 if ((showSearch && searchQuery) || (showMessageSearch && messageSearchQuery)) return false;
@@ -1641,6 +1643,7 @@ ${content}
                                                 },
                                             }}
                                         />
+                                        </div>
                                     </ErrorBoundary>
 
                                     {!atBottom && (
