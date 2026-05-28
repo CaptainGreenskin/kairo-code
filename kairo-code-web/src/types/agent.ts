@@ -18,7 +18,8 @@ export type AgentEventType =
     | 'MODE_DEMOTED'
     | 'MODE_ESCALATED'
     | 'PEER_MESSAGE'
-    | 'SESSION_RESUMED';
+    | 'SESSION_RESUMED'
+    | 'CLEAR_EXECUTION_MESSAGES';
 
 /**
  * Mirrors {@code io.kairo.api.tool.FailureReason}. Carried on TOOL_RESULT payloads under
@@ -54,7 +55,8 @@ export type AgentEventPayload =
     | RevertedPayload
     | ModeDemotedPayload
     | ModeEscalatedPayload
-    | PeerMessagePayload;
+    | PeerMessagePayload
+    | Record<string, never>;
 
 export interface TextChunkPayload {
     text: string;
@@ -95,6 +97,7 @@ export interface ToolProgressPayload {
 export interface AgentDonePayload {
     inputTokens: number;
     outputTokens: number;
+    cost?: number;
 }
 
 export interface AgentErrorPayload {

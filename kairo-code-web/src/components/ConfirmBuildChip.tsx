@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Hammer, FileText, X } from 'lucide-react';
+import { Hammer, X } from 'lucide-react';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
 
 interface ConfirmBuildChipProps {
@@ -131,22 +131,6 @@ export function ConfirmBuildChip({ sessionId: _sessionId, isVisible, onConfirm }
                 >
                     <Hammer size={13} />
                     Approve and Build
-                </button>
-                <button
-                    onClick={() => {
-                        // Placeholder: open plan.md in editor
-                        window.dispatchEvent(
-                            new CustomEvent('kairo:openFile', {
-                                detail: { path: '.kairo-session/plan.md' },
-                            }),
-                        );
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md
-                        bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--border)]
-                        hover:text-[var(--text-primary)] hover:border-[var(--text-muted)]/40 transition-colors"
-                >
-                    <FileText size={13} />
-                    Open in Editor
                 </button>
             </div>
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentEvent, ConnectionStatus, PlanReadyPayload } from '@/types/agent';
 import { useSessionStore } from '@store/sessionStore';
 import { useSessionModeStore } from '@store/sessionModeStore';
+import { useBuildPhaseStore } from '@store/buildPhaseStore';
 
 /**
  * Agent WebSocket hook — talks to /ws/agent over native WebSocket + JSON.
@@ -56,7 +57,11 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
         case 'AGENT_DONE':
             return {
                 type: 'AGENT_DONE', sessionId, timestamp: ts,
-                payload: { inputTokens: (raw.tokenUsage as number) ?? 0, outputTokens: 0 },
+                payload: {
+                    inputTokens: (raw.tokenUsage as number) ?? 0,
+                    outputTokens: 0,
+                    cost: (raw.cost as number) ?? undefined,
+                },
             };
         case 'AGENT_ERROR':
             return {
@@ -142,6 +147,11 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
             return {
                 type: 'SESSION_RESUMED', sessionId, timestamp: ts,
                 payload: { reason: (raw.content as string) ?? '' },
+            };
+        case 'CLEAR_EXECUTION_MESSAGES':
+            return {
+                type: 'CLEAR_EXECUTION_MESSAGES', sessionId, timestamp: ts,
+                payload: {},
             };
         case 'PEER_MESSAGE': {
             // M-Team / #60: peer-to-peer message relayed via the in-process MessageBus.
@@ -262,13 +272,13 @@ export function useAgentWebSocket(
             const sid = raw.sessionId as string;
             sessionIdRef.current = sid;
             sessionStorage.setItem(SESSION_STORAGE_KEY, sid);
+            if (typeof raw.isGit === 'boolean') {
+                useBuildPhaseStore.getState().setIsGit(raw.isGit);
+            }
             const pending = createPendingRef.current;
             if (pending) {
                 clearTimeout(pending.timer);
                 createPendingRef.current = null;
-                // Record the mode this session was created with so the toggle can
-                // reflect the active session's mode even when multiple sessions in
-                // the same workspace use different modes.
                 useSessionModeStore.getState().setSessionMode(sid, pending.mode);
                 pending.resolve(sid);
             }

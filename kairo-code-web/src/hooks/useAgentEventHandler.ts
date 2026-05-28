@@ -290,6 +290,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     const payload = event.payload as {
                         inputTokens: number;
                         outputTokens: number;
+                        cost?: number;
                     };
                     // Transition build phase on agent completion during EXECUTING
                     if (useBuildPhaseStore.getState().phase === 'EXECUTING') {
@@ -354,9 +355,8 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         input: payload.inputTokens,
                         output: payload.outputTokens,
                     });
-                    const cost =
-                        (payload.inputTokens * 0.001 + payload.outputTokens * 0.003) /
-                        1000;
+                    const cost = payload.cost
+                        ?? (payload.inputTokens * 0.001 + payload.outputTokens * 0.003) / 1000;
                     setEstimatedCostFor(sid, cost);
                     {
                         const msgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
@@ -542,6 +542,17 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     useBuildPhaseStore.getState().setPhase('idle');
                     // Optionally: could clear execution messages here;
                     // parent handles via phase change observation.
+                    break;
+                }
+
+                case 'CLEAR_EXECUTION_MESSAGES': {
+                    const msgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
+                    const filtered = msgs.filter(
+                        (m) => !m.toolCalls?.length,
+                    );
+                    if (filtered.length !== msgs.length) {
+                        setMessagesFor(sid, filtered);
+                    }
                     break;
                 }
 
