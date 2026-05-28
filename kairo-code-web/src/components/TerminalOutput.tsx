@@ -5,55 +5,122 @@ const COLLAPSE_THRESHOLD = 20;
 
 interface TerminalOutputProps {
     output: string;
+    streaming?: boolean;
 }
 
-export function TerminalOutput({ output }: TerminalOutputProps) {
+export function TerminalOutput({ output, streaming }: TerminalOutputProps) {
     const terminalRef = useRef<HTMLDivElement>(null);
     const [collapsed, setCollapsed] = useState(true);
     const [copied, setCopied] = useState(false);
 
+    const termRef = useRef<import('@xterm/xterm').Terminal | null>(null);
+    const fitRef = useRef<import('@xterm/addon-fit').FitAddon | null>(null);
+    const writtenLenRef = useRef(0);
+
     const lineCount = output.split('\n').length;
-    const shouldCollapse = lineCount > COLLAPSE_THRESHOLD;
+    const shouldCollapse = !streaming && lineCount > COLLAPSE_THRESHOLD;
 
     useEffect(() => {
-        let cancelled = false;
-        let term: import('@xterm/xterm').Terminal | null = null;
-        let fitAddon: import('@xterm/addon-fit').FitAddon | null = null;
+        if (!streaming) {
+            // Non-streaming: recreate terminal on every output change (original behavior)
+            let cancelled = false;
+            let term: import('@xterm/xterm').Terminal | null = null;
+            let fitAddon: import('@xterm/addon-fit').FitAddon | null = null;
 
+            (async () => {
+                const [{ Terminal }, { FitAddon }] = await Promise.all([
+                    import('@xterm/xterm'),
+                    import('@xterm/addon-fit'),
+                ]);
+
+                if (cancelled || !terminalRef.current) return;
+
+                term = new Terminal({
+                    disableStdin: true,
+                    cursorBlink: false,
+                    fontSize: 12,
+                    fontFamily: 'var(--font-mono, ui-monospace, SF Mono, Monaco, monospace)',
+                    allowProposedApi: true,
+                    scrollback: 1000,
+                });
+
+                fitAddon = new FitAddon();
+                term.loadAddon(fitAddon);
+                term.open(terminalRef.current);
+                fitAddon.fit();
+                term.write(output);
+                requestAnimationFrame(() => fitAddon?.fit());
+            })();
+
+            return () => {
+                cancelled = true;
+                term?.dispose();
+            };
+        }
+
+        // Streaming mode: create terminal once, append delta on each output change
+        if (termRef.current) return; // already initialized
+
+        let cancelled = false;
         (async () => {
             const [{ Terminal }, { FitAddon }] = await Promise.all([
                 import('@xterm/xterm'),
                 import('@xterm/addon-fit'),
             ]);
-
             if (cancelled || !terminalRef.current) return;
 
-            term = new Terminal({
+            const term = new Terminal({
                 disableStdin: true,
-                cursorBlink: false,
+                cursorBlink: true,
                 fontSize: 12,
                 fontFamily: 'var(--font-mono, ui-monospace, SF Mono, Monaco, monospace)',
                 allowProposedApi: true,
-                scrollback: 1000,
+                scrollback: 5000,
             });
-
-            fitAddon = new FitAddon();
+            const fitAddon = new FitAddon();
             term.loadAddon(fitAddon);
             term.open(terminalRef.current);
             fitAddon.fit();
 
-            // Write output (xterm handles ANSI escape codes)
-            term.write(output);
+            termRef.current = term;
+            fitRef.current = fitAddon;
+            writtenLenRef.current = 0;
 
-            // Refit after content is written
-            requestAnimationFrame(() => fitAddon?.fit());
+            // Write initial content
+            if (output.length > 0) {
+                term.write(output);
+                writtenLenRef.current = output.length;
+            }
+            requestAnimationFrame(() => fitAddon.fit());
         })();
 
         return () => {
             cancelled = true;
-            term?.dispose();
         };
-    }, [output]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [streaming]);
+
+    // Streaming delta append
+    useEffect(() => {
+        if (!streaming || !termRef.current) return;
+        const delta = output.slice(writtenLenRef.current);
+        if (delta.length > 0) {
+            termRef.current.write(delta);
+            writtenLenRef.current = output.length;
+            termRef.current.scrollToBottom();
+            requestAnimationFrame(() => fitRef.current?.fit());
+        }
+    }, [streaming, output]);
+
+    // Cleanup streaming terminal on unmount
+    useEffect(() => {
+        return () => {
+            termRef.current?.dispose();
+            termRef.current = null;
+            fitRef.current = null;
+            writtenLenRef.current = 0;
+        };
+    }, []);
 
     const handleCopy = useCallback(() => {
         navigator.clipboard.writeText(output);

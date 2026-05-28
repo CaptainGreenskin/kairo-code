@@ -54,26 +54,30 @@ final class OtelTracer implements Tracer {
 
     @Override
     public Span startIterationSpan(Span parent, int iteration) {
-        SpanBuilder b = otel.spanBuilder("agent.iteration")
+        String spanName = "iteration-" + iteration;
+        SpanBuilder b = otel.spanBuilder(spanName)
                 .setParent(parentContext(parent))
                 .setAttribute("iter", (long) iteration);
-        return start(b, parent, "agent.iteration");
+        return start(b, parent, spanName);
     }
 
     @Override
     public Span startReasoningSpan(Span parent, String modelName, int messageCount) {
-        SpanBuilder b = otel.spanBuilder("agent.reasoning")
+        String spanName = modelName != null ? modelName : "agent.reasoning";
+        SpanBuilder b = otel.spanBuilder(spanName)
                 .setParent(parentContext(parent))
+                .setAttribute("langfuse.observation.type", "generation")
                 .setAttribute("message.count", (long) messageCount);
         if (modelName != null) {
             b.setAttribute("model.name", modelName);
         }
-        return start(b, parent, "agent.reasoning");
+        return start(b, parent, spanName);
     }
 
     @Override
     public Span startToolSpan(Span parent, String toolName, Map<String, Object> input) {
-        SpanBuilder b = otel.spanBuilder("agent.tool")
+        String spanName = toolName != null ? toolName : "agent.tool";
+        SpanBuilder b = otel.spanBuilder(spanName)
                 .setParent(parentContext(parent))
                 .setAttribute("langfuse.observation.type", "tool");
         if (toolName != null) {
@@ -82,11 +86,10 @@ final class OtelTracer implements Tracer {
         if (input != null && !input.isEmpty()) {
             String inputStr = input.toString();
             b.setAttribute("tool.input.preview", preview(inputStr));
-            // Mirror tool args into Langfuse's Input panel for the tool span.
             b.setAttribute("langfuse.observation.input", inputStr);
             b.setAttribute("input.value", inputStr);
         }
-        return start(b, parent, "agent.tool");
+        return start(b, parent, spanName);
     }
 
     private Span start(SpanBuilder builder, Span parent, String name) {

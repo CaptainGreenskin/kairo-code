@@ -79,6 +79,17 @@ public final class ToolProgressTracker {
                 });
     }
 
+    /** Reverse-lookup: find the active toolCallId for a given toolName, or null if not tracked. */
+    public String findToolCallIdByName(String toolName) {
+        if (toolName == null) return null;
+        for (Map.Entry<String, Entry> e : inflight.entrySet()) {
+            if (toolName.equals(e.getValue().toolName())) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
     /** True when nothing is currently being tracked — callers can skip the tick. */
     public boolean isEmpty() {
         return inflight.isEmpty();

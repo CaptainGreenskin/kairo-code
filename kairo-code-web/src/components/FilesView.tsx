@@ -1,5 +1,6 @@
 import { FileTreePanel } from './FileTreePanel';
 import { useOpenFilesStore } from '@store/openFilesStore';
+import { useLayoutStore } from '@store/layoutStore';
 
 interface FilesViewProps {
     workspaceId?: string;
@@ -15,6 +16,7 @@ interface FilesViewProps {
  */
 export function FilesView({ workspaceId, rootKey, onInsertFile, onMentionFile }: FilesViewProps) {
     const openFile = useOpenFilesStore((s) => s.openFile);
+    const refreshKey = useLayoutStore((s) => s.fileTreeRefreshKey);
 
     return (
         <FileTreePanel
@@ -24,7 +26,7 @@ export function FilesView({ workspaceId, rootKey, onInsertFile, onMentionFile }:
             onInsertFile={onInsertFile}
             onMentionFile={onMentionFile}
             onOpenInEditor={(path) => openFile(path)}
-            rootKey={rootKey}
+            rootKey={`${rootKey ?? ''}-${refreshKey}`}
             workspaceId={workspaceId}
         />
     );

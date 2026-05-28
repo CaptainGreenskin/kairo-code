@@ -358,7 +358,19 @@ public class AgentService implements DisposableBean, InitializingBean {
                         new io.kairo.code.core.observability.SessionAwareTracer(
                                 tracer, sessionId, workspaceId));
             }
-            CodeAgentSession session = CodeAgentFactory.createSession(config, opts);
+            // Chunk sink: forward streaming tool output (e.g. bash stdout) to the
+            // event sink so the frontend can render it incrementally.
+            final String chunkSessionId = sessionId;
+            final ToolProgressTracker chunkTracker = progressTracker;
+            java.util.function.BiConsumer<String, String> chunkSink = (toolName, chunkText) -> {
+                String callId = chunkTracker.findToolCallIdByName(toolName);
+                if (callId != null) {
+                    sink.tryEmitNext(AgentEvent.toolOutputChunk(chunkSessionId, callId, chunkText));
+                }
+            };
+            Map<String, Object> extraToolDeps = Map.of(
+                    io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, chunkSink);
+            CodeAgentSession session = CodeAgentFactory.createSession(config, opts, extraToolDeps);
 
             // ── Unified payload: always AgentSessionPayload + optional escalation ──
             AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
@@ -1076,7 +1088,19 @@ public class AgentService implements DisposableBean, InitializingBean {
         }
 
         try {
-            CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts);
+            ToolProgressTracker rebuildTracker = progressTrackers.get(sid);
+            Map<String, Object> rebuildExtraDeps = Map.of();
+            if (rebuildTracker != null) {
+                java.util.function.BiConsumer<String, String> rebuildChunkSink = (toolName, chunkText) -> {
+                    String callId = rebuildTracker.findToolCallIdByName(toolName);
+                    if (callId != null) {
+                        sink.tryEmitNext(AgentEvent.toolOutputChunk(sid, callId, chunkText));
+                    }
+                };
+                rebuildExtraDeps = Map.of(
+                        io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, rebuildChunkSink);
+            }
+            CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts, rebuildExtraDeps);
             Consumer<SessionPhase> persistPhaseFn = p -> persistPhase(rebuilt.workingDir(), p);
             AgentRuntimeContext newCtx = new AgentRuntimeContext(
                     sid, sink, running != null ? running : new AtomicBoolean(false),

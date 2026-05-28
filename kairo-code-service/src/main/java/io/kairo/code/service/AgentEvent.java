@@ -33,6 +33,7 @@ public record AgentEvent(
         TOOL_CALL,
         TOOL_RESULT,
         TOOL_PROGRESS,
+        TOOL_OUTPUT_CHUNK,
         AGENT_DONE,
         AGENT_ERROR,
         SESSION_RESTORED,
@@ -110,6 +111,15 @@ public record AgentEvent(
         return new AgentEvent(EventType.TOOL_PROGRESS, sessionId, null, toolName, null,
                 false, toolCallId, null, null, null, null, null, meta,
                 System.currentTimeMillis());
+    }
+
+    /**
+     * Streaming output chunk from a tool (typically bash). {@code content} carries the
+     * incremental text; {@code toolCallId} links it to the in-flight tool card in the UI.
+     */
+    public static AgentEvent toolOutputChunk(String sessionId, String toolCallId, String content) {
+        return new AgentEvent(EventType.TOOL_OUTPUT_CHUNK, sessionId, content, null, null,
+                false, toolCallId, null, null, null, null, null, null, System.currentTimeMillis());
     }
 
     public static AgentEvent done(String sessionId, long tokens, double cost) {

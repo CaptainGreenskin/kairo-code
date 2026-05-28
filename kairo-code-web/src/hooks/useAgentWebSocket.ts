@@ -44,16 +44,19 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                     requiresApproval: (raw.requiresApproval as boolean) ?? false,
                 },
             };
-        case 'TOOL_RESULT':
+        case 'TOOL_RESULT': {
+            const meta = (raw.resultMetadata as Record<string, unknown>) ?? {};
             return {
                 type: 'TOOL_RESULT', sessionId, timestamp: ts,
                 payload: {
                     toolCallId: (raw.toolCallId as string) ?? '',
                     result: (raw.toolResult as string) ?? '',
-                    isError: false,
-                    durationMs: 0,
+                    isError: (meta.isError as boolean) ?? false,
+                    durationMs: (meta.durationMs as number) ?? 0,
+                    resultMetadata: meta,
                 },
             };
+        }
         case 'AGENT_DONE':
             return {
                 type: 'AGENT_DONE', sessionId, timestamp: ts,
@@ -164,6 +167,26 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                     content: (raw.content as string) ?? '',
                     messageId: (meta.messageId as string) ?? '',
                 },
+            };
+        }
+        case 'TOOL_OUTPUT_CHUNK':
+            return {
+                type: 'TOOL_OUTPUT_CHUNK', sessionId, timestamp: ts,
+                payload: {
+                    toolCallId: (raw.toolCallId as string) ?? '',
+                    content: (raw.content as string) ?? '',
+                },
+            };
+        case 'TOOL_PROGRESS': {
+            const meta = (raw.resultMetadata as Record<string, unknown>) ?? {};
+            return {
+                type: 'TOOL_PROGRESS', sessionId, timestamp: ts,
+                payload: {
+                    toolCallId: (raw.toolCallId as string) ?? '',
+                    toolName: (raw.toolName as string) ?? '',
+                    phase: ((meta.phase as string) ?? 'EXECUTING') as 'EXECUTING' | 'AWAITING_APPROVAL' | 'STREAMING',
+                    elapsedMs: (meta.elapsedMs as number) ?? 0,
+                } satisfies import('@/types/agent').ToolProgressPayload,
             };
         }
         default:

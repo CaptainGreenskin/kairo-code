@@ -172,6 +172,18 @@ public final class CodeAgentFactory {
      * <p>Used by the REPL to mutate runtime state (toggle plan mode, swap skills, restore from a
      * snapshot) without exposing internal components through the {@link Agent} contract.
      */
+    public static CodeAgentSession createSession(
+            CodeAgentConfig config, SessionOptions options, Map<String, Object> extraToolDeps) {
+        CodeAgentSession session = createSession(config, options);
+        if (extraToolDeps != null && !extraToolDeps.isEmpty()) {
+            Agent agent = session.agent();
+            if (agent instanceof io.kairo.core.agent.DefaultReActAgent dra) {
+                dra.mergeToolDependencies(extraToolDeps);
+            }
+        }
+        return session;
+    }
+
     public static CodeAgentSession createSession(CodeAgentConfig config, SessionOptions options) {
         if (options == null) options = SessionOptions.empty();
 

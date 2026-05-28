@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { listFiles, getFileContent, deleteFile, renameFile, createFile, createDir } from '@api/config';
 import type { FileEntry } from '@/types/agent';
+import { useLayoutStore } from '@store/layoutStore';
 
 interface FileTreePanelProps {
     isOpen: boolean;
@@ -96,6 +97,7 @@ function TreeNodeItem({
     onMentionFile,
     onContextMenu,
     selectedPath,
+    recentlyModifiedFiles,
 }: {
     node: TreeNode;
     depth: number;
@@ -104,8 +106,10 @@ function TreeNodeItem({
     onMentionFile?: (path: string) => void;
     onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
     selectedPath?: string;
+    recentlyModifiedFiles?: Set<string>;
 }) {
     const isDir = node.entry.isDir;
+    const isRecentlyModified = !isDir && recentlyModifiedFiles?.has(node.entry.path);
     const chain = buildChain(node);
     const isCompact = chain.length > 1;
     // Tail of the chain is the directory whose children we actually render and
@@ -128,7 +132,7 @@ function TreeNodeItem({
             >
                 <button
                     className={`flex-1 flex items-center gap-1.5 min-w-0 text-left ${
-                        !isDir ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'
+                        isRecentlyModified ? 'text-blue-400' : !isDir ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'
                     }`}
                     onClick={() => {
                         if (isDir) onExpand(targetEntry.path);
@@ -156,6 +160,9 @@ function TreeNodeItem({
                         </span>
                     ) : (
                         <span className="truncate">{node.entry.name}</span>
+                    )}
+                    {isRecentlyModified && (
+                        <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-400" title="Recently modified by agent" />
                     )}
                 </button>
                 {!isDir && onMentionFile && (
@@ -189,6 +196,7 @@ function TreeNodeItem({
                             onMentionFile={onMentionFile}
                             onContextMenu={onContextMenu}
                             selectedPath={selectedPath}
+                            recentlyModifiedFiles={recentlyModifiedFiles}
                         />
                     ))}
                     {!targetLoading && targetChildren && targetChildren.length === 0 && (
@@ -274,6 +282,7 @@ function ContextMenuPopup({
 }
 
 export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, onOpenInEditor, width = 240, rootKey, workspaceId, embedded = false }: FileTreePanelProps) {
+    const recentlyModifiedFiles = useLayoutStore((s) => s.recentlyModifiedFiles);
     const [rootNodes, setRootNodes] = useState<TreeNode[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -498,6 +507,7 @@ export function FileTreePanel({ isOpen, onToggle, onInsertFile, onMentionFile, o
                             onMentionFile={onMentionFile}
                             onContextMenu={handleContextMenu}
                             selectedPath={selectedPath}
+                            recentlyModifiedFiles={recentlyModifiedFiles}
                         />
                     ))}
                 </div>

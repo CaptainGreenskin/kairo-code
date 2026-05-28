@@ -6,6 +6,7 @@ import { usePlanModeStore } from '@store/planModeStore';
 import type { AgentEvent, ToolCall, PlanReadyPayload, SessionRestoredPayload, TodosUpdatedPayload } from '@/types/agent';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
 import { useExpertTeamStore } from '@store/expertTeamStore';
+import { useLayoutStore } from '@store/layoutStore';
 import type { Phase } from '@components/ThinkingIndicator';
 import type { ToastMessage } from '@components/Toast';
 import { deleteSnapshot, saveSnapshot, setLastSessionId } from '@utils/sessionSnapshot';
@@ -258,10 +259,20 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                             durationMs: payload.durationMs,
                             isError: payload.isError,
                             failureReason,
-                            // Heartbeat is over — clear progress fields so the card stops showing live elapsed.
                             progressPhase: undefined,
                             progressElapsedMs: undefined,
                         });
+                        // Auto-refresh file tree when a write/edit tool completes successfully.
+                        if (tc && !payload.isError) {
+                            const name = tc.toolName.toLowerCase();
+                            if (name.includes('write') || name.includes('edit') || name.includes('patch') || name.includes('create')) {
+                                const input = tc.input as Record<string, unknown> | undefined;
+                                const path = (input?.file_path ?? input?.path ?? input?.filePath) as string | undefined;
+                                if (path) {
+                                    useLayoutStore.getState().bumpFileTreeRefresh([path]);
+                                }
+                            }
+                        }
                     }
                     break;
                 }
@@ -281,6 +292,25 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         updateToolCallIn(sid, targetMsg.id, payload.toolCallId, {
                             progressPhase: payload.phase,
                             progressElapsedMs: payload.elapsedMs,
+                        });
+                    }
+                    break;
+                }
+
+                case 'TOOL_OUTPUT_CHUNK': {
+                    const payload = event.payload as {
+                        toolCallId: string;
+                        content: string;
+                    };
+                    const msgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
+                    const targetMsg = msgs.find((m) =>
+                        (m.toolCalls ?? []).some((tc) => tc.id === payload.toolCallId),
+                    );
+                    if (targetMsg) {
+                        const tc = (targetMsg.toolCalls ?? []).find((c) => c.id === payload.toolCallId);
+                        const existing = tc?.partialOutput ?? '';
+                        updateToolCallIn(sid, targetMsg.id, payload.toolCallId, {
+                            partialOutput: existing + payload.content,
                         });
                     }
                     break;

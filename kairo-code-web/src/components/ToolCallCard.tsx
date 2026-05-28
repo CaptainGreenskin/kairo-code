@@ -663,6 +663,10 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                                 return <InlineTodoCard todos={todos} overview={overview} />;
                             })()}
                         </div>
+                    ) : toolCall.partialOutput && toolCall.status !== 'done' && toolCall.status !== 'error' && toolCall.status !== 'rejected' ? (
+                        <div className="border-t border-[var(--border)]">
+                            <TerminalOutput output={toolCall.partialOutput} streaming />
+                        </div>
                     ) : (
                         toolCall.result && toolCall.status === 'done' && (
                             <ResultOutput

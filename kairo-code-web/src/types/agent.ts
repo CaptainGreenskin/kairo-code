@@ -17,6 +17,7 @@ export type AgentEventType =
     | 'REVERTED'
     | 'MODE_DEMOTED'
     | 'MODE_ESCALATED'
+    | 'TOOL_OUTPUT_CHUNK'
     | 'PEER_MESSAGE'
     | 'SESSION_RESUMED'
     | 'CLEAR_EXECUTION_MESSAGES';
@@ -55,6 +56,7 @@ export type AgentEventPayload =
     | RevertedPayload
     | ModeDemotedPayload
     | ModeEscalatedPayload
+    | ToolOutputChunkPayload
     | PeerMessagePayload
     | Record<string, never>;
 
@@ -92,6 +94,15 @@ export interface ToolProgressPayload {
     toolName: string;
     phase: 'EXECUTING' | 'AWAITING_APPROVAL' | 'STREAMING';
     elapsedMs: number;
+}
+
+/**
+ * Incremental output chunk from a streaming tool (typically bash). Appended to the
+ * ToolCall's {@code partialOutput} so the UI can render a live terminal.
+ */
+export interface ToolOutputChunkPayload {
+    toolCallId: string;
+    content: string;
 }
 
 export interface AgentDonePayload {
@@ -193,6 +204,8 @@ export interface ToolCall {
     progressPhase?: 'EXECUTING' | 'AWAITING_APPROVAL' | 'STREAMING';
     /** Wall-clock ms since tool started, updated on each TOOL_PROGRESS tick. */
     progressElapsedMs?: number;
+    /** Accumulated streaming output chunks (bash stdout/stderr). */
+    partialOutput?: string;
 }
 
 export interface ServerConfig {

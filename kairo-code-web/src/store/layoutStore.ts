@@ -17,6 +17,10 @@ interface LayoutState {
     chatSessionsWidth: number;
     /** Whether the Sessions strip is rendered (Cursor-style — sessions live with chat). */
     chatSessionsOpen: boolean;
+    /** Monotonic counter bumped on agent file writes — triggers FileTreePanel reload. */
+    fileTreeRefreshKey: number;
+    /** File paths recently modified by agent tools — cleared after 5 s. */
+    recentlyModifiedFiles: Set<string>;
 
     togglePrimarySidebar: () => void;
     toggleBottomPanel: () => void;
@@ -31,6 +35,8 @@ interface LayoutState {
     setChatSessionsWidth: (w: number) => void;
     /** Activity-Bar click: switch view if different, close sidebar if same. */
     selectActivity: (view: ActivityView) => void;
+    /** Bump file tree refresh key and mark paths as recently modified. */
+    bumpFileTreeRefresh: (paths: string[]) => void;
 }
 
 export const useLayoutStore = create<LayoutState>()((set, get) => ({
@@ -46,6 +52,8 @@ export const useLayoutStore = create<LayoutState>()((set, get) => ({
     chatWidth: prefs.chatWidth ?? 640,
     chatSessionsWidth: prefs.chatSessionsWidth ?? 220,
     chatSessionsOpen: prefs.chatSessionsOpen ?? false,
+    fileTreeRefreshKey: 0,
+    recentlyModifiedFiles: new Set<string>(),
 
     togglePrimarySidebar: () => {
         const next = !get().primarySidebarOpen;
@@ -95,6 +103,18 @@ export const useLayoutStore = create<LayoutState>()((set, get) => ({
     setChatSessionsWidth: (w) => {
         set({ chatSessionsWidth: w });
         savePref('chatSessionsWidth', w);
+    },
+    bumpFileTreeRefresh: (paths) => {
+        const current = get().recentlyModifiedFiles;
+        const next = new Set(current);
+        for (const p of paths) next.add(p);
+        set({ fileTreeRefreshKey: get().fileTreeRefreshKey + 1, recentlyModifiedFiles: next });
+        setTimeout(() => {
+            const updated = get().recentlyModifiedFiles;
+            const cleaned = new Set(updated);
+            for (const p of paths) cleaned.delete(p);
+            set({ recentlyModifiedFiles: cleaned });
+        }, 5000);
     },
     selectActivity: (view) => {
         const { activityView, primarySidebarOpen } = get();
