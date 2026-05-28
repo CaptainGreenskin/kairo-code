@@ -59,6 +59,12 @@ public class WorkspacePersistenceService {
 
     public synchronized WorkspaceConfig add(String name, String workingDir, boolean useWorktree) throws IOException {
         List<WorkspaceConfig> all = new ArrayList<>(loadAll());
+        Optional<WorkspaceConfig> existing = all.stream()
+                .filter(w -> w.workingDir().equals(workingDir))
+                .findFirst();
+        if (existing.isPresent()) {
+            return existing.get();
+        }
         WorkspaceConfig fresh = new WorkspaceConfig(
                 UUID.randomUUID().toString(),
                 name,
