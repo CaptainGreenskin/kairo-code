@@ -159,12 +159,14 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         String baseUrl = resolveBaseUrl(provider);
         String model = nonBlank(text(body, "model"), serverProperties.model());
         String mode = nonBlank(text(body, "mode"), "agent");
+        String permissionMode = text(body, "permissionMode");
 
         CodeAgentConfig config = new CodeAgentConfig(
                 apiKey, baseUrl, model, Integer.MAX_VALUE, workspace.workingDir(), null, 0, 0,
                 serverProperties.thinkingBudget(), serverProperties.llmClassifier());
 
-        String sessionId = agentService.createSession(config, workspace.id(), workspace.useWorktree(), mode);
+        String sessionId = agentService.createSession(
+                config, workspace.id(), workspace.useWorktree(), mode, permissionMode);
         bind(session, sessionId);
 
         // After createSession, the actual cwd may have been swapped to a worktree path. Read the

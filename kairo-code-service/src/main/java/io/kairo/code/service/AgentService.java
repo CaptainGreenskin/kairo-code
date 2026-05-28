@@ -214,23 +214,26 @@ public class AgentService implements DisposableBean, InitializingBean {
      * Create a new session bound to a workspace (defaults to "agent" mode).
      */
     public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree) {
-        return createSession(config, workspaceId, useWorktree, "agent");
+        return createSession(config, workspaceId, useWorktree, "agent", null);
+    }
+
+    public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
+                                String sessionMode) {
+        return createSession(config, workspaceId, useWorktree, sessionMode, null);
     }
 
     /**
-     * Create a new session bound to a workspace with explicit session mode.
-     * If {@code useWorktree} is true and the workspace is a git repo, the session runs in a
-     * fresh worktree on branch {@code kairo/<sid8>}; otherwise the session runs directly in
-     * {@code config.workingDir()}.
+     * Create a new session bound to a workspace with explicit session mode and permission mode.
      *
-     * @param config       agent config (its {@code workingDir} is the workspace dir)
-     * @param workspaceId  owning workspace id (may be null for legacy tests)
-     * @param useWorktree  whether to provision a per-session git worktree
-     * @param sessionMode  ignored (unified mode); kept for backward compat
+     * @param config         agent config (its {@code workingDir} is the workspace dir)
+     * @param workspaceId    owning workspace id (may be null for legacy tests)
+     * @param useWorktree    whether to provision a per-session git worktree
+     * @param sessionMode    ignored (unified mode); kept for backward compat
+     * @param permissionMode "bypass" to auto-approve all tool calls (headless/API); null for normal
      * @return the new session ID
      */
     public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
-                                String sessionMode) {
+                                String sessionMode, String permissionMode) {
         // Unified mode: all legacy modes collapse to "agent" (auto-escalation handles the rest)
         String normalizedMode = "agent";
         if (sessionMode != null && !sessionMode.isBlank()
@@ -275,6 +278,10 @@ public class AgentService implements DisposableBean, InitializingBean {
         eventSinks.put(sessionId, sink);
 
         WebSocketApprovalHandler approvalHandler = new WebSocketApprovalHandler(sink, sessionId);
+        if ("bypass".equalsIgnoreCase(permissionMode)) {
+            approvalHandler.setAutoApprove(true);
+            log.info("Session {} using bypass permission mode (auto-approve all tools)", sessionId);
+        }
         ToolProgressTracker progressTracker = new ToolProgressTracker();
         approvalHandler.setProgressTracker(progressTracker);
         progressTrackers.put(sessionId, progressTracker);
@@ -359,20 +366,10 @@ public class AgentService implements DisposableBean, InitializingBean {
                 agentPayload.setCheckpointHook(checkpointHook);
             }
 
-            if (swarmCoordinator != null && triageGate != null
-                    && teamManager != null && messageBus != null) {
-                io.kairo.api.model.ModelProvider narratorModel =
-                        CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
-                agentPayload.setEscalationConfig(new AgentSessionPayload.EscalationConfig(
-                        swarmCoordinator,
-                        io.kairo.api.team.TeamConfig.defaults(),
-                        triageGate,
-                        eventBus,
-                        teamManager,
-                        messageBus,
-                        config,
-                        narratorModel));
-            }
+            // Auto-escalation disabled: Agent mode stays in single-agent ReAct loop.
+            // Users must explicitly choose mode="experts" to get multi-agent fan-out.
+            // The HeuristicTriageGate is too broad (matches "fix", "debug", etc.),
+            // causing every code task to escalate — defeating the purpose of Agent mode.
             SessionPayload payload = agentPayload;
 
             SessionEntry entry = new SessionEntry(

@@ -43,6 +43,7 @@ public final class WebSocketApprovalHandler implements UserApprovalHandler {
     private final Sinks.Many<AgentEvent> eventSink;
     private final String sessionId;
     private volatile ToolProgressTracker progressTracker;
+    private volatile boolean autoApprove;
 
     public WebSocketApprovalHandler() {
         this(null, null);
@@ -58,6 +59,14 @@ public final class WebSocketApprovalHandler implements UserApprovalHandler {
         this.progressTracker = tracker;
     }
 
+    /**
+     * Enable auto-approve mode: every tool call is approved immediately without blocking.
+     * Used for headless/API sessions (permissionMode=bypass) where no human is present.
+     */
+    public void setAutoApprove(boolean autoApprove) {
+        this.autoApprove = autoApprove;
+    }
+
     /** Returns the set of toolCallIds WSAH has already announced; used by BridgeHook to dedupe. */
     public Set<String> announcedToolCallIds() {
         return announcedToolCallIds;
@@ -71,6 +80,13 @@ public final class WebSocketApprovalHandler implements UserApprovalHandler {
     @Override
     public Mono<ApprovalResult> requestApproval(ToolCallRequest request) {
         String toolCallId = generateToolCallId(request);
+
+        if (autoApprove) {
+            // BridgeHook already emits the TOOL_CALL event in POST_REASONING.
+            // Don't emit a duplicate here — just return immediately.
+            return Mono.just(ApprovalResult.allow());
+        }
+
         Sinks.One<ApprovalResult> sink = Sinks.one();
 
         pendingApprovals.put(toolCallId, sink);
@@ -78,14 +94,9 @@ public final class WebSocketApprovalHandler implements UserApprovalHandler {
 
         notifyPendingApproval(request, toolCallId);
         if (progressTracker != null) {
-            // Tool already registered as EXECUTING via the TOOL_CALL emit; flip to AWAITING so the
-            // heartbeat carries the right phase.
             progressTracker.setPhase(toolCallId, ToolProgressTracker.Phase.AWAITING_APPROVAL);
         }
 
-        // NOTE: do NOT clean up on CANCEL. The upstream Flux can cancel this Mono
-        // before the user has a chance to press y, which would orphan the request.
-        // resolveApproval() and cancelAll() are the only legitimate removers.
         return sink.asMono()
                 .doFinally(signal -> {
                     if (signal != SignalType.CANCEL) {
