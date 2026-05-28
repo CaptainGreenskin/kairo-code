@@ -568,6 +568,18 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     break;
                 }
 
+                case 'MODE_ESCALATED': {
+                    const payload = event.payload as { reason: string };
+                    addMessageTo(sid, {
+                        id: generateId(),
+                        role: 'assistant',
+                        content: payload.reason,
+                        toolCalls: [],
+                        timestamp: Date.now(),
+                    });
+                    break;
+                }
+
                 case 'PEER_MESSAGE': {
                     const payload = event.payload as {
                         fromSessionId: string; content: string; messageId: string;

@@ -5,8 +5,7 @@ import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.team.MessageBus;
 import io.kairo.code.core.team.SwarmCoordinator;
 import io.kairo.code.core.team.TeamManager;
-import io.kairo.code.service.agent.TeamSessionPayload;
-import io.kairo.code.service.agent.tools.NoNarrationTool;
+import io.kairo.code.service.agent.AgentSessionPayload;
 import io.kairo.code.service.team.TriageGate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -19,22 +18,10 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * M-Team / #60: tests for the {@code "team"} sessionMode arm of
- * {@link AgentService#createSession(CodeAgentConfig, String, boolean, String)}.
- *
- * <p>Verifies the two halves of the guard:
- * <ul>
- *   <li>When {@code teamManager} + {@code messageBus} are wired (mirrors prod DI),
- *       createSession succeeds and the entry's payload is {@link TeamSessionPayload}.</li>
- *   <li>When either primitive is missing, createSession throws
- *       {@link IllegalStateException} so misconfigured deploys fail loud.</li>
- * </ul>
- *
- * <p>Uses reflection to inject the {@code @Autowired(required=false)} fields without
- * standing up a full Spring context — the unit-test style used throughout this module.
+ * Unified-mode tests: verifies that all legacy session modes ("team", "experts")
+ * collapse to "agent" with optional auto-escalation config injection.
  */
 @Timeout(value = 10, unit = TimeUnit.SECONDS)
 class AgentServiceTeamModeTest {
@@ -44,93 +31,94 @@ class AgentServiceTeamModeTest {
             null, null, 0, 0, null);
 
     @Test
-    void createSession_teamMode_succeedsWhenWired() throws Exception {
+    void createSession_teamMode_normalizesToAgent() throws Exception {
         AgentService service = new AgentService();
         injectTeamPrimitives(service, new TeamManager(), new MessageBus());
 
         String sid = service.createSession(CONFIG, null, false, "team");
         try {
-            assertThat(sid).isNotBlank();
-
-            // listSessions surfaces the recorded mode — easiest cross-check.
-            assertThat(service.listSessions())
-                    .anyMatch(info -> info.sessionId().equals(sid));
-
-            // Drill into the private session map to confirm payload type — this is the
-            // only way to assert TeamSessionPayload was actually instantiated without
-            // exposing an internal accessor purely for tests.
             AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
             assertThat(entry).isNotNull();
-            assertThat(entry.sessionMode()).isEqualTo("team");
-            assertThat(entry.payload()).isInstanceOf(TeamSessionPayload.class);
+            assertThat(entry.sessionMode()).isEqualTo("agent");
+            assertThat(entry.payload()).isInstanceOf(AgentSessionPayload.class);
         } finally {
             service.destroySession(sid);
         }
     }
 
     @Test
-    void createSession_teamMode_failsWhenUnwired() {
-        AgentService service = new AgentService(); // teamManager/messageBus both null
-
-        assertThatThrownBy(() -> service.createSession(CONFIG, null, false, "team"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("team mode unavailable");
-    }
-
-    @Test
-    void createSession_teamMode_failsWhenOnlyTeamManagerWired() throws Exception {
+    void createSession_teamMode_succeedsEvenWhenUnwired() throws Exception {
         AgentService service = new AgentService();
-        injectTeamPrimitives(service, new TeamManager(), null);
 
-        // Half-wiring should fail the same way — guards the diagonal that you don't
-        // accidentally light up team mode just because one bean got registered.
-        assertThatThrownBy(() -> service.createSession(CONFIG, null, false, "team"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("team mode unavailable");
+        String sid = service.createSession(CONFIG, null, false, "team");
+        try {
+            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            assertThat(entry).isNotNull();
+            assertThat(entry.sessionMode()).isEqualTo("agent");
+            assertThat(entry.payload()).isInstanceOf(AgentSessionPayload.class);
+        } finally {
+            service.destroySession(sid);
+        }
     }
 
-    // ── #61 M-Experts-Upgrade: experts arm extensions ──────────────────────
-
     @Test
-    void createSession_expertsMode_succeedsWhenWired() throws Exception {
+    void createSession_expertsMode_normalizesToAgentWithEscalation() throws Exception {
         AgentService service = new AgentService();
         injectTeamPrimitives(service, new TeamManager(), new MessageBus());
         injectExpertsPrimitives(service, newStubSwarmCoordinator(), goal -> true);
 
-        String sid = service.createSession(expertsConfig(), null, false, "experts");
+        String sid = service.createSession(withWorkingDir(), null, false, "experts");
         try {
             AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
             assertThat(entry).isNotNull();
-            assertThat(entry.sessionMode()).isEqualTo("experts");
-            assertThat(entry.payload()).isInstanceOf(TeamSessionPayload.class);
-            TeamSessionPayload payload = (TeamSessionPayload) entry.payload();
-            // The preset must be wired — proves we took the experts arm, not the team arm.
-            assertThat(payload.preset()).isNotNull();
+            assertThat(entry.sessionMode()).isEqualTo("agent");
+            assertThat(entry.payload()).isInstanceOf(AgentSessionPayload.class);
+
+            AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
+            assertThat(escalationConfigOf(payload))
+                    .as("full primitives wired → escalation config must be injected")
+                    .isNotNull();
         } finally {
             service.destroySession(sid);
         }
     }
 
     @Test
-    void createSession_expertsMode_failsWhenSwarmCoordinatorMissing() throws Exception {
+    void createSession_expertsMode_noEscalationWhenSwarmCoordinatorMissing() throws Exception {
         AgentService service = new AgentService();
         injectTeamPrimitives(service, new TeamManager(), new MessageBus());
         injectExpertsPrimitives(service, null, goal -> true);
 
-        assertThatThrownBy(() -> service.createSession(expertsConfig(), null, false, "experts"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("experts mode unavailable");
+        String sid = service.createSession(withWorkingDir(), null, false, "experts");
+        try {
+            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            assertThat(entry).isNotNull();
+            AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
+            assertThat(escalationConfigOf(payload))
+                    .as("missing SwarmCoordinator → no escalation config")
+                    .isNull();
+        } finally {
+            service.destroySession(sid);
+        }
     }
 
     @Test
-    void createSession_expertsMode_failsWhenTriageGateMissing() throws Exception {
+    void createSession_expertsMode_noEscalationWhenTriageGateMissing() throws Exception {
         AgentService service = new AgentService();
         injectTeamPrimitives(service, new TeamManager(), new MessageBus());
         injectExpertsPrimitives(service, newStubSwarmCoordinator(), null);
 
-        assertThatThrownBy(() -> service.createSession(expertsConfig(), null, false, "experts"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("experts mode unavailable");
+        String sid = service.createSession(withWorkingDir(), null, false, "experts");
+        try {
+            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            assertThat(entry).isNotNull();
+            AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
+            assertThat(escalationConfigOf(payload))
+                    .as("missing TriageGate → no escalation config")
+                    .isNull();
+        } finally {
+            service.destroySession(sid);
+        }
     }
 
     @Test
@@ -139,51 +127,39 @@ class AgentServiceTeamModeTest {
         injectTeamPrimitives(service, new TeamManager(), new MessageBus());
         injectExpertsPrimitives(service, newStubSwarmCoordinator(), goal -> true);
 
-        String sid = service.createSession(expertsConfig(), null, false, "experts");
+        String sid = service.createSession(withWorkingDir(), null, false, "experts");
         try {
             AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
             assertThat(entry).isNotNull();
-            TeamSessionPayload payload = (TeamSessionPayload) entry.payload();
-            assertThat(payload.preset()).isNotNull();
-            assertThat(payload.preset().narratorModelProvider())
-                    .as("experts arm must wire a dedicated ModelProvider for narrator calls")
+            AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
+            AgentSessionPayload.EscalationConfig esc = escalationConfigOf(payload);
+            assertThat(esc).isNotNull();
+            assertThat(esc.narratorModelProvider())
+                    .as("escalation config must wire a dedicated ModelProvider for narrator calls")
                     .isNotNull();
-            // no_narration should NOT be in the session agent's tool registry (direct model call)
-            boolean hasNoNarration = payload.session().toolRegistry().getAll().stream()
-                    .anyMatch(t -> NoNarrationTool.NAME.equals(t.name()));
-            assertThat(hasNoNarration)
-                    .as("no_narration must not pollute the session agent's tool registry")
-                    .isFalse();
         } finally {
             service.destroySession(sid);
         }
     }
 
     @Test
-    void createSession_agentMode_doesNotRegisterNoNarrationTool() throws Exception {
-        // Mode-isolation regression: the no_narration tool must NOT leak into agent mode.
+    void createSession_agentMode_noEscalationWithoutPrimitives() throws Exception {
         AgentService service = new AgentService();
         String sid = service.createSession(CONFIG, null, false, "agent");
         try {
             AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
             assertThat(entry).isNotNull();
-            boolean hasNoNarration = entry.session().toolRegistry().getAll().stream()
-                    .anyMatch(t -> NoNarrationTool.NAME.equals(t.name()));
-            assertThat(hasNoNarration)
-                    .as("agent mode must not see the experts-only no_narration tool")
-                    .isFalse();
+            AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
+            assertThat(escalationConfigOf(payload))
+                    .as("agent mode without team primitives → no escalation config")
+                    .isNull();
         } finally {
             service.destroySession(sid);
         }
     }
 
-    /**
-     * Experts mode resolves {@code config.workingDir()} into a {@code Path} for the lesson
-     * store (see AgentService:323). Tests use a tmp dir to avoid NPE without polluting
-     * a real workspace.
-     */
-    private static CodeAgentConfig expertsConfig() throws Exception {
-        Path tmp = Files.createTempDirectory("kairo-experts-test-");
+    private static CodeAgentConfig withWorkingDir() throws Exception {
+        Path tmp = Files.createTempDirectory("kairo-unified-test-");
         tmp.toFile().deleteOnExit();
         return new CodeAgentConfig(
                 "test-key", "https://api.openai.com", "gpt-4o", 50,
@@ -214,6 +190,13 @@ class AgentServiceTeamModeTest {
                 null, planner, registry);
         return new SwarmCoordinator(
                 coord, registry, new io.kairo.expertteam.tck.NoopMessageBus(), List.<Agent>of());
+    }
+
+    private static AgentSessionPayload.EscalationConfig escalationConfigOf(
+            AgentSessionPayload payload) throws Exception {
+        Field f = AgentSessionPayload.class.getDeclaredField("escalationConfig");
+        f.setAccessible(true);
+        return (AgentSessionPayload.EscalationConfig) f.get(payload);
     }
 
     private static void setField(Object target, String name, Object value) throws Exception {

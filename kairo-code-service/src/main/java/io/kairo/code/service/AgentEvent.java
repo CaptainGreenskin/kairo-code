@@ -46,6 +46,8 @@ public record AgentEvent(
         CLEAR_EXECUTION_MESSAGES,
         /** Emitted when expert-team triage demotes the request to single-agent ReAct. */
         MODE_DEMOTED,
+        /** Emitted when a single-agent session auto-escalates to expert-team coordination. */
+        MODE_ESCALATED,
         /**
          * Emitted by {@code TeamSessionPayload} when a peer agent in the same team has sent
          * this session a message via {@code MessageBus}. {@code content} carries the body and
@@ -217,6 +219,12 @@ public record AgentEvent(
      */
     public static AgentEvent modeDemoted(String sessionId, String reason) {
         return new AgentEvent(EventType.MODE_DEMOTED, sessionId, reason, null, null,
+                false, null, null, null, null, null, null, null,
+                System.currentTimeMillis());
+    }
+
+    public static AgentEvent modeEscalated(String sessionId, String reason) {
+        return new AgentEvent(EventType.MODE_ESCALATED, sessionId, reason, null, null,
                 false, null, null, null, null, null, null, null,
                 System.currentTimeMillis());
     }

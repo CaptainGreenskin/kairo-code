@@ -1,15 +1,22 @@
 package io.kairo.code.service.agent;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.api.event.KairoEventBus;
 import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.api.model.ModelProvider;
+import io.kairo.api.team.TeamConfig;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
+import io.kairo.code.core.team.MessageBus;
+import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.SessionPhase;
 import io.kairo.code.service.concurrency.AgentConcurrencyException;
 import io.kairo.code.service.concurrency.AgentSlot;
+import io.kairo.code.service.team.TriageGate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
@@ -18,8 +25,9 @@ import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.Base64;
-import java.util.Deque;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -46,10 +54,24 @@ public final class AgentSessionPayload implements SessionPayload {
     /** Maximum pending refinement messages per session. */
     private static final int MAX_REFINEMENT_QUEUE_SIZE = 5;
 
+    private static final Set<String> CODE_KEYWORDS = Set.of(
+            "refactor", "implement", "test", "fix", "review", "debug",
+            "build", "deploy", "api", "database", "migration", "endpoint",
+            "compile", "lint", "code", "function", "class", "module",
+            "commit", "merge", "branch", "ci", "cd", "pipeline",
+            "重构", "实现", "测试", "修复", "审查", "调试",
+            "编译", "部署", "接口", "数据库", "代码", "模块",
+            "函数", "构建", "优化", "迁移", "架构"
+    );
+
     private final CodeAgentConfig config;
     private final CodeAgentSession session;
     private volatile Agent agent;
     private final AgentRuntimeContext ctx;
+
+    // ── Auto-escalation to expert team ──────────────────────────────────────────
+    private volatile EscalationConfig escalationConfig;
+    private volatile TeamSessionPayload escalatedDelegate;
 
     // ── Payload-owned state ──────────────────────────────────────────────────────
     private final ReentrantLock refineLock = new ReentrantLock();
@@ -66,6 +88,30 @@ public final class AgentSessionPayload implements SessionPayload {
         this.agent = session.agent();
         this.ctx = Objects.requireNonNull(ctx, "ctx");
     }
+
+    /**
+     * Inject escalation configuration so this payload can auto-upgrade to expert team
+     * coordination when the task warrants it. Called by {@code AgentService} after construction.
+     */
+    public void setEscalationConfig(EscalationConfig cfg) {
+        this.escalationConfig = cfg;
+    }
+
+    /**
+     * Collaborators needed to construct a {@link TeamSessionPayload} with an Experts preset
+     * on the fly. All fields are required; the record is constructed once by
+     * {@code AgentService.createSession()} and injected via {@link #setEscalationConfig}.
+     */
+    public record EscalationConfig(
+            SwarmCoordinator coordinator,
+            TeamConfig teamConfig,
+            TriageGate triageGate,
+            KairoEventBus eventBus,
+            TeamManager teamManager,
+            MessageBus messageBus,
+            CodeAgentConfig agentConfig,
+            ModelProvider narratorModelProvider
+    ) {}
 
     // ── SessionPayload contract ──────────────────────────────────────────────────
 
@@ -85,9 +131,22 @@ public final class AgentSessionPayload implements SessionPayload {
      */
     @Override
     public Flux<AgentEvent> handleMessage(MessageRequest request) {
+        // ── Delegate to escalated expert team if already upgraded ──
+        if (escalatedDelegate != null) {
+            return escalatedDelegate.handleMessage(request);
+        }
+
         String sessionId = ctx.sessionId();
         AtomicReference<SessionPhase> phaseRef = ctx.phaseRef();
         SessionPhase phase = phaseRef.get();
+
+        // ── Auto-escalate to expert team for complex code tasks ──
+        if (escalationConfig != null
+                && (phase == SessionPhase.IDLE || phase == SessionPhase.COMPLETED)
+                && escalationConfig.triageGate().shouldFanOut(request.text())
+                && isCodeRelated(request.text())) {
+            return escalate(request);
+        }
 
         // ── FAILED_EXECUTION: reject until revert ──
         if (phase == SessionPhase.FAILED_EXECUTION) {
@@ -187,24 +246,41 @@ public final class AgentSessionPayload implements SessionPayload {
 
     @Override
     public void stop() {
+        if (escalatedDelegate != null) {
+            escalatedDelegate.stop();
+            return;
+        }
         Disposable d = currentRun.getAndSet(null);
         if (d != null && !d.isDisposed()) {
             d.dispose();
         }
         ctx.runningState().set(false);
         refineQueue.clear();
-        // Also interrupt the underlying agent for cooperative cancellation
         session.agent().interrupt();
     }
 
     @Override
     public boolean isRunning() {
+        if (escalatedDelegate != null) {
+            return escalatedDelegate.isRunning();
+        }
         return ctx.runningState().get();
     }
 
     @Override
     public SessionPhase getState() {
+        if (escalatedDelegate != null) {
+            return escalatedDelegate.getState();
+        }
         return ctx.phaseRef().get();
+    }
+
+    @Override
+    public Flux<AgentEvent> confirmBuild() {
+        if (escalatedDelegate != null) {
+            return escalatedDelegate.confirmBuild();
+        }
+        return Flux.empty();
     }
 
     // ── Agent rebuild support ────────────────────────────────────────────────────
@@ -334,6 +410,54 @@ public final class AgentSessionPayload implements SessionPayload {
     /** The underlying session (agent + tool runtime state). */
     public CodeAgentSession session() {
         return session;
+    }
+
+    // ── Auto-escalation ───────────────────────────────────────────────────────
+
+    /**
+     * Construct an {@link TeamSessionPayload} with the Experts preset on the fly and delegate
+     * the current message to it. This is a one-way transition: once escalated, all subsequent
+     * messages go through the delegate.
+     */
+    private Flux<AgentEvent> escalate(MessageRequest request) {
+        String sessionId = ctx.sessionId();
+        log.info("Auto-escalating session {} to expert team", sessionId);
+
+        Sinks.Many<AgentEvent> sink = ctx.sharedSink();
+        sink.tryEmitNext(AgentEvent.modeEscalated(sessionId,
+                "Task escalated to expert team for collaborative execution"));
+
+        TeamSessionPayload.ExpertsPresetConfig presetCfg =
+                new TeamSessionPayload.ExpertsPresetConfig(
+                        escalationConfig.coordinator(),
+                        escalationConfig.teamConfig(),
+                        escalationConfig.triageGate(),
+                        this,
+                        TeamSessionPayload.NarratorSettings.defaults(),
+                        escalationConfig.eventBus(),
+                        escalationConfig.narratorModelProvider());
+
+        this.escalatedDelegate = new TeamSessionPayload(
+                config, session, ctx,
+                escalationConfig.teamManager(),
+                escalationConfig.messageBus(),
+                presetCfg);
+
+        return escalatedDelegate.handleMessage(request);
+    }
+
+    private boolean isCodeRelated(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        for (String kw : CODE_KEYWORDS) {
+            if (lower.contains(kw)) return true;
+        }
+        return false;
+    }
+
+    /** @return the escalated delegate, or {@code null} if still in single-agent mode. */
+    public TeamSessionPayload escalatedDelegate() {
+        return escalatedDelegate;
     }
 
     /**

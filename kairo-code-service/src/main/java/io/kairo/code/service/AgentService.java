@@ -225,15 +225,16 @@ public class AgentService implements DisposableBean, InitializingBean {
      * @param config       agent config (its {@code workingDir} is the workspace dir)
      * @param workspaceId  owning workspace id (may be null for legacy tests)
      * @param useWorktree  whether to provision a per-session git worktree
-     * @param sessionMode  "agent" for single-agent, "experts" for expert-team
+     * @param sessionMode  ignored (unified mode); kept for backward compat
      * @return the new session ID
      */
     public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
                                 String sessionMode) {
-        // v2.3 mode normalization: "chat" → "agent"
-        String normalizedMode = (sessionMode == null || sessionMode.isBlank()) ? "agent" : sessionMode;
-        if ("chat".equals(normalizedMode)) {
-            normalizedMode = "agent";
+        // Unified mode: all legacy modes collapse to "agent" (auto-escalation handles the rest)
+        String normalizedMode = "agent";
+        if (sessionMode != null && !sessionMode.isBlank()
+                && !"agent".equals(sessionMode) && !"chat".equals(sessionMode)) {
+            log.info("Legacy mode '{}' normalized to 'agent' (unified mode)", sessionMode);
         }
 
         // Enforce the LRU cap BEFORE we allocate a new sessionId — bursty
@@ -291,9 +292,7 @@ public class AgentService implements DisposableBean, InitializingBean {
         sessionPhases.put(sessionId, phaseRef);
 
         String finalWorkingDir = config.workingDir();
-        Consumer<SessionPhase> persistPhaseFn = "experts".equals(normalizedMode)
-                ? p -> persistPhase(finalWorkingDir, p)
-                : p -> {};
+        Consumer<SessionPhase> persistPhaseFn = p -> persistPhase(finalWorkingDir, p);
 
         AgentRuntimeContext ctx = new AgentRuntimeContext(
                 sessionId, sink, running, phaseRef, persistPhaseFn, concurrencyController);
@@ -318,7 +317,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             hooks.add(bridgeHook);
             hooks.add(compactionHook);
             hooks.add(planHook);
-            if ("experts".equals(normalizedMode)) {
+            if (finalWorkingDir != null) {
                 final CodeAgentConfig effectiveCfg = config;
                 final Path kairoDir = Path.of(finalWorkingDir, ".kairo-code");
                 final LearnedLessonStore lessonStore = LearnedLessonStore.fromKairoDir(kairoDir);
@@ -334,11 +333,6 @@ public class AgentService implements DisposableBean, InitializingBean {
                     .asReplSession()
                     .withApprovalHandler(approvalHandler)
                     .withHooks(hooks);
-            // SwarmCoordinator is intentionally NOT wired into Agent-mode sessions.
-            // Experts mode (TeamSessionPayload + ExpertsPresetConfig, post M-Experts-Upgrade)
-            // uses it out-of-band as a session-level orchestrator; exposing it as a model-facing
-            // tool in Agent mode would smuggle a multi-minute batch workflow into a tool-result
-            // loop. See kairo-code/docs/adr/ADR-001-mode-architecture.md.
             if (tracer != null) {
                 // Wrap so every span carries session.id + langfuse.session.id +
                 // langfuse.user.id. Without this Langfuse can't group multi-turn
@@ -348,59 +342,26 @@ public class AgentService implements DisposableBean, InitializingBean {
                         new io.kairo.code.core.observability.SessionAwareTracer(
                                 tracer, sessionId, workspaceId));
             }
-            // M-Team (#60): plumb team primitives into the agent's tool registry only
-            // when this is a team-mode session. Agent / Experts modes deliberately do
-            // not expose team_create / send_message / team_delete — those are the
-            // primitives that distinguish Team mode per ADR-001.
-            if ("team".equals(normalizedMode) && teamManager != null && messageBus != null) {
-                opts = opts.withTeamPrimitives(teamManager, messageBus);
-            }
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts);
 
-            // ── Payload creation via switch expression ───────────────────────────────
-            SessionPayload payload = switch (normalizedMode) {
-                case "experts" -> {
-                    if (swarmCoordinator == null || triageGate == null) {
-                        throw new IllegalStateException(
-                                "experts mode unavailable: SwarmCoordinator not configured");
-                    }
-                    if (teamManager == null || messageBus == null) {
-                        throw new IllegalStateException(
-                                "experts mode unavailable: team primitives missing");
-                    }
-                    // Narrator uses a direct ModelProvider.call() with only the no_narration
-                    // tool definition — no registration into the session's tool registry needed.
-                    // This prevents the session agent from accidentally executing tools during
-                    // narrator calls.
-                    TeamSessionPayload.NarratorSettings narratorSettings =
-                            TeamSessionPayload.NarratorSettings.defaults();
-                    AgentSessionPayload fb = new AgentSessionPayload(config, session, ctx);
-                    io.kairo.api.model.ModelProvider narratorModel = narratorSettings.enabled()
-                            ? CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl())
-                            : null;
-                    TeamSessionPayload.ExpertsPresetConfig presetCfg =
-                            new TeamSessionPayload.ExpertsPresetConfig(
-                                    swarmCoordinator,
-                                    io.kairo.api.team.TeamConfig.defaults(),
-                                    triageGate,
-                                    fb,
-                                    narratorSettings,
-                                    eventBus,
-                                    narratorModel);
-                    yield new TeamSessionPayload(config, session, ctx,
-                            teamManager, messageBus, presetCfg);
-                }
-                case "team" -> {
-                    if (teamManager == null || messageBus == null) {
-                        throw new IllegalStateException(
-                                "team mode unavailable: TeamManager/MessageBus not configured");
-                    }
-                    yield new TeamSessionPayload(config, session, ctx, teamManager, messageBus);
-                }
-                case "agent" -> new AgentSessionPayload(config, session, ctx);
-                default -> throw new IllegalArgumentException(
-                        "Unknown sessionMode: " + normalizedMode);
-            };
+            // ── Unified payload: always AgentSessionPayload + optional escalation ──
+            AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
+
+            if (swarmCoordinator != null && triageGate != null
+                    && teamManager != null && messageBus != null) {
+                io.kairo.api.model.ModelProvider narratorModel =
+                        CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+                agentPayload.setEscalationConfig(new AgentSessionPayload.EscalationConfig(
+                        swarmCoordinator,
+                        io.kairo.api.team.TeamConfig.defaults(),
+                        triageGate,
+                        eventBus,
+                        teamManager,
+                        messageBus,
+                        config,
+                        narratorModel));
+            }
+            SessionPayload payload = agentPayload;
 
             SessionEntry entry = new SessionEntry(
                     sessionId, workspaceId, normalizedMode, payload,
@@ -1058,66 +1019,35 @@ public class AgentService implements DisposableBean, InitializingBean {
                 .asReplSession()
                 .withApprovalHandler(approvalHandler)
                 .withHooks(List.of(bridgeHook, compactionHook, planHook));
-        // SwarmCoordinator intentionally NOT wired in Agent mode — see createSession
-        // path comment and ADR-001-mode-architecture.md.
         if (tracer != null) {
             // Same session-id stamping as createSession — see Langfuse rationale there.
             opts = opts.withTracer(
                     new io.kairo.code.core.observability.SessionAwareTracer(
                             tracer, sid, entry.workspaceId()));
         }
-        // M-Team (#60): mirror the createSession wiring — team-mode rebuilds need the
-        // team tools too, otherwise the model loses team_create / send_message after
-        // credential refresh.
-        if ("team".equals(entry.sessionMode()) && teamManager != null && messageBus != null) {
-            opts = opts.withTeamPrimitives(teamManager, messageBus);
-        }
 
         try {
             CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts);
-            Consumer<SessionPhase> persistPhaseFn = "experts".equals(entry.sessionMode())
-                    ? p -> persistPhase(rebuilt.workingDir(), p)
-                    : p -> {};
+            Consumer<SessionPhase> persistPhaseFn = p -> persistPhase(rebuilt.workingDir(), p);
             AgentRuntimeContext newCtx = new AgentRuntimeContext(
                     sid, sink, running != null ? running : new AtomicBoolean(false),
                     phaseRef != null ? phaseRef : new AtomicReference<>(SessionPhase.IDLE),
                     persistPhaseFn, concurrencyController);
     
-            // Pattern-match on sealed payload type. Experts is a TeamSessionPayload preset
-            // post M-Experts-Upgrade — preserve the preset config across rebuild so the
-            // narrator + swarm bridge survive credential refresh.
-            SessionPayload newPayload;
-            if (entry.payload() instanceof TeamSessionPayload t) {
-                if (teamManager == null || messageBus == null) {
-                    log.warn("Cannot rebuild team-mode session {}: team primitives missing",
-                            entry.sessionId());
-                    return entry;
-                }
-                TeamSessionPayload.ExpertsPresetConfig existingPreset = t.preset();
-                if (existingPreset != null) {
-                    // Experts preset: rebuild the fallback AgentSessionPayload around the
-                    // fresh session, but reuse the other preset collaborators (coordinator,
-                    // triage, narrator settings, eventBus) — they're stateless w.r.t. the
-                    // CodeAgentSession.
-                    AgentSessionPayload newFallback = new AgentSessionPayload(
-                            rebuilt, newSession, newCtx);
-                    TeamSessionPayload.ExpertsPresetConfig rebuiltPreset =
-                            new TeamSessionPayload.ExpertsPresetConfig(
-                                    existingPreset.coordinator(),
-                                    existingPreset.teamConfig(),
-                                    existingPreset.triageGate(),
-                                    newFallback,
-                                    existingPreset.narrator(),
-                                    existingPreset.eventBus(),
-                                    existingPreset.narratorModelProvider());
-                    newPayload = new TeamSessionPayload(rebuilt, newSession, newCtx,
-                            teamManager, messageBus, rebuiltPreset);
-                } else {
-                    newPayload = new TeamSessionPayload(rebuilt, newSession, newCtx,
-                            teamManager, messageBus);
-                }
-            } else {
-                newPayload = new AgentSessionPayload(rebuilt, newSession, newCtx);
+            AgentSessionPayload newPayload = new AgentSessionPayload(rebuilt, newSession, newCtx);
+            if (swarmCoordinator != null && triageGate != null
+                    && teamManager != null && messageBus != null) {
+                io.kairo.api.model.ModelProvider narratorModel =
+                        CodeAgentFactory.buildModelProvider(rebuilt.apiKey(), rebuilt.baseUrl());
+                newPayload.setEscalationConfig(new AgentSessionPayload.EscalationConfig(
+                        swarmCoordinator,
+                        io.kairo.api.team.TeamConfig.defaults(),
+                        triageGate,
+                        eventBus,
+                        teamManager,
+                        messageBus,
+                        rebuilt,
+                        narratorModel));
             }
     
             SessionEntry newEntry = new SessionEntry(
@@ -1602,10 +1532,9 @@ public class AgentService implements DisposableBean, InitializingBean {
     /**
      * Holds a session and its associated state.
      *
-     * <p>The polymorphic {@link SessionPayload} encapsulates either a single-agent
-     * ({@link AgentSessionPayload}) or expert-team execution context.
-     * {@code sessionMode} is {@code "agent"} for single-agent, {@code "experts"}
-     * for expert-team mode.
+     * <p>Unified mode: {@code sessionMode} is always {@code "agent"}.
+     * Auto-escalation to expert team is handled internally by
+     * {@link AgentSessionPayload} when escalation criteria are met.
      */
     public record SessionEntry(
             String sessionId,

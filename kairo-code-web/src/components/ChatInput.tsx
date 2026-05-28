@@ -3,7 +3,6 @@ import { Send, Square, Paperclip, X, ClipboardList, Plus } from 'lucide-react';
 import { FilePicker } from './FilePicker';
 import { AutocompleteDropdown } from './AutocompleteDropdown';
 import { ApprovalModeToggle } from './ApprovalModeToggle';
-import { SessionModeToggle } from './SessionModeToggle';
 import { ModelSelector } from './ModelSelector';
 import { PlanModeBadge } from './PlanModeBadge';
 import { ContextHealthIndicator } from './ContextHealthIndicator';
@@ -664,7 +663,6 @@ export function ChatInput({
                     Right: attach + send. Dropdowns drop UP since input sits at viewport bottom. */}
                 <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-0">
                     <div className="flex items-center gap-1 min-w-0">
-                        <SessionModeToggle dropUp />
                         <ApprovalModeToggle dropUp />
                         {models.length > 0 && onModelChange && (
                             <ModelSelector

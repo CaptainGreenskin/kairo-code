@@ -133,6 +133,11 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 type: 'MODE_DEMOTED', sessionId, timestamp: ts,
                 payload: { reason: (raw.content as string) ?? '' },
             };
+        case 'MODE_ESCALATED':
+            return {
+                type: 'MODE_ESCALATED', sessionId, timestamp: ts,
+                payload: { reason: (raw.content as string) ?? '' },
+            };
         case 'PEER_MESSAGE': {
             // M-Team / #60: peer-to-peer message relayed via the in-process MessageBus.
             // Backend stamps fromSessionId + messageId on resultMetadata (Map<String,Object>).
@@ -438,7 +443,7 @@ export function useAgentWebSocket(
                                 reject(new Error('[ws] createSession timeout'));
                             }
                         }, 10_000);
-                        const mode = useSessionModeStore.getState().getMode(workspaceId);
+                        const mode = 'agent';
                         createPendingRef.current = { resolve, reject, timer, mode };
                         send({ action: 'create', workspaceId, mode });
                     } else if (attemptsLeft > 0) {

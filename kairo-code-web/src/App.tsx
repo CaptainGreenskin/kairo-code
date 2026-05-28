@@ -187,16 +187,7 @@ function App() {
     const chatSessionsWidth = useLayoutStore((s) => s.chatSessionsWidth);
     const setChatSessionsWidthStore = useLayoutStore((s) => s.setChatSessionsWidth);
     const openFileInEditor = useOpenFilesStore((s) => s.openFile);
-    // M-Experts-Upgrade / #69: the always-on Canvas pane reads the active session's
-    // mode and shows itself only when mode === 'experts'. Resolved the same way
-    // SessionModeToggle does (session mode first, workspace default as fallback).
-    const sessionModesMap = useSessionModeStore((s) => s.sessionModes);
-    const getWorkspaceMode = useSessionModeStore((s) => s.getMode);
-    const activeMode: 'agent' | 'experts' | 'team' = sessionId
-        ? (sessionModesMap[sessionId] ?? (currentWorkspaceId ? getWorkspaceMode(currentWorkspaceId) : 'agent'))
-        : (currentWorkspaceId ? getWorkspaceMode(currentWorkspaceId) : 'agent');
     const canvasTeamId = useExpertTeamStore((s) => s.canvasTeamId);
-    const setCanvasTeamId = useExpertTeamStore((s) => s.setCanvasTeamId);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -355,13 +346,6 @@ function App() {
         }
     }, [canvasTeamId, isConnected, teamSubscribe]);
 
-    // Reset canvasTeamId when the user switches to a non-experts session — keeps the
-    // Canvas from showing a stale team after toggling modes / sessions.
-    useEffect(() => {
-        if (activeMode !== 'experts' && canvasTeamId !== null) {
-            setCanvasTeamId(null);
-        }
-    }, [activeMode, canvasTeamId, setCanvasTeamId]);
 
     useEffect(() => {
         approveToolRef.current = approveTool;
@@ -1602,7 +1586,7 @@ ${content}
                                                     const buildIsGit = useBuildPhaseStore((s) => s.isGit);
                                                     return (
                                                         <div className="px-4">
-                                                            {buildPhase === 'PLAN_PENDING' && sessionId && activeMode !== 'experts' && (
+                                                            {buildPhase === 'PLAN_PENDING' && sessionId && !canvasTeamId && (
                                                                 <ConfirmBuildChip
                                                                     sessionId={sessionId}
                                                                     isVisible={true}
@@ -1714,7 +1698,7 @@ ${content}
                     </>
                 )}
 
-                {!isMobile && activeMode === 'experts' && (
+                {!isMobile && canvasTeamId !== null && (
                     <aside
                         className="relative flex flex-col h-full min-w-0"
                         style={{ flex: '0 1 380px', minWidth: 36 }}

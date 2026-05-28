@@ -16,6 +16,7 @@ export type AgentEventType =
     | 'PLAN_READY'
     | 'REVERTED'
     | 'MODE_DEMOTED'
+    | 'MODE_ESCALATED'
     | 'PEER_MESSAGE';
 
 /**
@@ -51,6 +52,7 @@ export type AgentEventPayload =
     | PlanReadyPayload
     | RevertedPayload
     | ModeDemotedPayload
+    | ModeEscalatedPayload
     | PeerMessagePayload;
 
 export interface TextChunkPayload {
@@ -250,6 +252,10 @@ export interface RevertedPayload {
  * render this as an info banner (not an error).
  */
 export interface ModeDemotedPayload {
+    reason: string;
+}
+
+export interface ModeEscalatedPayload {
     reason: string;
 }
 
