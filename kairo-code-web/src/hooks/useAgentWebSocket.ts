@@ -138,6 +138,11 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 type: 'MODE_ESCALATED', sessionId, timestamp: ts,
                 payload: { reason: (raw.content as string) ?? '' },
             };
+        case 'SESSION_RESUMED':
+            return {
+                type: 'SESSION_RESUMED', sessionId, timestamp: ts,
+                payload: { reason: (raw.content as string) ?? '' },
+            };
         case 'PEER_MESSAGE': {
             // M-Team / #60: peer-to-peer message relayed via the in-process MessageBus.
             // Backend stamps fromSessionId + messageId on resultMetadata (Map<String,Object>).

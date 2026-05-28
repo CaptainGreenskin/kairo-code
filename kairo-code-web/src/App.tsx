@@ -1599,7 +1599,7 @@ ${content}
                                                                 />
                                                             )}
                                                             {(buildPhase === 'FAILED_EXECUTION' || buildPhase === 'COMPLETED') && sessionId && (
-                                                                <div className="mt-2 mb-2">
+                                                                <div className="mt-2 mb-2 flex gap-2">
                                                                     <RevertButton
                                                                         sessionId={sessionId}
                                                                         isGit={buildIsGit}
@@ -1610,6 +1610,16 @@ ${content}
                                                                             }
                                                                         }}
                                                                     />
+                                                                    {buildPhase === 'FAILED_EXECUTION' && (
+                                                                        <button
+                                                                            className="px-3 py-1.5 text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                                                                            onClick={() => {
+                                                                                send({ action: 'resume', sessionId });
+                                                                            }}
+                                                                        >
+                                                                            Resume
+                                                                        </button>
+                                                                    )}
                                                                 </div>
                                                             )}
                                                             {isRunning && (

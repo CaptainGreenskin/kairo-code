@@ -580,6 +580,19 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     break;
                 }
 
+                case 'SESSION_RESUMED': {
+                    useBuildPhaseStore.getState().setPhase('idle');
+                    setRunningFor(sid, false);
+                    addMessageTo(sid, {
+                        id: generateId(),
+                        role: 'assistant',
+                        content: 'Session resumed — you can continue from where you left off.',
+                        toolCalls: [],
+                        timestamp: Date.now(),
+                    });
+                    break;
+                }
+
                 case 'PEER_MESSAGE': {
                     const payload = event.payload as {
                         fromSessionId: string; content: string; messageId: string;

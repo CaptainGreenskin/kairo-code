@@ -9,6 +9,7 @@ import io.kairo.api.model.ModelProvider;
 import io.kairo.api.team.TeamConfig;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
+import io.kairo.code.core.hook.CheckpointWriterHook;
 import io.kairo.code.core.team.MessageBus;
 import io.kairo.code.core.team.SwarmCoordinator;
 import io.kairo.code.core.team.TeamManager;
@@ -73,6 +74,9 @@ public final class AgentSessionPayload implements SessionPayload {
     private volatile EscalationConfig escalationConfig;
     private volatile TeamSessionPayload escalatedDelegate;
 
+    // ── Checkpoint persistence for web sessions ─────────────────────────────────
+    private volatile CheckpointWriterHook checkpointHook;
+
     // ── Payload-owned state ──────────────────────────────────────────────────────
     private final ReentrantLock refineLock = new ReentrantLock();
     private final ConcurrentLinkedDeque<Msg> refineQueue = new ConcurrentLinkedDeque<>();
@@ -95,6 +99,10 @@ public final class AgentSessionPayload implements SessionPayload {
      */
     public void setEscalationConfig(EscalationConfig cfg) {
         this.escalationConfig = cfg;
+    }
+
+    public void setCheckpointHook(CheckpointWriterHook hook) {
+        this.checkpointHook = hook;
     }
 
     /**
@@ -207,6 +215,11 @@ public final class AgentSessionPayload implements SessionPayload {
         };
 
         long startedAtMs = System.currentTimeMillis();
+
+        // Record user message in checkpoint for resume support
+        if (checkpointHook != null) {
+            checkpointHook.recordUserMessage(userMsg);
+        }
 
         // Subscribe to agent.call() — terminal events (DONE/ERROR) are emitted by
         // AgentEventBridgeHook.onSessionEnd(), not here.

@@ -53,7 +53,9 @@ public record AgentEvent(
          * this session a message via {@code MessageBus}. {@code content} carries the body and
          * {@code resultMetadata} carries {@code fromSessionId} and {@code messageId}.
          */
-        PEER_MESSAGE
+        PEER_MESSAGE,
+        /** Emitted when a stopped session is resumed (phase reset from FAILED_* to IDLE). */
+        SESSION_RESUMED
     }
 
     public static AgentEvent thinking(String sessionId) {
@@ -225,6 +227,13 @@ public record AgentEvent(
 
     public static AgentEvent modeEscalated(String sessionId, String reason) {
         return new AgentEvent(EventType.MODE_ESCALATED, sessionId, reason, null, null,
+                false, null, null, null, null, null, null, null,
+                System.currentTimeMillis());
+    }
+
+    public static AgentEvent sessionResumed(String sessionId) {
+        return new AgentEvent(EventType.SESSION_RESUMED, sessionId,
+                "Session resumed from interrupted state", null, null,
                 false, null, null, null, null, null, null, null,
                 System.currentTimeMillis());
     }

@@ -17,7 +17,8 @@ export type AgentEventType =
     | 'REVERTED'
     | 'MODE_DEMOTED'
     | 'MODE_ESCALATED'
-    | 'PEER_MESSAGE';
+    | 'PEER_MESSAGE'
+    | 'SESSION_RESUMED';
 
 /**
  * Mirrors {@code io.kairo.api.tool.FailureReason}. Carried on TOOL_RESULT payloads under

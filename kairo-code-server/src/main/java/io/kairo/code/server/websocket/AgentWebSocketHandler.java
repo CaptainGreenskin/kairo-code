@@ -100,6 +100,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                 case "confirmBuild" -> handleConfirmBuild(session, root);
                 case "stop"         -> handleStop(session, root);
                 case "revert"       -> handleRevert(session, root);
+                case "resume"       -> handleResume(session, root);
                 case "subscribeTeam"   -> handleSubscribeTeam(session, root);
                 case "unsubscribeTeam" -> handleUnsubscribeTeam(session, root);
                 case "rejectStep"      -> handleRejectStep(session, root);
@@ -271,6 +272,21 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
             log.info("Revert completed for session {}", sid);
         } else {
             sendErr(session, "revert", "Revert failed or not allowed in current session state");
+        }
+    }
+
+    private void handleResume(WebSocketSession session, JsonNode body) {
+        String sid = text(body, "sessionId");
+        if (sid == null) {
+            sendErr(session, "resume", "missing sessionId");
+            return;
+        }
+        boolean success = agentService.resumeSession(sid);
+        if (success) {
+            sendAck(session, "resume");
+            log.info("Session {} resumed", sid);
+        } else {
+            sendErr(session, "resume", "Resume failed or session not in interrupted state");
         }
     }
 

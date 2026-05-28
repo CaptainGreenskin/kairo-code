@@ -94,6 +94,16 @@ public final class CheckpointWriterHook {
         }
     }
 
+    /**
+     * Record a user message into the checkpoint. Called by web session payloads
+     * before {@code agent.call()} so the user turn is captured in the checkpoint.
+     */
+    public void recordUserMessage(Msg userMsg) {
+        if (workingDir == null || userMsg == null) return;
+        messages.add(userMsg);
+        writeCheckpoint();
+    }
+
     @HookHandler(HookPhase.POST_REASONING)
     public HookResult<PostReasoningEvent> onPostReasoning(PostReasoningEvent event) {
         if (workingDir == null) {

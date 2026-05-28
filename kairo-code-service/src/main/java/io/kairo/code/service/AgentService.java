@@ -9,6 +9,7 @@ import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.stats.ToolUsageTracker;
+import io.kairo.code.core.hook.CheckpointWriterHook;
 import io.kairo.code.core.hook.ContextCompactionHook;
 import io.kairo.code.service.agent.AgentRuntimeContext;
 import io.kairo.code.service.agent.AgentSessionPayload;
@@ -329,6 +330,14 @@ public class AgentService implements DisposableBean, InitializingBean {
                 });
                 hooks.add(failureTracker);
             }
+            CheckpointWriterHook checkpointHook = null;
+            if (finalWorkingDir != null) {
+                checkpointHook = new CheckpointWriterHook(
+                        Path.of(finalWorkingDir),
+                        new com.fasterxml.jackson.databind.ObjectMapper(),
+                        null);
+                hooks.add(checkpointHook);
+            }
             SessionOptions opts = SessionOptions.empty()
                     .asReplSession()
                     .withApprovalHandler(approvalHandler)
@@ -346,6 +355,9 @@ public class AgentService implements DisposableBean, InitializingBean {
 
             // ── Unified payload: always AgentSessionPayload + optional escalation ──
             AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
+            if (checkpointHook != null) {
+                agentPayload.setCheckpointHook(checkpointHook);
+            }
 
             if (swarmCoordinator != null && triageGate != null
                     && teamManager != null && messageBus != null) {
@@ -580,6 +592,46 @@ public class AgentService implements DisposableBean, InitializingBean {
         } catch (Exception e) {
             log.warn("Error stopping session {}", sessionId, e);
         }
+    }
+
+    /**
+     * Resume a session that was interrupted (FAILED_EXECUTION or FAILED_PLANNING).
+     * Resets the phase to IDLE so the next {@code handleMessage()} proceeds normally.
+     * The agent object is still alive with its full conversation history — the user
+     * can send "Continue from where you left off" and the LLM picks up context.
+     */
+    public boolean resumeSession(String sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) {
+            log.warn("resumeSession: session {} not found", sessionId);
+            return false;
+        }
+
+        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
+        if (phaseRef == null) {
+            log.warn("resumeSession: no phase tracking for session {}", sessionId);
+            return false;
+        }
+
+        SessionPhase current = phaseRef.get();
+        if (current != SessionPhase.FAILED_EXECUTION && current != SessionPhase.FAILED_PLANNING) {
+            log.info("resumeSession: session {} phase is {} — nothing to resume", sessionId, current);
+            return false;
+        }
+
+        phaseRef.set(SessionPhase.IDLE);
+        CodeAgentConfig cfg = entry.configOrNull();
+        if (cfg != null) {
+            persistPhase(cfg.workingDir(), SessionPhase.IDLE);
+        }
+
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        if (sink != null) {
+            sink.tryEmitNext(AgentEvent.sessionResumed(sessionId));
+        }
+
+        log.info("Session {} resumed from {}", sessionId, current);
+        return true;
     }
 
     // ── Revert mechanism ─────────────────────────────────────────────────────────
