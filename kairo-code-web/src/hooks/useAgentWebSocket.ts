@@ -3,6 +3,7 @@ import type { AgentEvent, ConnectionStatus, PlanReadyPayload } from '@/types/age
 import { useSessionStore } from '@store/sessionStore';
 import { useSessionModeStore } from '@store/sessionModeStore';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
+import { useExpertTeamStore } from '@store/expertTeamStore';
 
 /**
  * Agent WebSocket hook — talks to /ws/agent over native WebSocket + JSON.
@@ -263,6 +264,19 @@ export function useAgentWebSocket(
         clearStalledTimer();
         stalledTimerRef.current = setTimeout(() => {
             stalledTimerRef.current = null;
+            // Never auto-cancel an active experts/team run: those are legitimately long and go
+            // quiet during a worker's model turn (tool calls stream as TEAM_EVENTs, not chat
+            // events). Auto-cancelling here was killing multi-expert runs mid-execution. The
+            // visual StallIndicator + manual Force Cancel still cover a genuinely dead session.
+            const teamId = useExpertTeamStore.getState().canvasTeamId;
+            const teamStatus = teamId
+                ? useExpertTeamStore.getState().teams[teamId]?.status
+                : undefined;
+            const expertsActive = teamStatus != null
+                && teamStatus !== 'completed' && teamStatus !== 'failed' && teamStatus !== 'timeout';
+            if (expertsActive) {
+                return;
+            }
             console.warn('[ws] SESSION_RESTORED running=true with no activity for 10s — cancelling');
             fetch(`/api/sessions/${sid}/cancel`, { method: 'POST' }).catch(() => {});
         }, STALLED_RUNNING_TIMEOUT_MS);
@@ -323,6 +337,10 @@ export function useAgentWebSocket(
         // raw handler (onRawMessage above); ACK is a command acknowledgement. Skip them so they
         // don't fall through to the "Unknown event type" error path.
         if (type === 'TEAM_EVENT' || type === 'ACK') {
+            // A streaming TEAM_EVENT proves the session is alive — during experts execution the
+            // chat channel emits no AGENT_THINKING/TEXT_CHUNK/TOOL_CALL (those are team events),
+            // so without this the stalled-probe would wrongly cancel a long-running expert step.
+            if (type === 'TEAM_EVENT') clearStalledTimer();
             return;
         }
 

@@ -20,7 +20,9 @@ import io.kairo.api.agent.AgentBuilderCustomizer;
 import io.kairo.api.event.KairoEventBus;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.api.team.MessageBus;
+import io.kairo.api.tool.ApprovalResult;
 import io.kairo.api.tool.ToolExecutor;
+import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.api.tool.ToolRegistry;
 import io.kairo.api.workspace.Workspace;
 import io.kairo.code.core.team.SwarmCoordinator;
@@ -48,6 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import reactor.core.publisher.Mono;
 
 /**
  * Wires the expert-team plan→generate→evaluate coordinator (ADR-015)
@@ -121,9 +124,34 @@ public class TeamConfig {
     }
 
     @Bean
-    public DefaultPlanner expertTeamPlanner(ExpertRoleRegistry registry) {
-        // Deterministic planner with registry — no LLM planning agent wired yet.
-        return new DefaultPlanner(registry, null, null);
+    public DefaultPlanner expertTeamPlanner(
+            ExpertRoleRegistry registry,
+            ModelProvider modelProvider,
+            ToolRegistry toolRegistry,
+            ToolExecutor toolExecutor,
+            GracefulShutdownManager shutdownManager,
+            @Autowired(required = false) List<AgentBuilderCustomizer> customizers) {
+        // LLM planning agent: a tool-free, workspace-free agent that decomposes the goal into a
+        // multi-role DAG (architect/coder/reviewer/tester …). Wrapped in StatelessAgentProxy so
+        // each planning call gets a clean context. Customizers must be applied to satisfy the
+        // mandatory modelName (set by ServerConfig.modelNameCustomizer).
+        Agent planningAgent = new StatelessAgentProxy("expert-planner", () -> {
+            AgentBuilder builder = AgentBuilder.create()
+                    .name("expert-planner")
+                    .model(modelProvider)
+                    .tools(toolRegistry)
+                    .toolExecutor(toolExecutor)
+                    .shutdownManager(shutdownManager)
+                    .systemPrompt(
+                            "You are an expert-team task planner. Decompose the goal into a DAG of "
+                                    + "role-assigned steps and output ONLY the JSON array — no prose, "
+                                    + "no code fences.");
+            if (customizers != null) {
+                customizers.forEach(c -> c.customize(builder));
+            }
+            return builder.build();
+        });
+        return new DefaultPlanner(registry, planningAgent, null);
     }
 
     @Bean
@@ -155,15 +183,33 @@ public class TeamConfig {
             GracefulShutdownManager shutdownManager,
             @Autowired(required = false) List<AgentBuilderCustomizer> customizers) {
         AtomicReference<SwarmCoordinator> coordRef = new AtomicReference<>();
+        // Experts run autonomously (qoder model): auto-approve tool calls so workers can run
+        // bash/pytest etc. without a per-call approval handler (the worker has no UI to ask).
+        UserApprovalHandler autoApprove = req -> Mono.just(ApprovalResult.allow());
         Agent workerProxy = new StatelessAgentProxy("expert-worker", () -> {
             SwarmCoordinator sc = coordRef.get();
             Workspace ws = sc != null ? sc.getActiveWorkspace() : null;
+            // Defense: never let tools fall back to the JVM launch dir if the session
+            // workspace wasn't bound yet.
+            if (ws == null) {
+                ws = Workspace.cwd();
+            }
+            final Workspace workspace = ws;
             AgentBuilder builder = AgentBuilder.create()
                     .name("expert-worker")
-                    .workspace(ws)
+                    .workspace(workspace)
                     .model(modelProvider)
                     .tools(toolRegistry)
                     .toolExecutor(toolExecutor)
+                    .approvalHandler(autoApprove)
+                    // Tell the worker its real working directory so it uses correct paths
+                    // instead of hallucinating absolutes like /home/user/project or /workspace.
+                    .systemPrompt(
+                            "You are an expert worker on a software team. Your current working "
+                                    + "directory is: " + workspace.root()
+                                    + "\nAll file paths you read or write must be relative to this "
+                                    + "directory (or absolute under it). Never invent paths such as "
+                                    + "/home/user/project or /workspace.")
                     .shutdownManager(shutdownManager);
             if (customizers != null) {
                 customizers.forEach(c -> c.customize(builder));
