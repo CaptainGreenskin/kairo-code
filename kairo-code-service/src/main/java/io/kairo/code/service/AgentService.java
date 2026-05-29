@@ -234,10 +234,13 @@ public class AgentService implements DisposableBean, InitializingBean {
      */
     public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
                                 String sessionMode, String permissionMode) {
-        // Unified mode: all legacy modes collapse to "agent" (auto-escalation handles the rest)
-        String normalizedMode = "agent";
+        // Unified mode: legacy modes collapse to "agent", except "experts" which
+        // enables auto-escalation to multi-agent fan-out.
+        boolean explicitExperts = "experts".equalsIgnoreCase(sessionMode);
+        String normalizedMode = explicitExperts ? "experts" : "agent";
         if (sessionMode != null && !sessionMode.isBlank()
-                && !"agent".equals(sessionMode) && !"chat".equals(sessionMode)) {
+                && !"agent".equals(sessionMode) && !"chat".equals(sessionMode)
+                && !explicitExperts) {
             log.info("Legacy mode '{}' normalized to 'agent' (unified mode)", sessionMode);
         }
 
@@ -315,6 +318,17 @@ public class AgentService implements DisposableBean, InitializingBean {
         // (e.g. EXECUTING/PLANNING), detect and transition to FAILED_EXECUTION.
         recoverSessionPhase(config.workingDir(), ctx.phaseRef());
 
+        // When the user explicitly selects Experts mode, force IDLE so the
+        // escalation check in AgentSessionPayload.handleMessage() can fire.
+        // A stale phase (e.g. PLAN_PENDING from a previous session) would
+        // otherwise block the auto-escalation gate.
+        if (explicitExperts && phaseRef.get() != SessionPhase.IDLE
+                && phaseRef.get() != SessionPhase.COMPLETED) {
+            log.info("Forcing phase IDLE for explicit experts mode (was {})", phaseRef.get());
+            phaseRef.set(SessionPhase.IDLE);
+            persistPhase(finalWorkingDir, SessionPhase.IDLE);
+        }
+
         try {
             // Web sessions are interactive (like a REPL) — skip the one-shot/batch hooks that
             // force tool calls on text-only responses.
@@ -378,11 +392,25 @@ public class AgentService implements DisposableBean, InitializingBean {
                 agentPayload.setCheckpointHook(checkpointHook);
             }
 
-            // Auto-escalation disabled: Agent mode stays in single-agent ReAct loop.
-            // Users must explicitly choose mode="experts" to get multi-agent fan-out.
-            // The HeuristicTriageGate is too broad (matches "fix", "debug", etc.),
-            // causing every code task to escalate — defeating the purpose of Agent mode.
+            // Auto-escalation only when the user explicitly selects mode="experts".
+            // The HeuristicTriageGate is too broad for automatic detection, but works
+            // fine as a passthrough when the user has already opted in.
             SessionPayload payload = agentPayload;
+            if (explicitExperts && swarmCoordinator != null && triageGate != null
+                    && teamManager != null && messageBus != null) {
+                io.kairo.api.model.ModelProvider narratorModel =
+                        CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+                agentPayload.setEscalationConfig(new AgentSessionPayload.EscalationConfig(
+                        swarmCoordinator,
+                        io.kairo.api.team.TeamConfig.defaults(),
+                        triageGate,
+                        eventBus,
+                        teamManager,
+                        messageBus,
+                        config,
+                        narratorModel));
+                log.info("Session {} created with experts escalation enabled", sessionId);
+            }
 
             SessionEntry entry = new SessionEntry(
                     sessionId, workspaceId, normalizedMode, payload,

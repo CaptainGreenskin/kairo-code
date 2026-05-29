@@ -481,7 +481,7 @@ export function useAgentWebSocket(
                                 reject(new Error('[ws] createSession timeout'));
                             }
                         }, 10_000);
-                        const mode = 'agent';
+                        const mode = useSessionModeStore.getState().getMode(workspaceId);
                         createPendingRef.current = { resolve, reject, timer, mode };
                         send({ action: 'create', workspaceId, mode });
                     } else if (attemptsLeft > 0) {

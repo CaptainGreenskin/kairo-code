@@ -87,7 +87,7 @@ import { useGlobalShortcuts } from '@hooks/useGlobalShortcuts';
 import { ConfirmBuildChip } from '@components/ConfirmBuildChip';
 import { RevertButton } from '@components/RevertButton';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
-import { useSessionModeStore } from '@store/sessionModeStore';
+
 import { useExpertTeamStore } from '@store/expertTeamStore';
 import { FileTrackerBadge } from '@components/FileTrackerBadge';
 
@@ -468,34 +468,7 @@ function App() {
     // Load the list of on-disk session snapshots once on mount.
     useEffect(() => { refreshPersistedSessions(); }, [refreshPersistedSessions]);
 
-    // Mode switch → spawn new session: when SessionModeToggle signals a restart,
-    // create a fresh session with the new mode and switch to it. The previous
-    // session stays open as a tab so the user can return to its history at any
-    // time. We only stop its in-flight agent run (if any) — we do NOT close it.
-    useEffect(() => {
-        const unsub = useSessionModeStore.subscribe((s, prev) => {
-            if (s.sessionRestartRequested === prev.sessionRestartRequested) return;
-            const wid = s.restartWorkspaceId;
-            if (!wid) return;
-            const oldSid = useSessionStore.getState().activeSessionId;
-            // Stop the old session's running agent (if any) — but KEEP the tab
-            // and message history so the user can switch back.
-            if (oldSid) {
-                stopAgent(oldSid);
-            }
-            connect();
-            createSession(wid)
-                .then((newId) => {
-                    useSessionStore.getState().openSession(newId);
-                    assistantMsgRef.current[newId] = null;
-                    switchSession(newId);
-                })
-                .catch((err) => {
-                    addToast('error', `Mode switch failed: ${err instanceof Error ? err.message : String(err)}`);
-                });
-        });
-        return unsub;
-    }, [connect, createSession, stopAgent, switchSession, addToast]);
+
 
     // When the user switches workspaces, the active session (bound to the old
     // workspace's workingDir) is stale. Stop any in-flight agent, clear session
