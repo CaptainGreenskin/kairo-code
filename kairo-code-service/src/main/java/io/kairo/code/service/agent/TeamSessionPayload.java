@@ -322,7 +322,10 @@ public final class TeamSessionPayload implements SessionPayload {
                     "Session is already running", "SESSION_BUSY"));
         }
 
-        Sinks.Many<AgentEvent> localSink = Sinks.many().multicast().onBackpressureBuffer();
+        // Emit to the shared session sink (see startPlanOnly) — never the throwaway local
+        // sink, or execution events never reach the WebSocket. Don't complete it; it's the
+        // persistent session channel. emitDoneOnce already signals terminal state to the UI.
+        Sinks.Many<AgentEvent> sink = ctx.sharedSink();
 
         // Bind the session workspace so worker agents resolve tool paths correctly
         if (config.workingDir() != null && !config.workingDir().isBlank()) {
@@ -338,7 +341,6 @@ public final class TeamSessionPayload implements SessionPayload {
                     phaseRef.set(SessionPhase.COMPLETED);
                     ctx.persistPhase().accept(SessionPhase.COMPLETED);
                     emitDoneOnce(sessionId);
-                    localSink.tryEmitComplete();
                 })
                 .doOnError(err -> {
                     ctx.runningState().set(false);
@@ -346,21 +348,19 @@ public final class TeamSessionPayload implements SessionPayload {
                     ctx.persistPhase().accept(SessionPhase.FAILED_EXECUTION);
                     log.warn("Expert team execution failed (session={}): {}",
                             sessionId, err.getMessage());
-                    localSink.tryEmitNext(AgentEvent.error(sessionId,
+                    sink.tryEmitNext(AgentEvent.error(sessionId,
                             "Expert team execution failed: " + err.getMessage(),
                             "TEAM_EXECUTION_ERROR"));
-                    localSink.tryEmitComplete();
                 })
                 .doOnCancel(() -> {
                     ctx.runningState().set(false);
                     phaseRef.set(SessionPhase.FAILED_EXECUTION);
                     ctx.persistPhase().accept(SessionPhase.FAILED_EXECUTION);
-                    localSink.tryEmitComplete();
                 })
                 .subscribe();
 
         currentRun.set(disposable);
-        return localSink.asFlux();
+        return sink.asFlux();
     }
 
     @Override
@@ -422,8 +422,13 @@ public final class TeamSessionPayload implements SessionPayload {
         // Force the bus subscription to start NOW (before the coordinator publishes).
         planAttrsMono.subscribe();
 
-        Sinks.Many<AgentEvent> localSink = Sinks.many().multicast().onBackpressureBuffer();
-        localSink.tryEmitNext(AgentEvent.thinking(sessionId));
+        // Emit to the shared session sink — the WebSocket broadcasts ONLY from this
+        // channel (AgentService.sessionEvents). A private sink would be silently dropped,
+        // which leaves the UI "silent" after the escalation notice. Never complete it:
+        // the shared sink is the persistent session channel reused by confirmAndExecute
+        // and any follow-up messages.
+        Sinks.Many<AgentEvent> sink = ctx.sharedSink();
+        sink.tryEmitNext(AgentEvent.thinking(sessionId));
 
         Mono<TeamResult> resultMono = preset.coordinator()
                 .startExpertTeam(goal, preset.teamConfig(), List.<String>of(), true);
@@ -439,9 +444,8 @@ public final class TeamSessionPayload implements SessionPayload {
                     lastPlanReadyAttributes = planAttrs.isEmpty() ? null : planAttrs;
                     Map<String, Object> meta = buildPlanReadyMeta(pendingTeamId,
                             planAttrs.isEmpty() ? null : planAttrs);
-                    localSink.tryEmitNext(AgentEvent.planReady(sessionId,
+                    sink.tryEmitNext(AgentEvent.planReady(sessionId,
                             extractPlanSummary(result), meta));
-                    localSink.tryEmitComplete();
                 })
                 .doOnError(err -> {
                     ctx.runningState().set(false);
@@ -449,21 +453,19 @@ public final class TeamSessionPayload implements SessionPayload {
                     ctx.persistPhase().accept(SessionPhase.FAILED_PLANNING);
                     log.warn("Expert team planning failed (session={}): {}",
                             sessionId, err.getMessage());
-                    localSink.tryEmitNext(AgentEvent.error(sessionId,
+                    sink.tryEmitNext(AgentEvent.error(sessionId,
                             "Planning failed: " + err.getMessage(),
                             "PLANNING_ERROR"));
-                    localSink.tryEmitComplete();
                 })
                 .doOnCancel(() -> {
                     ctx.runningState().set(false);
                     ctx.phaseRef().set(SessionPhase.FAILED_PLANNING);
                     ctx.persistPhase().accept(SessionPhase.FAILED_PLANNING);
-                    localSink.tryEmitComplete();
                 })
                 .subscribe();
 
         currentRun.set(disposable);
-        return localSink.asFlux();
+        return sink.asFlux();
     }
 
     private static String extractPlanSummary(TeamResult result) {
