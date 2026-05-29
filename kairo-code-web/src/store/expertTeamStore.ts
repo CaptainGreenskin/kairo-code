@@ -20,6 +20,8 @@ export interface ToolCallEntry {
   args: Record<string, unknown>;
   result?: string;
   timestamp: string;
+  isError?: boolean;
+  durationMs?: number;
 }
 
 export interface StepState {
@@ -126,6 +128,20 @@ function createEmptyTeam(teamId: string): TeamState {
   };
 }
 
+/** A blank step, used when a STEP_* event arrives before STEP_ASSIGNED so we never drop it. */
+function createEmptyStep(stepId: string, roleId = ''): StepState {
+  return {
+    stepId,
+    roleId,
+    status: 'assigned',
+    thinkingChunks: [],
+    toolCalls: [],
+    artifact: '',
+    thinkingStartedAt: null,
+    thinkingDuration: null,
+  };
+}
+
 // ── Store ───────────────────────────────────────────────────────────────────
 
 // ── Derived tool summary utility ─────────────────────────────────────────────
@@ -207,8 +223,8 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
           if (seq <= maxSeq) continue; // dedup
           maxSeq = seq;
 
-          if (eventType === 'STEP_THINKING' && stepId && updatedSteps[stepId]) {
-            const step = updatedSteps[stepId];
+          if (eventType === 'STEP_THINKING' && stepId) {
+            const step = updatedSteps[stepId] ?? createEmptyStep(stepId);
             // Accumulate into existing array reference — clone once at the end
             updatedSteps[stepId] = {
               ...step,
@@ -219,8 +235,8 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
               ],
               thinkingStartedAt: step.thinkingStartedAt ?? Date.now(),
             };
-          } else if (eventType === 'STEP_ARTIFACT_CHUNK' && stepId && updatedSteps[stepId]) {
-            const step = updatedSteps[stepId];
+          } else if (eventType === 'STEP_ARTIFACT_CHUNK' && stepId) {
+            const step = updatedSteps[stepId] ?? createEmptyStep(stepId);
             updatedSteps[stepId] = {
               ...step,
               artifact:
@@ -319,8 +335,8 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
           break;
 
         case 'STEP_THINKING':
-          if (stepId && updatedTeam.steps[stepId]) {
-            const thinkStep = updatedTeam.steps[stepId];
+          if (stepId) {
+            const thinkStep = updatedTeam.steps[stepId] ?? createEmptyStep(stepId);
             updatedTeam.steps[stepId] = {
               ...thinkStep,
               status: 'thinking',
@@ -334,8 +350,8 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
           break;
 
         case 'STEP_TOOL_CALL':
-          if (stepId && updatedTeam.steps[stepId]) {
-            const toolStep = updatedTeam.steps[stepId];
+          if (stepId) {
+            const toolStep = updatedTeam.steps[stepId] ?? createEmptyStep(stepId);
             const computedDuration =
               toolStep.thinkingDuration == null && toolStep.thinkingStartedAt != null
                 ? Date.now() - toolStep.thinkingStartedAt
@@ -350,6 +366,8 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
                   args: (attributes.args as Record<string, unknown>) ?? {},
                   result: attributes.result as string | undefined,
                   timestamp,
+                  isError: (attributes.isError as boolean) ?? false,
+                  durationMs: attributes.durationMs as number | undefined,
                 },
               ],
               thinkingDuration: computedDuration,
@@ -358,12 +376,11 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
           break;
 
         case 'STEP_ARTIFACT_CHUNK':
-          if (stepId && updatedTeam.steps[stepId]) {
+          if (stepId) {
+            const artStep = updatedTeam.steps[stepId] ?? createEmptyStep(stepId);
             updatedTeam.steps[stepId] = {
-              ...updatedTeam.steps[stepId],
-              artifact:
-                updatedTeam.steps[stepId].artifact +
-                ((attributes.chunk as string) ?? ''),
+              ...artStep,
+              artifact: artStep.artifact + ((attributes.chunk as string) ?? ''),
             };
           }
           break;

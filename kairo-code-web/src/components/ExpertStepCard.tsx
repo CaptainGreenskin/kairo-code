@@ -1,6 +1,25 @@
 import { useState } from 'react';
 import { type StepState, type ToolCallEntry, deriveToolSummary } from '../store/expertTeamStore';
 import { useThinkingTimer } from '../hooks/useThinkingTimer';
+import { ToolCallCard } from './ToolCallCard';
+import { LazyMarkdown } from './LazyMarkdown';
+import type { ToolCall } from '../types/agent';
+
+/** Adapt an expert-team ToolCallEntry to the main-chat ToolCall shape so we can reuse
+ *  ToolCallCard (with its FileDiffView / TerminalOutput rendering). Expert tool calls are
+ *  always already complete, so status is 'done'/'error' and no approval is required. */
+function toToolCall(tc: ToolCallEntry, idx: number): ToolCall {
+    return {
+        id: `${tc.timestamp}-${idx}`,
+        toolName: tc.toolName,
+        input: tc.args ?? {},
+        result: tc.result,
+        status: tc.isError ? 'error' : 'done',
+        requiresApproval: false,
+        isError: tc.isError,
+        durationMs: tc.durationMs,
+    };
+}
 
 // ── Props ───────────────────────────────────────────────────────────────────
 
@@ -63,80 +82,9 @@ const STATUS_STYLES: Record<StepState['status'], {
     },
 };
 
-// ── Tool categorization helpers ─────────────────────────────────────────────
-
-function isReadTool(name: string): boolean {
-    return ['read', 'read_file', 'cat', 'view'].some((k) => name.toLowerCase().includes(k));
-}
-
-function isWriteTool(name: string): boolean {
-    return ['write', 'edit', 'create', 'patch', 'replace'].some((k) => name.toLowerCase().includes(k));
-}
-
-function isBashTool(name: string): boolean {
-    return name === 'bash' || name === 'terminal' || name.toLowerCase().includes('command');
-}
-
-function isSearchTool(name: string): boolean {
-    return ['search', 'grep', 'find', 'glob', 'explore'].some((k) => name.toLowerCase().includes(k));
-}
-
-function getToolIcon(toolName: string): string {
-    if (isReadTool(toolName)) return '🔍';
-    if (isWriteTool(toolName)) return '✏️';
-    if (isBashTool(toolName)) return '▶️';
-    if (isSearchTool(toolName)) return '🔎';
-    return '🔧';
-}
-
-function getToolDisplayName(tc: ToolCallEntry): string {
-    const name = tc.toolName;
-    // Try to extract a meaningful file/command from args
-    if (isReadTool(name)) {
-        const filePath = (tc.args.file_path ?? tc.args.path ?? tc.args.file) as string | undefined;
-        if (filePath) {
-            const fileName = filePath.split('/').pop() ?? filePath;
-            return `Read ${fileName}`;
-        }
-        return `Read`;
-    }
-    if (isWriteTool(name)) {
-        const filePath = (tc.args.file_path ?? tc.args.path ?? tc.args.file) as string | undefined;
-        if (filePath) {
-            const fileName = filePath.split('/').pop() ?? filePath;
-            return `Edit ${fileName}`;
-        }
-        return `Edit`;
-    }
-    if (isBashTool(name)) {
-        const cmd = (tc.args.command ?? tc.args.cmd) as string | undefined;
-        if (cmd) {
-            const shortCmd = cmd.length > 40 ? cmd.slice(0, 40) + '…' : cmd;
-            return `Ran ${shortCmd}`;
-        }
-        return `Ran command`;
-    }
-    if (isSearchTool(name)) {
-        const query = (tc.args.query ?? tc.args.pattern ?? tc.args.regex) as string | undefined;
-        if (query) {
-            const shortQ = query.length > 30 ? query.slice(0, 30) + '…' : query;
-            return `Search "${shortQ}"`;
-        }
-        return `Search`;
-    }
-    return name;
-}
-
-function getToolResultPreview(tc: ToolCallEntry): string | null {
-    if (!tc.result) return null;
-    if (tc.result.length > 60) return tc.result.slice(0, 60) + '…';
-    return tc.result;
-}
-
 // ── Timeline entry components ───────────────────────────────────────────────
 
 function ThinkingEntry({ duration, text }: { duration: string; text: string }) {
-    const preview = text.length > 80 ? text.slice(0, 80) + '…' : text;
     return (
         <div className="flex items-start gap-2 py-1">
             <span className="text-xs shrink-0 mt-0.5">🧠</span>
@@ -144,29 +92,9 @@ function ThinkingEntry({ duration, text }: { duration: string; text: string }) {
                 <span className="text-xs font-medium text-[var(--text-secondary)]">
                     Thinking{duration ? ` (${duration})` : ''}
                 </span>
-                {preview && (
-                    <p className="text-[10px] text-[var(--text-muted)] italic truncate mt-0.5">
-                        "{preview}"
-                    </p>
-                )}
-            </div>
-        </div>
-    );
-}
-
-function ToolCallTimelineEntry({ toolCall }: { toolCall: ToolCallEntry }) {
-    const icon = getToolIcon(toolCall.toolName);
-    const displayName = getToolDisplayName(toolCall);
-    const resultPreview = getToolResultPreview(toolCall);
-
-    return (
-        <div className="flex items-start gap-2 py-1">
-            <span className="text-xs shrink-0 mt-0.5">{icon}</span>
-            <div className="min-w-0 flex-1">
-                <span className="text-xs text-[var(--text-secondary)]">{displayName}</span>
-                {resultPreview && (
-                    <p className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">
-                        → {resultPreview}
+                {text && (
+                    <p className="text-[10px] text-[var(--text-muted)] italic mt-0.5 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+                        {text}
                     </p>
                 )}
             </div>
@@ -289,10 +217,15 @@ export function ExpertStepCard({ step, defaultExpanded = false }: ExpertStepCard
                             <ThinkingEntry duration={displayDuration} text={thinkingText} />
                         )}
 
-                        {/* Tool call entries */}
-                        {step.toolCalls.map((tc, i) => (
-                            <ToolCallTimelineEntry key={i} toolCall={tc} />
-                        ))}
+                        {/* Tool call cards — full args + result/diff/terminal, reusing the
+                            main-chat ToolCallCard so experts show their real read/edit/bash work. */}
+                        {step.toolCalls.length > 0 && (
+                            <div className="space-y-1.5 py-1">
+                                {step.toolCalls.map((tc, i) => (
+                                    <ToolCallCard key={`${tc.timestamp}-${i}`} toolCall={toToolCall(tc, i)} />
+                                ))}
+                            </div>
+                        )}
 
                         {/* Evaluation entry */}
                         {step.evaluation && (
@@ -322,6 +255,18 @@ export function ExpertStepCard({ step, defaultExpanded = false }: ExpertStepCard
                         {/* Completion entry */}
                         {(step.status === 'done' || step.status === 'failed') && (
                             <CompletionEntry status={step.status} />
+                        )}
+
+                        {/* Artifact — the expert's final produced output/summary */}
+                        {step.artifact && step.artifact.trim().length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-[var(--border)]">
+                                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-1">
+                                    Output
+                                </div>
+                                <div className="text-xs prose dark:prose-invert prose-sm max-w-none text-[var(--text-primary)] max-h-72 overflow-y-auto">
+                                    <LazyMarkdown>{step.artifact}</LazyMarkdown>
+                                </div>
+                            </div>
                         )}
                     </div>
                 </div>

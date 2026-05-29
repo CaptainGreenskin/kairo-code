@@ -317,6 +317,12 @@ export function useAgentWebSocket(
             }
             return;
         }
+        // Non-AgentEvent envelopes consumed elsewhere: TEAM_EVENT is handled by the expert-team
+        // raw handler (onRawMessage above); ACK is a command acknowledgement. Skip them so they
+        // don't fall through to the "Unknown event type" error path.
+        if (type === 'TEAM_EVENT' || type === 'ACK') {
+            return;
+        }
 
         // Otherwise an AgentEvent
         const event = transformEvent(raw);
