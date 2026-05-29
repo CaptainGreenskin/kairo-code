@@ -23,6 +23,8 @@ import getConfigurationServiceOverride from '@codingame/monaco-vscode-configurat
 import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-override';
 import getTextmateServiceOverride from '@codingame/monaco-vscode-textmate-service-override';
 import getLanguagesServiceOverride from '@codingame/monaco-vscode-languages-service-override';
+import getEnvironmentServiceOverride from '@codingame/monaco-vscode-environment-service-override';
+import getHostServiceOverride from '@codingame/monaco-vscode-host-service-override';
 
 // Vite-native worker loader: `new Worker(new URL(..., import.meta.url))` is
 // the canonical pattern. The `?worker` suffix would also work but URLs are
@@ -68,6 +70,8 @@ export function initMonaco(): Promise<void> {
         ...getThemeServiceOverride(),
         ...getTextmateServiceOverride(),
         ...getLanguagesServiceOverride(),
+        ...getEnvironmentServiceOverride(),
+        ...getHostServiceOverride(),
     });
     return initPromise;
 }

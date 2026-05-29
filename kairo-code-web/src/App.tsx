@@ -1390,6 +1390,7 @@ ${content}
                 )}
 
                 {/* Center: VS Code-style multi-tab editor area, falls back to welcome / chat-empty content. */}
+                <ErrorBoundary>
                 <EditorArea
                     workspaceId={currentWorkspaceId ?? undefined}
                     welcome={
@@ -1419,6 +1420,7 @@ ${content}
                         )
                     }
                 />
+                </ErrorBoundary>
 
                 {/* Right chat sidebar — Cursor-style two-column: Sessions strip | Chat tabs+messages+input */}
                 {!isMobile && chatSidebarOpen && (

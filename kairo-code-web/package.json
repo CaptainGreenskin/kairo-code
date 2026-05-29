@@ -14,6 +14,8 @@
   "dependencies": {
     "@codingame/monaco-vscode-api": "31.0.1",
     "@codingame/monaco-vscode-configuration-service-override": "31.0.1",
+    "@codingame/monaco-vscode-environment-service-override": "31.0.1",
+    "@codingame/monaco-vscode-host-service-override": "31.0.1",
     "@codingame/monaco-vscode-css-default-extension": "31.0.1",
     "@codingame/monaco-vscode-html-default-extension": "31.0.1",
     "@codingame/monaco-vscode-java-default-extension": "31.0.1",
