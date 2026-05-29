@@ -876,6 +876,24 @@ public class AgentService implements DisposableBean, InitializingBean {
             String json = Files.readString(checkpointPath);
             ObjectMapper mapper = new ObjectMapper();
             JsonNode root = mapper.readTree(json);
+
+            // The checkpoint file is workingDir-scoped (one per workspace), shared by every
+            // session that runs there. Without this guard a freshly-created session ("New Chat")
+            // would adopt the PREVIOUS session's conversation on bind. Only restore a checkpoint
+            // written at/after this session was created; an older checkpoint belongs to a prior
+            // session in the same workspace.
+            JsonNode tsNode = root.get("timestamp");
+            if (tsNode != null && tsNode.isTextual()) {
+                try {
+                    long checkpointMs = java.time.Instant.parse(tsNode.asText()).toEpochMilli();
+                    if (checkpointMs < entry.createdAt()) {
+                        return List.of();
+                    }
+                } catch (java.time.format.DateTimeParseException ignored) {
+                    // Unparseable timestamp — fall through and restore (preserve prior behavior).
+                }
+            }
+
             JsonNode messagesNode = root.get("messages");
             if (messagesNode == null || !messagesNode.isArray()) {
                 return List.of();
