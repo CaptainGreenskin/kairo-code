@@ -82,6 +82,18 @@ results-v*/
 node_modules/
 package-lock.json
 
+# Stray pnpm files (real lockfile lives at kairo-code-web/pnpm-lock.yaml)
+/pnpm-lock.yaml
+/pnpm-workspace.yaml
+kairo-code-web/pnpm-workspace.yaml
+
+# Agent eval-run artifacts (calculator / BST / todo-app fixtures, cnarch-sre-ai probes)
+/calculator.py
+/todo_app/
+**/bst.py
+**/test_bst.py
+**/cnarch-sre-ai-*/
+
 # VitePress build output
 docs/.vitepress/dist/
 docs/.vitepress/cache/

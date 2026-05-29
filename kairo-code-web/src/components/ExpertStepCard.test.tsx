@@ -119,9 +119,10 @@ describe('ExpertStepCard', () => {
           defaultExpanded={true}
         />
       );
-      // Should show derived tool display names
-      expect(screen.getByText('Read auth.ts')).toBeDefined();
-      expect(screen.getByText('Ran npm test')).toBeDefined();
+      // Expanded view renders a ToolCallCard per tool call (reusing main-chat rendering),
+      // which surfaces the raw tool name.
+      expect(screen.getByText('read_file')).toBeDefined();
+      expect(screen.getByText('bash')).toBeDefined();
     });
   });
 

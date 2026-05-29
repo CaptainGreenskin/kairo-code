@@ -6,9 +6,9 @@ import { vi } from 'vitest';
 // host one anyway). Components that import monaco get a no-op stub.
 vi.mock('monaco-editor', () => ({
     editor: {
-        create: () => ({ dispose: () => {}, setValue: () => {}, getValue: () => '', onDidChangeModelContent: () => ({ dispose: () => {} }) }),
+        create: () => ({ dispose: () => {}, setValue: () => {}, getValue: () => '', updateOptions: () => {}, layout: () => {}, onDidChangeModelContent: () => ({ dispose: () => {} }) }),
         createModel: () => ({ dispose: () => {}, getValue: () => '', setValue: () => {} }),
-        createDiffEditor: () => ({ dispose: () => {}, setModel: () => {}, onDidUpdateDiff: () => ({ dispose: () => {} }) }),
+        createDiffEditor: () => ({ dispose: () => {}, setModel: () => {}, updateOptions: () => {}, layout: () => {}, onDidUpdateDiff: () => ({ dispose: () => {} }) }),
         defineTheme: () => {},
         setTheme: () => {},
     },
