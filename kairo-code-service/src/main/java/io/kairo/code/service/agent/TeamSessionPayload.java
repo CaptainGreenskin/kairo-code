@@ -525,8 +525,10 @@ public final class TeamSessionPayload implements SessionPayload {
                     String content = summarize(te);
                     String fromTag = role != null ? "expert:" + role : "expert";
                     String eventId = envelope.eventId();
+                    Object stepIdAttr = te.attributes().get("stepId");
+                    String stepId = stepIdAttr != null ? stepIdAttr.toString() : null;
                     ctx.emit(AgentEvent.peerMessage(
-                            sessionId, fromTag, content, eventId));
+                            sessionId, fromTag, content, eventId, stepId, activeTeamId));
                     if (narrator != null) {
                         narrator.enqueue(new PeerEventSummary(
                                 fromTag, content, eventId, envelope.timestamp().toEpochMilli()));

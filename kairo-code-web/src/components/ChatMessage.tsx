@@ -17,6 +17,7 @@ import { useDebounce } from '@hooks/useDebounce';
 import { getPreviewContent, countLines, COLLAPSE_PREVIEW_LINES } from '@utils/messageCollapse';
 import { MessageReaction } from './MessageReaction';
 import { ReportLayout, extractHeadings, shouldUseReportLayout } from './ReportLayout';
+import { ExpertStepChatCard } from './ExpertStepChatCard';
 
 interface ChatMessageProps {
     message: Message;
@@ -125,6 +126,11 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
 
     // Debounce streaming content to avoid per-token ReactMarkdown re-parse (CPU spike)
     const debouncedContent = useDebounce(displayContent, isStreaming ? 80 : 0);
+
+    // Expert-step card: render the live execution card instead of a text bubble.
+    if (message.kind === 'expertStep' && message.stepRef) {
+        return <ExpertStepChatCard teamId={message.stepRef.teamId} stepId={message.stepRef.stepId} />;
+    }
 
     if (message.role === 'user') {
         return (

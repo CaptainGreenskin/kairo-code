@@ -166,6 +166,8 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                     fromSessionId: (meta.fromSessionId as string) ?? '',
                     content: (raw.content as string) ?? '',
                     messageId: (meta.messageId as string) ?? '',
+                    stepId: meta.stepId as string | undefined,
+                    teamId: meta.teamId as string | undefined,
                 },
             };
         }

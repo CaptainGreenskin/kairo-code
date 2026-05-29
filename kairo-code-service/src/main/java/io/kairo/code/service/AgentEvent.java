@@ -256,9 +256,22 @@ public record AgentEvent(
      */
     public static AgentEvent peerMessage(String sessionId, String fromSessionId,
                                          String content, String messageId) {
-        Map<String, Object> meta = Map.of(
-                "fromSessionId", fromSessionId == null ? "" : fromSessionId,
-                "messageId", messageId == null ? "" : messageId);
+        return peerMessage(sessionId, fromSessionId, content, messageId, null, null);
+    }
+
+    /**
+     * Peer message carrying the originating expert step. {@code stepId}/{@code teamId} let the
+     * frontend bind the chat bubble to a live {@code expertTeamStore} step and render a
+     * collapsible expert card instead of plain text.
+     */
+    public static AgentEvent peerMessage(String sessionId, String fromSessionId,
+                                         String content, String messageId,
+                                         String stepId, String teamId) {
+        Map<String, Object> meta = new java.util.HashMap<>();
+        meta.put("fromSessionId", fromSessionId == null ? "" : fromSessionId);
+        meta.put("messageId", messageId == null ? "" : messageId);
+        if (stepId != null) meta.put("stepId", stepId);
+        if (teamId != null) meta.put("teamId", teamId);
         return new AgentEvent(EventType.PEER_MESSAGE, sessionId, content, null, null,
                 false, null, null, null, null, null, null, meta,
                 System.currentTimeMillis());

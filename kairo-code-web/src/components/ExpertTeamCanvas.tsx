@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, ChevronRight, ChevronLeft, Maximize2, X } from 'lucide-react';
+import { Users, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useExpertTeamStore } from '@store/expertTeamStore';
 import { useSessionStore } from '@store/sessionStore';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
@@ -23,7 +23,6 @@ export function ExpertTeamCanvas({ sendAction }: ExpertTeamCanvasProps) {
             return false;
         }
     });
-    const [maximized, setMaximized] = useState(false);
 
     useEffect(() => {
         try {
@@ -38,21 +37,11 @@ export function ExpertTeamCanvas({ sendAction }: ExpertTeamCanvasProps) {
         }
     }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Close the popup on Escape
-    useEffect(() => {
-        if (!maximized) return;
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') setMaximized(false);
-        };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, [maximized]);
-
-    // Plan-ready approval bar — shared by docked + popup layouts.
+    // Plan-ready approval bar.
     const planBar = buildPhase === 'PLAN_PENDING' && sessionId ? (
         <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
             <div className="text-[11px] text-[var(--text-secondary)] mb-1.5">
-                Plan ready — review the DAG below, then approve to start execution.
+                Plan ready — review the experts below, then approve to start execution.
             </div>
             <button
                 onClick={() => {
@@ -77,58 +66,6 @@ export function ExpertTeamCanvas({ sendAction }: ExpertTeamCanvasProps) {
             )}
         </div>
     );
-
-    // ── Popup (maximized) layout: large modal overlay + slim docked rail ──────────
-    if (maximized) {
-        return (
-            <>
-                <div className="flex flex-col h-full bg-[var(--bg-primary)] border-l border-[var(--border)]"
-                     style={{ width: 36 }}>
-                    <button
-                        onClick={() => setMaximized(false)}
-                        className="flex flex-col items-center gap-1 py-3 px-1 hover:bg-[var(--bg-tertiary)] transition-colors"
-                        title="Show Canvas popup"
-                    >
-                        <Users size={14} className="text-violet-400" />
-                        <span className="text-[9px] text-[var(--text-muted)] font-medium"
-                              style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>
-                            Experts
-                        </span>
-                    </button>
-                </div>
-
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-                    onClick={() => setMaximized(false)}
-                >
-                    <div
-                        className="flex flex-col w-[92vw] h-[90vh] max-w-[1400px] rounded-xl
-                                   bg-[var(--bg-primary)] border border-[var(--border)] shadow-2xl overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
-                            <Users size={15} className="text-violet-400" />
-                            <span className="text-sm font-semibold text-[var(--text-primary)]">Experts Canvas</span>
-                            {teamId && (
-                                <span className="text-[11px] text-[var(--text-muted)] font-mono truncate">
-                                    {teamId.substring(0, 18)}…
-                                </span>
-                            )}
-                            <button
-                                onClick={() => setMaximized(false)}
-                                className="ml-auto p-1 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-                                title="Close popup (Esc)"
-                            >
-                                <X size={16} className="text-[var(--text-muted)]" />
-                            </button>
-                        </div>
-                        {planBar}
-                        {body}
-                    </div>
-                </div>
-            </>
-        );
-    }
 
     // ── Collapsed rail ────────────────────────────────────────────────────────────
     if (collapsed) {
@@ -162,22 +99,13 @@ export function ExpertTeamCanvas({ sendAction }: ExpertTeamCanvasProps) {
                         {teamId.substring(0, 12)}…
                     </span>
                 )}
-                <div className="ml-auto flex items-center gap-0.5">
-                    <button
-                        onClick={() => setMaximized(true)}
-                        className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-                        title="Open as popup (more room)"
-                    >
-                        <Maximize2 size={13} className="text-[var(--text-muted)]" />
-                    </button>
-                    <button
-                        onClick={() => setCollapsed(true)}
-                        className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-                        title="Collapse Canvas"
-                    >
-                        <ChevronRight size={13} className="text-[var(--text-muted)]" />
-                    </button>
-                </div>
+                <button
+                    onClick={() => setCollapsed(true)}
+                    className="ml-auto p-0.5 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                    title="Collapse Canvas"
+                >
+                    <ChevronRight size={13} className="text-[var(--text-muted)]" />
+                </button>
             </div>
 
             {planBar}
@@ -194,8 +122,8 @@ function CanvasEmptyState() {
                 No active expert team yet
             </div>
             <div className="text-[11px] text-[var(--text-muted)] max-w-[240px] leading-relaxed">
-                Send a task in the chat. Once the planner produces a DAG, the Canvas will
-                show the experts working through it live.
+                Send a task in the chat. Once the planner assigns experts, they'll appear
+                here — click one to open its full execution in a tab.
             </div>
         </div>
     );

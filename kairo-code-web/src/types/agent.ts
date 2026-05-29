@@ -183,6 +183,10 @@ export interface Message {
     streaming?: boolean;
     imageData?: string;        // base64 encoded image data
     imageMediaType?: string;   // e.g. "image/png"
+    /** When set, this message renders as a live expert-step card (qoder-style inline agent
+     *  card) bound to expertTeamStore, instead of a plain text bubble. */
+    kind?: 'expertStep';
+    stepRef?: { teamId: string; stepId: string };
     /** Reasoning_content captured during AGENT_THINKING events. Pinned onto the
      *  message so users can expand it in the chat after the response completes,
      *  mirroring Claude Code's collapsible 思考过程 box. */
@@ -288,6 +292,9 @@ export interface PeerMessagePayload {
     fromSessionId: string;
     content: string;
     messageId: string;
+    /** Originating expert step — present for step-level events; absent for team-level ones. */
+    stepId?: string;
+    teamId?: string;
 }
 
 export interface TokenUsage {
