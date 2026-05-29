@@ -653,11 +653,12 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         fromSessionId: string; content: string; messageId: string;
                         stepId?: string; teamId?: string;
                     };
-                    const fromTag = payload.fromSessionId || 'peer';
                     // Step-level events → one collapsible expert card per step (qoder-style),
-                    // bound live to expertTeamStore. Upsert by stable id so the 5 lifecycle
+                    // bound live to expertTeamStore. Upsert by stable id so the lifecycle
                     // events (started/eval/PASS/completed) collapse into a single card that
-                    // updates itself; team-level events (no stepId) fall back to a text bubble.
+                    // updates itself. Team-level events (no stepId) carry no per-agent detail
+                    // and are redundant with the roster's progress + each card's status, so we
+                    // suppress them rather than spamming the thread with "[expert] …" lines.
                     if (payload.stepId && payload.teamId) {
                         const cardId = `step:${payload.teamId}:${payload.stepId}`;
                         const existing = useSessionStore.getState().sessions[sid]?.messages;
@@ -672,14 +673,6 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                                 stepRef: { teamId: payload.teamId, stepId: payload.stepId },
                             });
                         }
-                    } else {
-                        addMessageTo(sid, {
-                            id: generateId(),
-                            role: 'assistant',
-                            content: `**[${fromTag}]** ${payload.content}`,
-                            toolCalls: [],
-                            timestamp: Date.now(),
-                        });
                     }
                     break;
                 }
