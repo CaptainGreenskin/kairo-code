@@ -194,14 +194,14 @@ public final class AgentSessionPayload implements SessionPayload {
         final Agent localAgent = this.agent;
 
         // Emit thinking indicator via shared sink
-        sink.tryEmitNext(AgentEvent.thinking(sessionId));
+        ctx.emit(AgentEvent.thinking(sessionId));
 
         // Acquire concurrency slot
         AgentSlot slot;
         try {
             slot = ctx.concurrency().acquire(sessionId);
         } catch (AgentConcurrencyException e) {
-            sink.tryEmitNext(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
+            ctx.emit(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
             running.set(false);
             return sink.asFlux();
         }
@@ -209,7 +209,7 @@ public final class AgentSessionPayload implements SessionPayload {
         // Thinking delta consumer (for reasoning models)
         Consumer<String> thinkingConsumer = delta -> {
             if (delta != null && !delta.isEmpty()) {
-                sink.tryEmitNext(AgentEvent.thinkingChunk(sessionId, delta));
+                ctx.emit(AgentEvent.thinkingChunk(sessionId, delta));
             }
         };
 
@@ -365,14 +365,14 @@ public final class AgentSessionPayload implements SessionPayload {
                         break;
                     }
 
-                    sink.tryEmitNext(AgentEvent.thinking(sessionId));
+                    ctx.emit(AgentEvent.thinking(sessionId));
 
                     // Acquire concurrency slot before calling agent
                     AgentSlot slot = null;
                     try {
                         slot = ctx.concurrency().acquire(sessionId);
                     } catch (AgentConcurrencyException e) {
-                        sink.tryEmitNext(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
+                        ctx.emit(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
                         break;
                     }
 
@@ -382,7 +382,7 @@ public final class AgentSessionPayload implements SessionPayload {
                     } catch (Exception e) {
                         log.warn("Plan refinement call failed for session {}: {}",
                                 sessionId, e.getMessage());
-                        sink.tryEmitNext(AgentEvent.error(sessionId,
+                        ctx.emit(AgentEvent.error(sessionId,
                                 "Plan refinement failed: " + e.getMessage(), "REFINEMENT_ERROR"));
                     } finally {
                         slot.close();
@@ -436,7 +436,7 @@ public final class AgentSessionPayload implements SessionPayload {
         log.info("Auto-escalating session {} to expert team", sessionId);
 
         Sinks.Many<AgentEvent> sink = ctx.sharedSink();
-        sink.tryEmitNext(AgentEvent.modeEscalated(sessionId,
+        ctx.emit(AgentEvent.modeEscalated(sessionId,
                 "Task escalated to expert team for collaborative execution"));
 
         TeamSessionPayload.ExpertsPresetConfig presetCfg =

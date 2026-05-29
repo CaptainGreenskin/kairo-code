@@ -344,7 +344,7 @@ public class AgentService implements DisposableBean, InitializingBean {
                 final Path kairoDir = Path.of(finalWorkingDir, ".kairo-code");
                 final LearnedLessonStore lessonStore = LearnedLessonStore.fromKairoDir(kairoDir);
                 FailurePatternTracker failureTracker = new FailurePatternTracker(strike -> {
-                    sink.tryEmitNext(AgentEvent.textChunk(sessionId,
+                    AgentRuntimeContext.emitSerialized(sink, AgentEvent.textChunk(sessionId,
                             "⚠ Tool '" + strike.toolName() + "' has failed 3 consecutive times. "
                                     + "Generating lesson in background…"));
                     ReflectionPipeline.generateAndSave(strike, effectiveCfg, lessonStore);
@@ -378,7 +378,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             final ToolProgressTracker chunkTracker = progressTracker;
             java.util.function.BiConsumer<String, String> chunkSink = (toolCallId, chunkText) -> {
                 if (toolCallId != null) {
-                    sink.tryEmitNext(
+                    AgentRuntimeContext.emitSerialized(sink, 
                             AgentEvent.toolOutputChunk(chunkSessionId, toolCallId, chunkText));
                 }
             };
@@ -528,14 +528,18 @@ public class AgentService implements DisposableBean, InitializingBean {
                     }
                 });
 
+        // confirmBuild() emits directly onto the shared session sink (it returns
+        // sharedSink.asFlux() and drives the coordinator internally). We subscribe ONLY to
+        // run the snapshot-drop side effect above — re-emitting events here would feed the
+        // shared sink back into itself (an infinite loop once emits are serialized).
         execution
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(
-                        sink::tryEmitNext,
+                        evt -> { /* already on shared sink; nothing to forward */ },
                         err -> {
                             log.warn("confirmBuild delegation error for session {}: {}",
                                     sessionId, err.getMessage());
-                            sink.tryEmitNext(AgentEvent.error(sessionId,
+                            AgentRuntimeContext.emitSerialized(sink, AgentEvent.error(sessionId,
                                     err.getMessage(), "CONFIRM_BUILD_ERROR"));
                         });
 
@@ -664,7 +668,7 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
         if (sink != null) {
-            sink.tryEmitNext(AgentEvent.sessionResumed(sessionId));
+            AgentRuntimeContext.emitSerialized(sink, AgentEvent.sessionResumed(sessionId));
         }
 
         log.info("Session {} resumed from {}", sessionId, current);
@@ -752,8 +756,8 @@ public class AgentService implements DisposableBean, InitializingBean {
             }
             Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
             if (sink != null) {
-                sink.tryEmitNext(AgentEvent.reverted(sessionId));
-                sink.tryEmitNext(AgentEvent.clearExecutionMessages(sessionId));
+                AgentRuntimeContext.emitSerialized(sink, AgentEvent.reverted(sessionId));
+                AgentRuntimeContext.emitSerialized(sink, AgentEvent.clearExecutionMessages(sessionId));
             }
             return true;
         }
@@ -779,8 +783,8 @@ public class AgentService implements DisposableBean, InitializingBean {
         // Emit events
         Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
         if (sink != null) {
-            sink.tryEmitNext(AgentEvent.reverted(sessionId));
-            sink.tryEmitNext(AgentEvent.clearExecutionMessages(sessionId));
+            AgentRuntimeContext.emitSerialized(sink, AgentEvent.reverted(sessionId));
+            AgentRuntimeContext.emitSerialized(sink, AgentEvent.clearExecutionMessages(sessionId));
         }
 
         log.info("Session {} reverted successfully (ref={}) — phase now PLAN_PENDING", sessionId, snapshotRef);
@@ -1121,7 +1125,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             if (rebuildTracker != null) {
                 java.util.function.BiConsumer<String, String> rebuildChunkSink = (toolCallId, chunkText) -> {
                     if (toolCallId != null) {
-                        sink.tryEmitNext(AgentEvent.toolOutputChunk(sid, toolCallId, chunkText));
+                        AgentRuntimeContext.emitSerialized(sink, AgentEvent.toolOutputChunk(sid, toolCallId, chunkText));
                     }
                 };
                 rebuildExtraDeps = Map.of(
@@ -1174,7 +1178,7 @@ public class AgentService implements DisposableBean, InitializingBean {
         ContextCompactionHook probe = new ContextCompactionHook();
         int maxTokens = probe.maxContextTokens();
         return ContextCompactionHook.withListener(beforeTokens -> {
-            Sinks.EmitResult emit = sink.tryEmitNext(
+            Sinks.EmitResult emit = AgentRuntimeContext.emitSerialized(sink, 
                     AgentEvent.contextCompacted(sessionId, beforeTokens, maxTokens));
             if (emit.isFailure()) {
                 log.warn("Failed to emit CONTEXT_COMPACTED for session {}: {}", sessionId, emit);
@@ -1323,7 +1327,7 @@ public class AgentService implements DisposableBean, InitializingBean {
                                                 inflight.toolName(),
                                                 inflight.phase().name(),
                                                 inflight.elapsedMs());
-                                Sinks.EmitResult emit = sink.tryEmitNext(event);
+                                Sinks.EmitResult emit = AgentRuntimeContext.emitSerialized(sink, event);
                                 if (emit.isFailure()) {
                                     log.debug(
                                             "Skipped TOOL_PROGRESS for {} ({}): {}",

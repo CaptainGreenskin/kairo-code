@@ -240,20 +240,20 @@ public final class TeamSessionPayload implements SessionPayload {
         Msg userMsg = buildUserMsg(request);
         final Agent localAgent = this.agent;
 
-        sink.tryEmitNext(AgentEvent.thinking(sessionId));
+        ctx.emit(AgentEvent.thinking(sessionId));
 
         AgentSlot slot;
         try {
             slot = ctx.concurrency().acquire(sessionId);
         } catch (AgentConcurrencyException e) {
-            sink.tryEmitNext(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
+            ctx.emit(AgentEvent.error(sessionId, e.getMessage(), e.reason().name()));
             running.set(false);
             return sink.asFlux();
         }
 
         Consumer<String> thinkingConsumer = delta -> {
             if (delta != null && !delta.isEmpty()) {
-                sink.tryEmitNext(AgentEvent.thinkingChunk(sessionId, delta));
+                ctx.emit(AgentEvent.thinkingChunk(sessionId, delta));
             }
         };
 
@@ -348,7 +348,7 @@ public final class TeamSessionPayload implements SessionPayload {
                     ctx.persistPhase().accept(SessionPhase.FAILED_EXECUTION);
                     log.warn("Expert team execution failed (session={}): {}",
                             sessionId, err.getMessage());
-                    sink.tryEmitNext(AgentEvent.error(sessionId,
+                    ctx.emit(AgentEvent.error(sessionId,
                             "Expert team execution failed: " + err.getMessage(),
                             "TEAM_EXECUTION_ERROR"));
                 })
@@ -428,7 +428,7 @@ public final class TeamSessionPayload implements SessionPayload {
         // the shared sink is the persistent session channel reused by confirmAndExecute
         // and any follow-up messages.
         Sinks.Many<AgentEvent> sink = ctx.sharedSink();
-        sink.tryEmitNext(AgentEvent.thinking(sessionId));
+        ctx.emit(AgentEvent.thinking(sessionId));
 
         Mono<TeamResult> resultMono = preset.coordinator()
                 .startExpertTeam(goal, preset.teamConfig(), List.<String>of(), true);
@@ -444,7 +444,7 @@ public final class TeamSessionPayload implements SessionPayload {
                     lastPlanReadyAttributes = planAttrs.isEmpty() ? null : planAttrs;
                     Map<String, Object> meta = buildPlanReadyMeta(pendingTeamId,
                             planAttrs.isEmpty() ? null : planAttrs);
-                    sink.tryEmitNext(AgentEvent.planReady(sessionId,
+                    ctx.emit(AgentEvent.planReady(sessionId,
                             extractPlanSummary(result), meta));
                 })
                 .doOnError(err -> {
@@ -453,7 +453,7 @@ public final class TeamSessionPayload implements SessionPayload {
                     ctx.persistPhase().accept(SessionPhase.FAILED_PLANNING);
                     log.warn("Expert team planning failed (session={}): {}",
                             sessionId, err.getMessage());
-                    sink.tryEmitNext(AgentEvent.error(sessionId,
+                    ctx.emit(AgentEvent.error(sessionId,
                             "Planning failed: " + err.getMessage(),
                             "PLANNING_ERROR"));
                 })
@@ -487,7 +487,7 @@ public final class TeamSessionPayload implements SessionPayload {
 
     private void emitDoneOnce(String sessionId) {
         if (doneEmitted.compareAndSet(false, true)) {
-            ctx.sharedSink().tryEmitNext(AgentEvent.done(sessionId, 0, 0));
+            ctx.emit(AgentEvent.done(sessionId, 0, 0));
         }
     }
 
@@ -525,7 +525,7 @@ public final class TeamSessionPayload implements SessionPayload {
                     String content = summarize(te);
                     String fromTag = role != null ? "expert:" + role : "expert";
                     String eventId = envelope.eventId();
-                    sink.tryEmitNext(AgentEvent.peerMessage(
+                    ctx.emit(AgentEvent.peerMessage(
                             sessionId, fromTag, content, eventId));
                     if (narrator != null) {
                         narrator.enqueue(new PeerEventSummary(
@@ -608,7 +608,7 @@ public final class TeamSessionPayload implements SessionPayload {
                     try {
                         List<MessageBus.TeamMessage> msgs = messageBus.poll(sessionId);
                         for (MessageBus.TeamMessage msg : msgs) {
-                            sink.tryEmitNext(AgentEvent.peerMessage(
+                            ctx.emit(AgentEvent.peerMessage(
                                     sessionId, msg.fromSessionId(),
                                     msg.content(), msg.messageId()));
                         }
@@ -916,7 +916,7 @@ public final class TeamSessionPayload implements SessionPayload {
             }
             log.debug("narrator.dispatch suppressed=false session={} chars={}",
                     sessionId, text.length());
-            sink.tryEmitNext(AgentEvent.textChunk(sessionId, text));
+            ctx.emit(AgentEvent.textChunk(sessionId, text));
         }
 
         private List<Msg> buildNarratorMessages(NarratorSettings settings,

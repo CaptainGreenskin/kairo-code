@@ -31,4 +31,32 @@ public record AgentRuntimeContext(
     AtomicReference<SessionPhase> phaseRef,
     Consumer<SessionPhase> persistPhase,
     AgentConcurrencyController concurrency
-) {}
+) {
+    /**
+     * Emit an event to the shared multicast sink, the single safe path for all writers.
+     *
+     * <p>Reactor's {@code multicast().onBackpressureBuffer} sink rejects concurrent
+     * {@code tryEmitNext} calls with {@link Sinks.EmitResult#FAIL_NON_SERIALIZED} and silently
+     * drops the event. The shared sink is written from several threads at once (agent reactor,
+     * swarm-event bridge, narrator dispatcher, worker pool), so a raw {@code tryEmitNext} loses
+     * events under contention — this is what left the chat stuck on "Stop" when the terminal
+     * {@code AGENT_DONE} raced the bridge. Spin-retry on contention; non-contention failures
+     * (terminated / overflow / no-subscriber) are returned to the caller, preserving the prior
+     * fire-and-forget leniency.
+     */
+    public Sinks.EmitResult emit(AgentEvent event) {
+        return emitSerialized(sharedSink, event);
+    }
+
+    /**
+     * Serialized emit usable by any holder of the per-session sink (e.g. AgentService) that does
+     * not have an {@link AgentRuntimeContext} handy. See {@link #emit(AgentEvent)} for rationale.
+     */
+    public static Sinks.EmitResult emitSerialized(Sinks.Many<AgentEvent> sink, AgentEvent event) {
+        Sinks.EmitResult result;
+        while ((result = sink.tryEmitNext(event)) == Sinks.EmitResult.FAIL_NON_SERIALIZED) {
+            Thread.onSpinWait();
+        }
+        return result;
+    }
+}
