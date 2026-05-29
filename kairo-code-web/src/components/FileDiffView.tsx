@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import * as monaco from 'monaco-editor';
 import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { useMonacoTheme } from '@hooks/useMonacoTheme';
 
 const LANG_BY_EXT: Record<string, string> = {
     ts: 'typescript',
@@ -48,6 +49,7 @@ interface FileDiffViewProps {
 function PreviewPanel({ language, value, collapsed }: { language: string; value: string; collapsed: boolean }) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+    const monacoTheme = useMonacoTheme();
 
     useEffect(() => {
         if (collapsed) return;
@@ -57,7 +59,7 @@ function PreviewPanel({ language, value, collapsed }: { language: string; value:
         const model = monaco.editor.createModel(value, language);
         const editor = monaco.editor.create(containerRef.current, {
             model,
-            theme: 'vs-dark',
+            theme: monacoTheme,
             readOnly: true,
             minimap: { enabled: false },
             scrollBeyondLastLine: false,
@@ -75,6 +77,12 @@ function PreviewPanel({ language, value, collapsed }: { language: string; value:
         };
     }, [collapsed, language, value]);
 
+    useEffect(() => {
+        if (editorRef.current) {
+            editorRef.current.updateOptions({ theme: monacoTheme });
+        }
+    }, [monacoTheme]);
+
     if (collapsed) return null;
     return (
         <div style={{ height: '300px' }}>
@@ -87,6 +95,7 @@ function PreviewPanel({ language, value, collapsed }: { language: string; value:
 function DiffPanel({ language, original, modified, collapsed }: { language: string; original: string; modified: string; collapsed: boolean }) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+    const monacoTheme = useMonacoTheme();
 
     useEffect(() => {
         if (collapsed) return;
@@ -102,7 +111,7 @@ function DiffPanel({ language, original, modified, collapsed }: { language: stri
             scrollBeyondLastLine: false,
             fontSize: 12,
             renderSideBySide: true,
-            theme: 'vs-dark',
+            theme: monacoTheme,
             automaticLayout: true,
         });
         editor.setModel({ original: originalModel, modified: modifiedModel });
@@ -115,6 +124,12 @@ function DiffPanel({ language, original, modified, collapsed }: { language: stri
             editorRef.current = null;
         };
     }, [collapsed, language, original, modified]);
+
+    useEffect(() => {
+        if (editorRef.current) {
+            monaco.editor.setTheme(monacoTheme);
+        }
+    }, [monacoTheme]);
 
     if (collapsed) return null;
     return (

@@ -32,7 +32,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.time.Duration;
 
@@ -78,7 +77,7 @@ public final class AgentSessionPayload implements SessionPayload {
     private volatile CheckpointWriterHook checkpointHook;
 
     // ── Payload-owned state ──────────────────────────────────────────────────────
-    private final ReentrantLock refineLock = new ReentrantLock();
+    private final AtomicBoolean refineProcessing = new AtomicBoolean(false);
     private final ConcurrentLinkedDeque<Msg> refineQueue = new ConcurrentLinkedDeque<>();
     private final AtomicReference<Disposable> currentRun = new AtomicReference<>();
 
@@ -339,7 +338,7 @@ public final class AgentSessionPayload implements SessionPayload {
         refineQueue.addLast(userMsg);
 
         // Try to acquire the refinement lock (serialized LLM calls)
-        if (!refineLock.tryLock()) {
+        if (!refineProcessing.compareAndSet(false, true)) {
             // Already processing a refinement — message is queued and will be picked up
             return sink.asFlux();
         }
@@ -390,7 +389,7 @@ public final class AgentSessionPayload implements SessionPayload {
                     }
                 }
             } finally {
-                refineLock.unlock();
+                refineProcessing.set(false);
             }
         }).subscribeOn(Schedulers.boundedElastic()).subscribe();
     }
@@ -407,7 +406,7 @@ public final class AgentSessionPayload implements SessionPayload {
         if (refineQueue.isEmpty()) {
             return;
         }
-        if (!refineLock.tryLock()) {
+        if (!refineProcessing.compareAndSet(false, true)) {
             return; // already being processed
         }
         processRefinementQueue(ctx.sharedSink());

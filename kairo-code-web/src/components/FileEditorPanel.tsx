@@ -3,6 +3,7 @@ import { X, Loader2, Eye, Pencil, ChevronRight, FileWarning } from 'lucide-react
 import { getFileContent, putFileContent } from '@api/config';
 import * as monaco from 'monaco-editor';
 import { LazyMarkdown } from './LazyMarkdown';
+import { useMonacoTheme } from '@hooks/useMonacoTheme';
 
 /** Binary/uneditable file basenames the editor will refuse to open with a friendly
  *  message rather than firing a doomed UTF-8 read that surfaces as a raw HTTP 400. */
@@ -46,6 +47,7 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
     const [binary, setBinary] = useState(false);
     const [oversize, setOversize] = useState<string | null>(null);
     const isMarkdown = language === 'markdown' || /\.(md|markdown|mdx)$/i.test(path);
+    const monacoTheme = useMonacoTheme();
 
     useEffect(() => {
         setError(null);
@@ -123,7 +125,7 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
 
         const editor = monaco.editor.create(editorContainerRef.current, {
             model,
-            theme: 'vs-dark',
+            theme: monacoTheme,
             minimap: { enabled: false },
             fontSize: 13,
             lineNumbers: 'on',
@@ -158,6 +160,13 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
         // require a remount. `content` changes are pushed via model.setValue below.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loading, binary, oversize, isMarkdown, viewMode, language]);
+
+    // Sync Monaco theme with system dark/light mode.
+    useEffect(() => {
+        if (editorRef.current) {
+            editorRef.current.updateOptions({ theme: monacoTheme });
+        }
+    }, [monacoTheme]);
 
     // External content updates (initial load, gotoLine refresh) → push into model.
     useEffect(() => {
@@ -280,10 +289,10 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
                     <LazyMarkdown>{content}</LazyMarkdown>
                 </div>
             ) : (
-                <div className="flex-1">
+                <div className="flex-1 min-h-0 relative">
                     <div
                         ref={editorContainerRef}
-                        className="w-full h-full"
+                        className="absolute inset-0"
                         data-testid="monaco-editor-container"
                     />
                 </div>

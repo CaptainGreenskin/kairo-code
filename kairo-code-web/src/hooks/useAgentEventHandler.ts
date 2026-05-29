@@ -3,7 +3,7 @@ import { useSessionStore } from '@store/sessionStore';
 import { streamingStore } from '@store/streamingStore';
 import { usePreferencesStore, shouldAutoApprove } from '@store/preferencesStore';
 import { usePlanModeStore } from '@store/planModeStore';
-import type { AgentEvent, ToolCall, PlanReadyPayload, SessionRestoredPayload, TodosUpdatedPayload } from '@/types/agent';
+import type { AgentEvent, ToolCall, PlanReadyPayload, SessionRestoredPayload, TodosUpdatedPayload, ContextCompactedPayload } from '@/types/agent';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
 import { useExpertTeamStore } from '@store/expertTeamStore';
 import { useLayoutStore } from '@store/layoutStore';
@@ -270,7 +270,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         // Auto-refresh file tree when a write/edit tool completes successfully.
                         if (tc && !payload.isError) {
                             const name = tc.toolName.toLowerCase();
-                            if (name.includes('write') || name.includes('edit') || name.includes('patch') || name.includes('create')) {
+                            if (name.includes('write') || name.includes('edit') || name.includes('patch') || name.includes('create') || name.includes('replace') || name.includes('insert')) {
                                 const input = tc.input as Record<string, unknown> | undefined;
                                 const path = (input?.file_path ?? input?.path ?? input?.filePath) as string | undefined;
                                 if (path) {
@@ -535,6 +535,15 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                 }
 
                 case 'CONTEXT_COMPACTED': {
+                    const cp = event.payload as ContextCompactedPayload;
+                    const pct = cp.maxTokens > 0 ? Math.round((cp.beforeTokens / cp.maxTokens) * 100) : 0;
+                    addMessageTo(sid, {
+                        id: generateId(),
+                        role: 'assistant',
+                        content: `⚡ **Context compacted** — ${cp.beforeTokens.toLocaleString()} / ${cp.maxTokens.toLocaleString()} tokens (${pct}%). Earlier messages have been summarized to free up context space.`,
+                        toolCalls: [],
+                        timestamp: Date.now(),
+                    });
                     if (isActive) {
                         setIsCompacting(true);
                         if (compactionTimerRef.current) clearTimeout(compactionTimerRef.current);

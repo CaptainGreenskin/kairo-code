@@ -7,13 +7,15 @@ interface SessionStatsData {
     assistantMessages: number;
     toolCalls: number;
     estimatedTokens: number;
+    contextTokens?: number;
+    contextWindow?: number;
 }
-
-const CONTEXT_LIMIT = 200_000;
 
 export function StatsPopover({ stats }: { stats: SessionStatsData }) {
     const [open, setOpen] = useState(false);
-    const pct = Math.min(stats.estimatedTokens / CONTEXT_LIMIT * 100, 100);
+    const usedTokens = stats.contextTokens ?? stats.estimatedTokens;
+    const limit = stats.contextWindow ?? 200_000;
+    const pct = Math.min(usedTokens / limit * 100, 100);
     const pctColor = pct > 80 ? 'text-red-400' : pct > 50 ? 'text-amber-400' : 'text-green-400';
 
     return (
@@ -23,7 +25,7 @@ export function StatsPopover({ stats }: { stats: SessionStatsData }) {
                 className={`p-1.5 rounded transition-colors hover:bg-[var(--bg-secondary)] ${
                     pct > 80 ? pctColor : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
-                title={`Session stats — ~${formatTokenCount(stats.estimatedTokens)}${pct > 80 ? ' (context near limit)' : ''}`}
+                title={`Session stats — ~${formatTokenCount(usedTokens)}${pct > 80 ? ' (context near limit)' : ''}`}
                 aria-label="Session stats"
             >
                 <BarChart3 size={16} />
@@ -49,7 +51,7 @@ export function StatsPopover({ stats }: { stats: SessionStatsData }) {
                                 />
                             </div>
                             <div className="text-[var(--text-muted)] mt-1">
-                                ~{formatTokenCount(stats.estimatedTokens)} / {formatTokenCount(CONTEXT_LIMIT)}
+                                ~{formatTokenCount(usedTokens)} / {formatTokenCount(limit)}
                             </div>
                         </div>
 

@@ -546,12 +546,20 @@ function App() {
         if (useSessionStore.getState().messages.length > 0) return;
         const lastId = getLastSessionId();
         if (!lastId) return;
-        loadSnapshot(lastId).then(snap => {
-            if (snap && snap.messages.length > 0
-                && useSessionStore.getState().messages.length === 0) {
-                restoreSession(snap.sessionId, snap.messages, false);
-                saveMessages(snap.sessionId, snap.messages);
+        listSnapshots().then(metas => {
+            if (!metas.some(m => m.sessionId === lastId)) {
+                clearLastSessionId();
+                return;
             }
+            return loadSnapshot(lastId).then(snap => {
+                if (snap && snap.messages.length > 0
+                    && useSessionStore.getState().messages.length === 0) {
+                    restoreSession(snap.sessionId, snap.messages, false);
+                    saveMessages(snap.sessionId, snap.messages);
+                } else if (!snap) {
+                    clearLastSessionId();
+                }
+            });
         });
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -647,7 +655,7 @@ function App() {
             // Without this, the server logs "No pending approval for toolCallId: X" because the
             // first approve already removed it from pendingApprovals.
             const msgs = useSessionStore.getState().messages;
-            const owner = msgs.find((m) => m.toolCalls.some((tc) => tc.id === toolCallId));
+            const owner = msgs.find((m) => m.toolCalls?.some((tc) => tc.id === toolCallId));
             if (owner) {
                 useSessionStore.getState().updateToolCall(owner.id, toolCallId, {
                     status: approved ? 'approved' : 'rejected',
@@ -1013,8 +1021,10 @@ function App() {
         const userMessages = messages.filter(m => m.role === 'user').length;
         const assistantMessages = messages.filter(m => m.role === 'assistant').length;
         const toolCalls = messages.reduce((sum, m) => sum + (m.toolCalls?.length ?? 0), 0);
-        return { userMessages, assistantMessages, toolCalls, estimatedTokens };
-    }, [messages]);
+        const contextTokens = tokenUsage.input > 0 ? tokenUsage.input : undefined;
+        const contextWindow = currentModel ? getContextWindow(currentModel) : undefined;
+        return { userMessages, assistantMessages, toolCalls, estimatedTokens, contextTokens, contextWindow };
+    }, [messages, tokenUsage.input, currentModel]);
 
     const handleExport = useCallback((format: 'markdown' | 'json') => {
         const name = (sessionId ? getSessionName(sessionId) : null) ?? `session-${sessionId?.slice(0, 8) ?? 'new'}`;
@@ -1532,6 +1542,7 @@ ${content}
                                             ref={virtuosoRef}
                                             className="pt-6 pb-3 overflow-x-hidden [scrollbar-gutter:stable]"
                                             style={{ height: '100%' }}
+                                            defaultItemHeight={80}
                                             data={filteredMessages}
                                             followOutput={(isAtBottom) => {
                                                 if ((showSearch && searchQuery) || (showMessageSearch && messageSearchQuery)) return false;

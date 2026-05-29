@@ -20,6 +20,8 @@ interface HeaderProps {
         assistantMessages: number;
         toolCalls: number;
         estimatedTokens: number;
+        contextTokens?: number;
+        contextWindow?: number;
     };
     isThinking?: boolean;
     isToolRunning?: boolean;

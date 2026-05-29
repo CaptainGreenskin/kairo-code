@@ -20,6 +20,7 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
+import reactor.core.Disposable;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -64,6 +65,9 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
 
     /** sessionId → WS sessions bound to it (multiple browser tabs supported). */
     private final ConcurrentHashMap<String, Set<WebSocketSession>> subscribers = new ConcurrentHashMap<>();
+
+    /** sessionId → single event stream subscription that broadcasts to all bound WS sessions. */
+    private final ConcurrentHashMap<String, Disposable> eventSubscriptions = new ConcurrentHashMap<>();
 
     /** teamId → WS sessions subscribed to team events. */
     private final ConcurrentHashMap<String, Set<WebSocketSession>> teamSubscribers = new ConcurrentHashMap<>();
@@ -193,9 +197,10 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
             sendErr(session, "message", "missing sessionId or message");
             return;
         }
+        ensureEventSubscription(sid);
         agentService.sendMessage(sid, msg, imageData, imageMediaType)
                 .subscribe(
-                        event -> broadcast(sid, event),
+                        event -> { /* events arrive via the single shared subscription */ },
                         err -> log.error("Stream error for session {}", sid, err)
                 );
     }
@@ -243,10 +248,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         if (accepted) {
             sendAck(session, "confirmBuild");
             log.info("confirmBuild accepted for session {}", sid);
-            agentService.sessionEvents(sid)
-                    .subscribe(
-                            event -> broadcast(sid, event),
-                            err -> log.error("sessionEvents error for session {}", sid, err));
+            ensureEventSubscription(sid);
         } else {
             log.debug("confirmBuild ignored for session {} (not in PLAN_PENDING)", sid);
         }
@@ -380,6 +382,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         subscribers
                 .computeIfAbsent(sessionId, k -> ConcurrentHashMap.newKeySet())
                 .add(session);
+        ensureEventSubscription(sessionId);
     }
 
     private void unbind(WebSocketSession session) {
@@ -390,9 +393,28 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                 set.remove(session);
                 if (set.isEmpty()) {
                     subscribers.remove(s);
+                    Disposable sub = eventSubscriptions.remove(s);
+                    if (sub != null && !sub.isDisposed()) {
+                        sub.dispose();
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Subscribe to the session's event stream exactly once. Multicast sinks deliver events to
+     * every subscriber — creating a new subscription per handleMessage/handleConfirmBuild call
+     * was causing N-fold duplication (the "TheThe user user" doubled-text bug).
+     */
+    private void ensureEventSubscription(String sessionId) {
+        eventSubscriptions.computeIfAbsent(sessionId, sid -> {
+            log.debug("Installing event subscription for session {}", sid);
+            return agentService.sessionEvents(sid)
+                    .subscribe(
+                            event -> broadcast(sid, event),
+                            err -> log.error("Event stream error for session {}", sid, err));
+        });
     }
 
     private void broadcast(String sessionId, Object payload) {

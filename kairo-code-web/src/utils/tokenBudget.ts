@@ -12,6 +12,7 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
     'claude-opus-4': 200_000,
     'glm-4': 128_000,
     'glm-4-flash': 128_000,
+    'glm-5': 128_000,
 };
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
