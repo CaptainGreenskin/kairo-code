@@ -340,7 +340,15 @@ export function useAgentWebSocket(
             // A streaming TEAM_EVENT proves the session is alive — during experts execution the
             // chat channel emits no AGENT_THINKING/TEXT_CHUNK/TOOL_CALL (those are team events),
             // so without this the stalled-probe would wrongly cancel a long-running expert step.
-            if (type === 'TEAM_EVENT') clearStalledTimer();
+            // It must ALSO refresh lastEventAt: the visual StallIndicator keys off lastEventAt, which
+            // is only updated by AgentEvents routed through onEvent below. TEAM_EVENTs return early,
+            // so without this the indicator wrongly reports "agent silent / likely stalled" while an
+            // expert worker is actively running tools.
+            if (type === 'TEAM_EVENT') {
+                clearStalledTimer();
+                const teamSid = raw.sessionId as string | undefined;
+                if (teamSid) useSessionStore.getState().recordEventFor(teamSid, Date.now());
+            }
             return;
         }
 

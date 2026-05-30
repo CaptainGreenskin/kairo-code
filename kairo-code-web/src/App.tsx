@@ -364,6 +364,19 @@ function App() {
         if (isThinking) {
             if (!thinkingStartRef.current) thinkingStartRef.current = Date.now();
             const timer = setTimeout(() => {
+                // Never auto-cancel an active experts/team run. The valve assumes a single agent
+                // turn shouldn't exceed ~6min, but an experts orchestration (planning + several
+                // sequential multi-iteration expert agents) legitimately stays "thinking" far
+                // longer — firing here killed healthy runs at the 6-minute mark.
+                const teamId = useExpertTeamStore.getState().canvasTeamId;
+                const teamStatus = teamId
+                    ? useExpertTeamStore.getState().teams[teamId]?.status
+                    : undefined;
+                const expertsActive = teamStatus != null
+                    && teamStatus !== 'completed' && teamStatus !== 'failed' && teamStatus !== 'timeout';
+                if (expertsActive) {
+                    return;
+                }
                 setThinking(false);
                 setAgentPhase('thinking');
                 addToast('warning', 'Agent response timed out. Please try again.');

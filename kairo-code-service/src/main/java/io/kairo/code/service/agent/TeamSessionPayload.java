@@ -379,8 +379,17 @@ public final class TeamSessionPayload implements SessionPayload {
         if (p != null && !p.isDisposed()) {
             p.dispose();
         }
-        ctx.runningState().set(false);
+        boolean wasRunning = ctx.runningState().getAndSet(false);
         session.agent().interrupt();
+        // Disposing currentRun above triggers the confirmBuild pipeline's doOnCancel, which sets
+        // phase=FAILED_EXECUTION but emits NOTHING to the session sink — and the underlying model
+        // call's CancellationException is dropped (onErrorDropped). Without a terminal event the UI
+        // stays "running" forever. Deliver one here, guarded by doneEmitted so a run that already
+        // completed normally (AGENT_DONE emitted) isn't followed by a spurious error.
+        if (wasRunning && doneEmitted.compareAndSet(false, true)) {
+            ctx.emit(AgentEvent.error(
+                    ctx.sessionId(), "Expert team execution stopped", "STOPPED"));
+        }
         log.info("TeamSessionPayload stopped (session={}, preset={})",
                 ctx.sessionId(), preset != null);
     }
