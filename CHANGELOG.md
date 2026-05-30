@@ -4,6 +4,37 @@ All notable changes to Kairo Code are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **General-flow Resume** — stopping an ordinary agent run now surfaces a
+  "Resume" button that continues from where it left off (the backend lands the
+  session in a resumable `FAILED_PLANNING` phase and keeps full conversation
+  history). The resumable flag is sticky across WebSocket rebinds and cleared on
+  the next message / resume. Plan-flow resume is unchanged; the button is hidden
+  in experts mode.
+- **Workspace write boundary** — file WRITE tools whose resolved target escapes
+  the session's working directory are escalated to human approval (reusing the
+  existing approval flow) instead of writing silently. Covers single-path tools
+  (`write`/`edit`) and `batch_write`'s `files` array. Implemented upstream in
+  `kairo-core`'s `ToolPermissionResolver` and wired via `CodeAgentFactory`.
+
+### Changed
+
+- **Plan confirmation is explicit** — removed the keyword-triggered 5s auto-build
+  countdown; confirming a plan is now an explicit "Approve and Build" click only.
+
+### Fixed
+
+- **Stop now terminates in-flight bash** — `BashTool` cancels the underlying
+  sandbox process on cancellation, so hitting Stop no longer lets a long-running
+  command keep executing in the background (upstream `kairo-tools`).
+- **Stop leaves the running state immediately** — the UI no longer stays stuck in
+  the "running" state after Stop when the backend emits no terminal event.
+- **New chat clears stale experts canvas** — opening a new chat resets the
+  experts canvas and plan phase instead of inheriting the previous session's.
+
 ## [0.2.0-SNAPSHOT] — 2026-05-23
 
 Full-stack Kairo SPI integration milestone. Kairo Code stops being a thin

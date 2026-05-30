@@ -1089,6 +1089,10 @@ ${content}
             const newId = await createSession(currentWorkspaceId);
             useSessionStore.getState().openSession(newId);
             assistantMsgRef.current[newId] = null;
+            // A fresh chat has no experts canvas or pending plan — clear any left over from
+            // the previous session so the new one doesn't inherit a stale canvas/phase.
+            useExpertTeamStore.getState().setCanvasTeamId(null);
+            useBuildPhaseStore.getState().setPhase('idle');
             if (isConnected) switchSession(newId);
         } catch (e) {
             addToast('error', e instanceof Error ? e.message : 'Failed to create session');
