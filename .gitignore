@@ -66,16 +66,8 @@ KAIRO_SESSION_RESULT.json
 .kairo-trace/
 .kairo-session/
 
-# Dispatcher internals — worktrees, logs, evals, ATA drafts (never push)
-.dispatcher/worktrees/
-.dispatcher/logs/
-.dispatcher/eval/
-.dispatcher/_archive/
-.dispatcher/ata/
-.dispatcher/bench/swe-bench/.work/
-.dispatcher/bench/swe-bench/.venv/
-.dispatcher/bench/swe-bench/.splits/
-.dispatcher/bench/swe-bench/logs/
+# Dispatcher internals — lives outside the repo by design, never commit
+.dispatcher/
 results-v*/
 
 # Node.js
