@@ -471,6 +471,9 @@ export function useAgentWebSocket(
                 body.imageData = imageData;
                 body.imageMediaType = imageMediaType;
             }
+            // A new user message supersedes any prior stop — clear the resumable flag so the
+            // general-flow "Resume" affordance does not linger across a fresh turn.
+            useSessionStore.getState().setResumableFor(sessionId, false);
             send(body);
         },
         [send],
@@ -495,6 +498,15 @@ export function useAgentWebSocket(
     const stopAgent = useCallback(
         (sessionId: string) => {
             send({ action: 'stop', sessionId });
+            // Stop is user-initiated; the backend interrupt does not always emit a terminal
+            // client event (an in-flight bash, for instance, only unblocks later). Flip
+            // running off optimistically so the UI leaves the "running" state immediately,
+            // and mark the session resumable so the general-flow "Resume" button appears.
+            // The backend lands the run in a resumable (FAILED_*) phase. resumable is cleared
+            // on the next run, SESSION_RESUMED, or session restore.
+            const store = useSessionStore.getState();
+            store.setRunningFor(sessionId, false);
+            store.setResumableFor(sessionId, true);
         },
         [send],
     );

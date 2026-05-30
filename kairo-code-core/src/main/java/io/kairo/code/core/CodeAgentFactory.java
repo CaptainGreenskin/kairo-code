@@ -324,6 +324,13 @@ public final class CodeAgentFactory {
                     io.kairo.core.tool.permission.PermissionMode.BYPASS);
         }
 
+        // Confine file writes to the workspace: a WRITE whose target escapes workingDir is
+        // escalated to ASK (human approval) via the existing approval flow. No-op in BYPASS
+        // (one-shot/batch) mode, where there is no approver anyway.
+        if (config.workingDir() != null && !config.workingDir().isBlank()) {
+            executor.setWorkspaceRoot(Path.of(config.workingDir()));
+        }
+
         // Workflow tool — the schema is already registered above; now inject the executor
         // so the tool can dispatch each step back through the same executor the agent uses.
         WorkflowTool workflowTool = new WorkflowTool();

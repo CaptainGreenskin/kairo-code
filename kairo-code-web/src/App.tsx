@@ -1585,6 +1585,10 @@ ${content}
                                                 Footer: () => {
                                                     const buildPhase = useBuildPhaseStore((s) => s.phase);
                                                     const buildIsGit = useBuildPhaseStore((s) => s.isGit);
+                                                    const resumable = useSessionStore((s) => s.resumable);
+                                                    // Use the store's running flag (what stopAgent flips), not the App-derived
+                                                    // isRunning (isThinking||agentPhase), which can stay stuck after a stop.
+                                                    const storeRunning = useSessionStore((s) => s.running);
                                                     return (
                                                         <div className="px-4">
                                                             {buildPhase === 'PLAN_PENDING' && sessionId && !canvasTeamId && (
@@ -1621,6 +1625,18 @@ ${content}
                                                                             Resume
                                                                         </button>
                                                                     )}
+                                                                </div>
+                                                            )}
+                                                            {!storeRunning && resumable && buildPhase === 'idle' && sessionId && !canvasTeamId && (
+                                                                <div className="mt-2 mb-2 flex gap-2">
+                                                                    <button
+                                                                        className="px-3 py-1.5 text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                                                                        onClick={() => {
+                                                                            send({ action: 'resume', sessionId });
+                                                                        }}
+                                                                    >
+                                                                        Resume
+                                                                    </button>
                                                                 </div>
                                                             )}
                                                             {isRunning && (

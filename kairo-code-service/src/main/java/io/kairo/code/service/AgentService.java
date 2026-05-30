@@ -605,10 +605,11 @@ public class AgentService implements DisposableBean, InitializingBean {
             // review). cancelAll() resolves each pending Sinks.One with denied so the in-flight
             // tool's Mono.block() returns instead of surfacing InterruptedException.
             entry.approvalHandler().cancelAll();
-            // Delegate cancellation to the payload (sets runningState=false, interrupts agent)
-            entry.payload().stop();
 
-            // Phase transition: stop() during EXECUTING → FAILED_EXECUTION
+            // Phase transition BEFORE payload.stop(): the run's doFinally races to
+            // compareAndSet(PLANNING, IDLE) once stop() disposes it. Landing the FAILED_*
+            // phase first means that compareAndSet no longer matches, so a stopped run
+            // deterministically stays resumable (resumeSession accepts FAILED_*).
             AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
             if (phaseRef != null) {
                 SessionPhase current = phaseRef.get();
@@ -630,6 +631,9 @@ public class AgentService implements DisposableBean, InitializingBean {
             } else {
                 log.info("Session {} stopped", sessionId);
             }
+
+            // Delegate cancellation to the payload (sets runningState=false, interrupts agent)
+            entry.payload().stop();
         } catch (Exception e) {
             log.warn("Error stopping session {}", sessionId, e);
         }

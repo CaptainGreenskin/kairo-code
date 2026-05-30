@@ -14,8 +14,6 @@ import { saveDraft, clearDraft } from '@utils/inputDraft';
 import { readFile, formatFileBlock } from '@utils/fileReader';
 import { listFiles } from '@api/config';
 import { usePlanModeStore, PLAN_MODE_PREAMBLE } from '@store/planModeStore';
-import { useBuildPhaseStore } from '@store/buildPhaseStore';
-import { isConfirmKeyword, isChinese } from '@components/ConfirmBuildChip';
 import type { FileEntry } from '@/types/agent';
 
 export interface AttachedImage {
@@ -359,22 +357,6 @@ export function ChatInput({
         const trimmed = text.trim();
         if (!trimmed || disabled) return;
 
-        // Keyword interception: if in PLAN_PENDING phase, check for confirm keywords
-        const buildPhase = useBuildPhaseStore.getState().phase;
-        if (buildPhase === 'PLAN_PENDING' && isConfirmKeyword(trimmed)) {
-            // Trigger the countdown chip instead of sending the message
-            const chinese = isChinese(trimmed);
-            window.dispatchEvent(
-                new CustomEvent('kairo:startBuildCountdown', { detail: { chinese } }),
-            );
-            setText('');
-            if (sessionId) clearDraft(sessionId);
-            return;
-        }
-
-        // If user types during an active countdown, cancel it
-        window.dispatchEvent(new Event('kairo:cancelBuildCountdown'));
-
         if (sessionId) pushHistory(sessionId, trimmed);
         historyIndexRef.current = null;
         draftRef.current = '';
@@ -498,8 +480,6 @@ export function ChatInput({
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         setText(e.target.value);
-        // Cancel any active build countdown when user types
-        window.dispatchEvent(new Event('kairo:cancelBuildCountdown'));
         // Re-parse autocomplete state after text change
         const cursor = e.target.selectionStart ?? 0;
         const newAcState = parseAutocompleteState(e.target.value, cursor);

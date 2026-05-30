@@ -101,6 +101,34 @@ class AgentServiceStateTest {
         assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.IDLE);
     }
 
+    // ── resumeSession contract (the general-flow Resume button depends on this) ──
+
+    @Test
+    void resumeSession_fromFailedExecution_resetsToIdle() {
+        // A stopped run lands in FAILED_EXECUTION (see stopAgent). Resume must clear it
+        // back to IDLE so the next message proceeds with full conversation history.
+        setPersistedPhase("FAILED_EXECUTION");
+        setSnapshotRef("stash@{0}");
+        String sid = service.createSession(configWithWorkDir());
+        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.FAILED_EXECUTION);
+
+        assertThat(service.resumeSession(sid)).isTrue();
+        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.IDLE);
+    }
+
+    @Test
+    void resumeSession_fromIdle_returnsFalse() {
+        String sid = service.createSession(configNoWorkDir());
+        // Nothing to resume from IDLE.
+        assertThat(service.resumeSession(sid)).isFalse();
+        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.IDLE);
+    }
+
+    @Test
+    void resumeSession_unknownSession_returnsFalse() {
+        assertThat(service.resumeSession("nonexistent")).isFalse();
+    }
+
     // ── Crash recovery: persisted EXECUTING → force FAILED_EXECUTION on restart ──
 
     @Test

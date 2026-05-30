@@ -66,7 +66,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
         setThinkingFor, setTokenUsageFor, setEstimatedCostFor,
         restoreSessionAs, setActiveSession, clearMessagesFor,
         appendThinkingTextTo, clearThinkingTextFor, setMessageThinkingIn,
-        setTodosFor, setRunningFor, recordEventFor,
+        setTodosFor, setRunningFor, setResumableFor, recordEventFor,
     } = useSessionStore();
 
     return useCallback(
@@ -638,6 +638,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                 case 'SESSION_RESUMED': {
                     useBuildPhaseStore.getState().setPhase('idle');
                     setRunningFor(sid, false);
+                    setResumableFor(sid, false);
                     addMessageTo(sid, {
                         id: generateId(),
                         role: 'assistant',
@@ -695,6 +696,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
             clearMessagesFor,
             setTodosFor,
             setRunningFor,
+            setResumableFor,
             recordEventFor,
             setStreamingMsgId,
             setAgentPhase,

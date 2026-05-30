@@ -28,6 +28,12 @@ interface PerSession {
     /** Unix millis of the most recent backend event for this session. 0 if none received yet.
      *  Powers the stall indicator: `Date.now() - lastEventAt > 30s && running` → show warning. */
     lastEventAt: number;
+    /**
+     * True after the user clicked Stop on a general agent run, signalling the backend left
+     * the session in a resumable (FAILED_*) phase. Drives the general-flow "Resume" button.
+     * Cleared when a new run starts (running→true), on SESSION_RESUMED, or on session restore.
+     */
+    resumable: boolean;
 }
 
 const EMPTY_SESSION: PerSession = {
@@ -40,6 +46,7 @@ const EMPTY_SESSION: PerSession = {
     todos: [],
     running: false,
     lastEventAt: 0,
+    resumable: false,
 };
 
 interface SessionsState {
@@ -59,6 +66,7 @@ interface SessionsState {
     todos: Todo[];
     running: boolean;
     lastEventAt: number;
+    resumable: boolean;
 
     // Tab management
     ensureSession: (sid: string) => void;
@@ -84,6 +92,7 @@ interface SessionsState {
     setCurrentModelFor: (sid: string, model: string) => void;
     setTodosFor: (sid: string, todos: Todo[]) => void;
     setRunningFor: (sid: string, running: boolean) => void;
+    setResumableFor: (sid: string, resumable: boolean) => void;
     recordEventFor: (sid: string, ts?: number) => void;
     clearMessagesFor: (sid: string) => void;
     restoreSessionAs: (sid: string, msgs: Message[], running: boolean, todos?: Todo[]) => void;
@@ -103,6 +112,7 @@ interface SessionsState {
     setEstimatedCost: (cost: number) => void;
     setCurrentModel: (model: string) => void;
     setRunning: (running: boolean) => void;
+    setResumable: (resumable: boolean) => void;
     recordEvent: (ts?: number) => void;
     clearMessages: () => void;
     restoreSession: (id: string, messages: Message[], running: boolean) => void;
@@ -118,7 +128,7 @@ function activeMirror(
     activeSessionId: string | null,
 ): Pick<
     SessionsState,
-    'sessionId' | 'messages' | 'isThinking' | 'thinkingText' | 'tokenUsage' | 'estimatedCost' | 'currentModel' | 'todos' | 'running' | 'lastEventAt'
+    'sessionId' | 'messages' | 'isThinking' | 'thinkingText' | 'tokenUsage' | 'estimatedCost' | 'currentModel' | 'todos' | 'running' | 'lastEventAt' | 'resumable'
 > {
     const s = activeSessionId ? sessions[activeSessionId] : null;
     return {
@@ -132,6 +142,7 @@ function activeMirror(
         todos: s?.todos ?? [],
         running: s?.running ?? false,
         lastEventAt: s?.lastEventAt ?? 0,
+        resumable: s?.resumable ?? false,
     };
 }
 
@@ -161,6 +172,7 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
     todos: [],
     running: false,
     lastEventAt: 0,
+    resumable: false,
 
     ensureSession: (sid) =>
         set((state) =>
@@ -325,6 +337,9 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
     setRunningFor: (sid, running) =>
         set((state) => patchSession(state, sid, (s) => ({ ...s, running }))),
 
+    setResumableFor: (sid, resumable) =>
+        set((state) => patchSession(state, sid, (s) => ({ ...s, resumable }))),
+
     recordEventFor: (sid, ts) =>
         set((state) =>
             patchSession(state, sid, (s) => ({ ...s, lastEventAt: ts ?? Date.now() })),
@@ -346,6 +361,10 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
                     todos: todos ?? prev.todos ?? [],
                     running,
                     lastEventAt: Date.now(),
+                    // Preserve resumable: periodic WS rebinds fire SESSION_RESTORED, and a stopped
+                    // run must keep its Resume affordance across those rebinds. Cleared only by a
+                    // new user message or SESSION_RESUMED.
+                    resumable: prev.resumable,
                 },
             };
             return { sessions, ...activeMirror(sessions, state.activeSessionId) };
@@ -422,6 +441,11 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
     setRunning: (running) => {
         const sid = get().activeSessionId;
         if (sid) get().setRunningFor(sid, running);
+    },
+
+    setResumable: (resumable) => {
+        const sid = get().activeSessionId;
+        if (sid) get().setResumableFor(sid, resumable);
     },
 
     recordEvent: (ts) => {
