@@ -134,14 +134,18 @@ public record AgentEvent(
 
     /**
      * Create a SESSION_RESTORED event. The {@code content} field holds a JSON object
-     * with {messages: [...], running: boolean, todos: [...]}.
+     * with {messages: [...], running: boolean, todos: [...], resumable: boolean}.
      * {@code todosJson} should be a JSON array string (e.g. {@code "[]"} when no todos exist).
+     * {@code resumable} is true when the bound session is in a resumable (FAILED_*) phase, so the
+     * client can restore the "Resume" affordance after a page reload.
      */
-    public static AgentEvent sessionRestored(String sessionId, String messagesJson, boolean running, String todosJson) {
+    public static AgentEvent sessionRestored(
+            String sessionId, String messagesJson, boolean running, String todosJson, boolean resumable) {
         String todos = (todosJson == null || todosJson.isBlank()) ? "[]" : todosJson;
         String payload = "{\"messages\":" + messagesJson
                 + ",\"running\":" + running
-                + ",\"todos\":" + todos + "}";
+                + ",\"todos\":" + todos
+                + ",\"resumable\":" + resumable + "}";
         return new AgentEvent(EventType.SESSION_RESTORED, sessionId, payload, null, null,
                 false, null, null, null, null, null, null, null, System.currentTimeMillis());
     }

@@ -130,6 +130,9 @@ export interface SessionRestoredPayload {
     messages: Message[];
     running: boolean;
     todos?: Todo[];
+    /** True when the backend session is in a resumable (FAILED_*) phase — restores the
+     *  general-flow "Resume" affordance after a page reload. */
+    resumable?: boolean;
 }
 
 /**

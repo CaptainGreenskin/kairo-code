@@ -610,23 +610,24 @@ public class AgentService implements DisposableBean, InitializingBean {
             // compareAndSet(PLANNING, IDLE) once stop() disposes it. Landing the FAILED_*
             // phase first means that compareAndSet no longer matches, so a stopped run
             // deterministically stays resumable (resumeSession accepts FAILED_*).
+            //
+            // Use compareAndSet (not set): if the run completed naturally in the window between
+            // reading `current` and this transition (doFinally already moved PLANNING→IDLE), the
+            // CAS fails and we must NOT clobber that legitimate IDLE with a spurious FAILED_*.
             AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
             if (phaseRef != null) {
                 SessionPhase current = phaseRef.get();
-                if (current == SessionPhase.EXECUTING) {
-                    phaseRef.set(SessionPhase.FAILED_EXECUTION);
+                SessionPhase failed =
+                        current == SessionPhase.EXECUTING
+                                ? SessionPhase.FAILED_EXECUTION
+                                : current == SessionPhase.PLANNING ? SessionPhase.FAILED_PLANNING : null;
+                if (failed != null && phaseRef.compareAndSet(current, failed)) {
                     CodeAgentConfig cfg = entry.configOrNull();
-                    if (cfg != null) persistPhase(cfg.workingDir(), SessionPhase.FAILED_EXECUTION);
-                    log.info("Session {} stopped during EXECUTING — transitioned to FAILED_EXECUTION",
-                            sessionId);
-                } else if (current == SessionPhase.PLANNING) {
-                    phaseRef.set(SessionPhase.FAILED_PLANNING);
-                    CodeAgentConfig cfg = entry.configOrNull();
-                    if (cfg != null) persistPhase(cfg.workingDir(), SessionPhase.FAILED_PLANNING);
-                    log.info("Session {} stopped during PLANNING — transitioned to FAILED_PLANNING",
-                            sessionId);
+                    if (cfg != null) persistPhase(cfg.workingDir(), failed);
+                    log.info("Session {} stopped during {} — transitioned to {}",
+                            sessionId, current, failed);
                 } else {
-                    log.info("Session {} stopped (phase={})", sessionId, current);
+                    log.info("Session {} stopped (phase={})", sessionId, phaseRef.get());
                 }
             } else {
                 log.info("Session {} stopped", sessionId);
@@ -861,8 +862,13 @@ public class AgentService implements DisposableBean, InitializingBean {
         CodeAgentConfig cfg = entry.configOrNull();
         String todosJson = cfg != null ? TodoStorage.readJson(cfg.workingDir()) : "[]";
 
-        log.info("Session {} bound: {} messages, running={}", sessionId, messages.size(), running);
-        return AgentEvent.sessionRestored(sessionId, messagesJson, running, todosJson);
+        SessionPhase phase = getSessionPhase(sessionId);
+        boolean resumable =
+                phase == SessionPhase.FAILED_PLANNING || phase == SessionPhase.FAILED_EXECUTION;
+
+        log.info("Session {} bound: {} messages, running={}, resumable={}",
+                sessionId, messages.size(), running, resumable);
+        return AgentEvent.sessionRestored(sessionId, messagesJson, running, todosJson, resumable);
     }
 
     private List<Map<String, Object>> readCheckpointMessages(SessionEntry entry) {

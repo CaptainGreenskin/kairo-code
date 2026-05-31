@@ -1643,7 +1643,7 @@ ${content}
                                                                     </button>
                                                                 </div>
                                                             )}
-                                                            {isRunning && (
+                                                            {isRunning && storeRunning && (
                                                                 <div>
                                                                     <ThinkingIndicator
                                                                         isVisible={true}

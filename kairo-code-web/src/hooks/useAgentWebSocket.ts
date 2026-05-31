@@ -500,13 +500,14 @@ export function useAgentWebSocket(
             send({ action: 'stop', sessionId });
             // Stop is user-initiated; the backend interrupt does not always emit a terminal
             // client event (an in-flight bash, for instance, only unblocks later). Flip
-            // running off optimistically so the UI leaves the "running" state immediately,
-            // and mark the session resumable so the general-flow "Resume" button appears.
-            // The backend lands the run in a resumable (FAILED_*) phase. resumable is cleared
-            // on the next run, SESSION_RESUMED, or session restore.
+            // running off optimistically so the UI leaves the "running" state immediately.
+            // Only mark the session resumable when it was ACTUALLY running — otherwise the
+            // backend leaves the phase unchanged (resumeSession returns false, no SESSION_RESUMED),
+            // and an always-on resumable flag would leave a dead "Resume" button that never clears.
             const store = useSessionStore.getState();
+            const wasRunning = store.sessions[sessionId]?.running ?? false;
             store.setRunningFor(sessionId, false);
-            store.setResumableFor(sessionId, true);
+            if (wasRunning) store.setResumableFor(sessionId, true);
         },
         [send],
     );

@@ -401,6 +401,13 @@ public final class CodeAgentFactory {
                         // like glm-5.1 that narrate between tool rounds.
                         .withSmartContinuation();
 
+        // Bind the session workspace so file tools resolve relative paths against workingDir (not
+        // the JVM cwd) — keeping tool path resolution aligned with the executor's workspace-write
+        // boundary (setWorkspaceRoot above). Without this, ToolContext defaults to Workspace.cwd().
+        if (config.workingDir() != null && !config.workingDir().isBlank()) {
+            builder.workspace(new DirWorkspace(Path.of(config.workingDir()).toAbsolutePath().normalize()));
+        }
+
         if (taskDeps != null && !options.childSession()) {
             Map<String, Object> deps = new LinkedHashMap<>();
             deps.put(TaskToolDependencies.class.getName(), taskDeps);
@@ -1119,6 +1126,25 @@ public final class CodeAgentFactory {
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
                     memoryStore, tracer, swarmCoordinator, mgr, bus);
+        }
+    }
+
+    /** Minimal {@code LOCAL} workspace rooted at the session's working directory. */
+    private record DirWorkspace(java.nio.file.Path root)
+            implements io.kairo.api.workspace.Workspace {
+        @Override
+        public String id() {
+            return root.toString();
+        }
+
+        @Override
+        public io.kairo.api.workspace.WorkspaceKind kind() {
+            return io.kairo.api.workspace.WorkspaceKind.LOCAL;
+        }
+
+        @Override
+        public java.util.Map<String, String> metadata() {
+            return java.util.Map.of();
         }
     }
 }

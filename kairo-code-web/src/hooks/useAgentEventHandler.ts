@@ -523,6 +523,9 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         if (payload.todos) setTodosFor(sid, payload.todos);
                     }
                     setRunningFor(sid, payload.running);
+                    // Backend is authoritative on resumability across reloads/rebinds: a session
+                    // left in a FAILED_* phase restores its "Resume" affordance.
+                    setResumableFor(sid, payload.resumable ?? false);
                     streamingStore.clear(sid);
                     if (isActive) setLoadingSessionId(null);
                     break;

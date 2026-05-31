@@ -29,9 +29,11 @@ interface PerSession {
      *  Powers the stall indicator: `Date.now() - lastEventAt > 30s && running` → show warning. */
     lastEventAt: number;
     /**
-     * True after the user clicked Stop on a general agent run, signalling the backend left
-     * the session in a resumable (FAILED_*) phase. Drives the general-flow "Resume" button.
-     * Cleared when a new run starts (running→true), on SESSION_RESUMED, or on session restore.
+     * True after the user clicked Stop on an actually-running general agent run, signalling the
+     * backend left the session in a resumable (FAILED_*) phase. Drives the general-flow "Resume"
+     * button. Sticky across `running` toggles and WS rebinds (a late event must not clear it);
+     * cleared only when a new user message is sent, on SESSION_RESUMED, or — for a fresh session —
+     * by starting from the EMPTY_SESSION default. `restoreSessionAs` preserves it.
      */
     resumable: boolean;
 }
