@@ -8,9 +8,9 @@ import { installAuthInterceptor } from './api/auth';
 // Inject the server auth token into all /api requests before anything fetches.
 installAuthInterceptor();
 
-// Theme persistence: restore saved theme or fall back to system preference
+// Theme persistence: restore saved theme or default to dark (Cursor-style)
 const savedTheme = localStorage.getItem('kairo-theme');
-if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+if (savedTheme !== 'light') {
     document.documentElement.classList.add('dark');
 }
 

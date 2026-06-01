@@ -74,11 +74,12 @@ export function WelcomeScreen({ onSelectPrompt, appVersion, recentSessions, onSe
     return (
         <div className="flex flex-col items-center justify-center h-full px-6 py-12 select-none">
             {/* Brand */}
-            <div className="flex items-center gap-2.5 mb-2">
-                <div className="w-8 h-8 rounded-lg bg-[var(--accent)] flex items-center justify-center flex-shrink-0">
-                    <Code2 size={16} className="text-white" />
+            <div className="flex flex-col items-center gap-3 mb-2">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-[0_8px_32px_rgba(99,102,241,0.3)]"
+                     style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
+                    <Code2 size={28} className="text-white" />
                 </div>
-                <span className="text-xl font-semibold text-[var(--text-primary)] tracking-tight">Kairo Code</span>
+                <span className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">Kairo Code</span>
             </div>
             {appVersion && (
                 <span className="text-[11px] text-[var(--text-muted)] font-mono mb-8">v{appVersion}</span>

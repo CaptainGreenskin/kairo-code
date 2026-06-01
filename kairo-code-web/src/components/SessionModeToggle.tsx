@@ -29,11 +29,12 @@ export function SessionModeToggle({ disabled }: Props) {
         <button
             onClick={toggle}
             disabled={disabled}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors
+            className={`flex items-center gap-1 px-3 py-1 rounded-[10px] text-xs font-semibold transition-all
                 ${mode === 'experts'
-                    ? 'bg-purple-500/15 text-purple-400 hover:bg-purple-500/25'
-                    : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}
+                    ? 'text-white shadow-md'
+                    : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}
                 disabled:opacity-40 disabled:cursor-not-allowed`}
+            style={mode === 'experts' ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' } : undefined}
             title={`Mode: ${current.label}. Click to toggle.`}
         >
             <Icon size={13} />

@@ -46,44 +46,45 @@
     }
 
     .dark {
-        --bg-primary: #0d1117;
-        --bg-secondary: #161b22;
-        --bg-tertiary: #1c2128;
-        --text-primary: #e6edf3;
-        --text-secondary: #8b949e;
-        --border: #30363d;
-        --accent: #3b82f6;
-        --code-bg: #1c2128;
-        --focus-ring: #818cf8;
-        --bg-hover: #1c2128;
-        --text-muted: #64748b;
+        /* Catppuccin Mocha base + Kairo blue-purple brand */
+        --bg-primary: #1e1e2e;
+        --bg-secondary: #181825;
+        --bg-tertiary: #11111b;
+        --text-primary: #cdd6f4;
+        --text-secondary: #a6adc8;
+        --border: #313244;
+        --accent: #6366f1;
+        --code-bg: #1e1e2e;
+        --focus-ring: #6366f1;
+        --bg-hover: #232434;
+        --text-muted: #6c7086;
 
-        --color-surface: #0f172a;
-        --color-surface-elevated: #1e293b;
-        --color-surface-sunken: #020617;
-        --color-primary: #818cf8;
-        --color-primary-hover: #6366f1;
-        --color-primary-active: #4f46e5;
-        --color-accent: #a78bfa;
-        --color-accent-muted: #5b21b6;
-        --color-muted: #94a3b8;
-        --color-border: #334155;
-        --color-text: #f8fafc;
-        --color-text-secondary: #cbd5e1;
-        --color-text-muted: #64748b;
-        --color-code-bg: #1e293b;
-        --color-code-border: #334155;
-        --color-info: #60a5fa;
-        --color-info-bg: #172554;
-        --color-success: #4ade80;
-        --color-success-bg: #052e16;
-        --color-warning: #facc15;
-        --color-warning-bg: #422006;
-        --color-danger: #f87171;
-        --color-danger-bg: #450a0a;
-        --color-scrollbar: #475569;
-        --color-scrollbar-hover: #64748b;
-        --color-focus-ring: #818cf8;
+        --color-surface: #1e1e2e;
+        --color-surface-elevated: #232434;
+        --color-surface-sunken: #11111b;
+        --color-primary: #6366f1;
+        --color-primary-hover: #8b5cf6;
+        --color-primary-active: #7c3aed;
+        --color-accent: #6366f1;
+        --color-accent-muted: #4338ca;
+        --color-muted: #6c7086;
+        --color-border: #313244;
+        --color-text: #cdd6f4;
+        --color-text-secondary: #a6adc8;
+        --color-text-muted: #6c7086;
+        --color-code-bg: #181825;
+        --color-code-border: #313244;
+        --color-info: #89b4fa;
+        --color-info-bg: #1e1e2e;
+        --color-success: #a6e3a1;
+        --color-success-bg: #1e1e2e;
+        --color-warning: #f9e2af;
+        --color-warning-bg: #1e1e2e;
+        --color-danger: #f38ba8;
+        --color-danger-bg: #1e1e2e;
+        --color-scrollbar: #45475a;
+        --color-scrollbar-hover: #585b70;
+        --color-focus-ring: rgba(99, 102, 241, 0.4);
         --color-overlay: rgba(0, 0, 0, 0.7);
     }
 }

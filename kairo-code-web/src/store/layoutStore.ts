@@ -40,7 +40,7 @@ interface LayoutState {
 }
 
 export const useLayoutStore = create<LayoutState>()((set, get) => ({
-    primarySidebarOpen: prefs.primarySidebarOpen ?? true,
+    primarySidebarOpen: prefs.primarySidebarOpen ?? false,
     bottomPanelOpen: prefs.bottomPanelOpen ?? false,
     fileTreeOpen: prefs.fileTreeOpen ?? false,
     // Migrate the now-removed 'sessions' view (legacy installs) → 'files'.

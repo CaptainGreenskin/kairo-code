@@ -546,10 +546,10 @@ export function ChatInput({
             {/* Unified Qoder-style card: top chips + textarea + footer toolbar all share
                 one rounded border + background. Textarea is borderless inside. */}
             <div
-                className={`relative rounded-xl bg-[var(--bg-secondary)] transition-colors ${
+                className={`relative rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] transition-all ${
                     isDragOver
-                        ? 'ring-1 ring-[var(--accent)]'
-                        : 'ring-1 ring-transparent focus-within:ring-[var(--text-muted)]/40'
+                        ? 'ring-2 ring-[var(--accent)] shadow-[0_0_0_4px_rgba(99,102,241,0.08)]'
+                        : 'focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_4px_rgba(99,102,241,0.08),0_4px_24px_rgba(99,102,241,0.12)]'
                 }`}
             >
                 {/* Top strip — context % + New Chat. Lives inside the card, right-aligned. */}
@@ -689,15 +689,16 @@ export function ChatInput({
                             <button
                                 onClick={handleSend}
                                 disabled={disabled || (!text.trim() && !attachedImage)}
-                                className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                                     text.trim() || attachedImage
-                                        ? 'text-[var(--color-primary)] hover:bg-[var(--color-primary)]/15'
-                                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+                                        ? 'text-white shadow-md hover:scale-105 hover:shadow-lg'
+                                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-hover)]'
                                 }`}
+                                style={text.trim() || attachedImage ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' } : undefined}
                                 aria-label="Send"
                                 title="Send"
                             >
-                                <Send size={13} />
+                                <Send size={14} />
                             </button>
                         )}
                     </div>
