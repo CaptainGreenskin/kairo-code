@@ -421,6 +421,19 @@ public class ReplLoop {
                     lspService);
             context.setRunner(runner);
 
+            // Wire the cron fire callback now that context/runner are ready.
+            // The BiConsumer drives the agent from the cron thread, serialized via cronLock.
+            cronAgentBridge.set((prompt, w) -> {
+                try {
+                    io.kairo.api.message.Msg userMsg =
+                            io.kairo.api.message.Msg.of(io.kairo.api.message.MsgRole.USER, prompt);
+                    runner.run(userMsg, context.agent());
+                } catch (Exception e) {
+                    w.println("[cron] execution failed: " + e.getMessage());
+                    w.flush();
+                }
+            });
+
             // Wire Ctrl+C signal handler: cancel agent if running, else no-op
             terminal.handle(Terminal.Signal.INT, signal -> {
                 if (runner.isRunning()) {
@@ -891,15 +904,34 @@ public class ReplLoop {
      * previous sessions. Returns null on failure so {@link commands.CronCommand} can fall back
      * to an unavailable message.
      */
+    /**
+     * Holder for the agent execution callback that the cron fire callback delegates to.
+     * Set after the REPL context and runner are ready (they don't exist at CronScheduler
+     * construction time). The lock serializes cron fires with the REPL main loop so the
+     * agent (which is not thread-safe) is never driven concurrently.
+     */
+    private static final java.util.concurrent.atomic.AtomicReference<java.util.function.BiConsumer<String, PrintWriter>>
+            cronAgentBridge = new java.util.concurrent.atomic.AtomicReference<>();
+    private static final Object cronLock = new Object();
+
     private static CronScheduler buildCronScheduler(Path kairoDir, PrintWriter writer) {
         try {
             Path cronDir = kairoDir.resolve("cron");
             Files.createDirectories(cronDir);
             var store = new io.kairo.cron.CronTaskStore(cronDir);
             io.kairo.api.cron.CronFireCallback callback = task -> {
-                // Stub: log fires until the agent-bridge lands (see M-A4 follow-on).
-                writer.println("[cron] fired task=" + task.id() + " prompt=" + task.prompt());
-                writer.flush();
+                var bridge = cronAgentBridge.get();
+                if (bridge != null) {
+                    synchronized (cronLock) {
+                        writer.println("[cron] executing task=" + task.id());
+                        writer.flush();
+                        bridge.accept(task.prompt(), writer);
+                    }
+                } else {
+                    writer.println("[cron] fired task=" + task.id()
+                            + " (agent not ready, prompt logged only: " + task.prompt() + ")");
+                    writer.flush();
+                }
             };
             return new io.kairo.cron.DefaultCronScheduler(
                     store, callback, java.time.ZoneId.systemDefault());

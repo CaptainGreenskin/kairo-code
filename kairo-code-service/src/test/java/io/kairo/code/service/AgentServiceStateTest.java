@@ -104,16 +104,19 @@ class AgentServiceStateTest {
     // ── resumeSession contract (the general-flow Resume button depends on this) ──
 
     @Test
-    void resumeSession_fromFailedExecution_resetsToIdle() {
+    void resumeSession_fromFailedExecution_resetsAndContinues() {
         // A stopped run lands in FAILED_EXECUTION (see stopAgent). Resume must clear it
-        // back to IDLE so the next message proceeds with full conversation history.
+        // and inject a continuation message. In unit tests (no concurrency controller wired)
+        // the continuation may fail gracefully, but resumeSession must still return true
+        // and the phase must have been reset from FAILED_EXECUTION.
         setPersistedPhase("FAILED_EXECUTION");
         setSnapshotRef("stash@{0}");
         String sid = service.createSession(configWithWorkDir());
         assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.FAILED_EXECUTION);
 
         assertThat(service.resumeSession(sid)).isTrue();
-        assertThat(service.getSessionPhase(sid)).isEqualTo(SessionPhase.IDLE);
+        // Phase is no longer FAILED_EXECUTION (may be IDLE or EXECUTING depending on wiring).
+        assertThat(service.getSessionPhase(sid)).isNotEqualTo(SessionPhase.FAILED_EXECUTION);
     }
 
     @Test

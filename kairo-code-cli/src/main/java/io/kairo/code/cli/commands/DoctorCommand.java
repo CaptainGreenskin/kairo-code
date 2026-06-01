@@ -70,10 +70,32 @@ public class DoctorCommand implements SlashCommand {
             printCheck(writer, "Skills registry", false);
         }
 
-        // 8. Model connectivity — skipped in command context (no lightweight ping available).
-        // Using .block(Duration) on a model call would require a provider instance which may
-        // not be configured. Print skip note instead.
-        writer.println("  - Model connectivity: skipped (use :compact to verify model access)");
+        // 8. Model connectivity — ping with a minimal prompt.
+        boolean modelOk = false;
+        String modelError = null;
+        if (hasApiKey) {
+            try {
+                var provider = io.kairo.code.core.CodeAgentFactory.buildModelProvider(
+                        context.config().apiKey(), context.config().baseUrl());
+                var msg = io.kairo.api.message.Msg.of(io.kairo.api.message.MsgRole.USER, "ping");
+                var modelCfg = io.kairo.api.model.ModelConfig.builder()
+                        .model(context.config().modelName())
+                        .maxTokens(16)
+                        .build();
+                provider.call(java.util.List.of(msg), modelCfg)
+                        .block(java.time.Duration.ofSeconds(10));
+                modelOk = true;
+            } catch (Exception e) {
+                modelError = e.getMessage();
+            }
+        } else {
+            modelError = "no API key";
+        }
+        printCheck(writer, "Model connectivity ("
+                + context.config().modelName() + ")", modelOk);
+        if (modelError != null) {
+            writer.println("    reason: " + modelError);
+        }
 
         // 9. Version
         writer.println("  kairo-code version: " + VERSION);

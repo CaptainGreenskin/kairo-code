@@ -153,20 +153,28 @@ class CodeAgentFactoryToolRegistryTest {
     }
 
     @Test
-    void expertTeamToolNotRegisteredByDefault() {
-        assertThat(toolNames()).doesNotContain("expert_team");
+    void expertTeamToolRegisteredByDefault() {
+        assertThat(toolNames()).contains("expert_team");
     }
 
     @Test
-    void expertTeamToolNotRegisteredEvenWhenSwarmCoordinatorWired() {
-        // Regression guard for ADR-001: even when a SwarmCoordinator is attached
-        // to SessionOptions, Agent-mode sessions must not surface expert_team as
-        // a model-facing tool. Re-introducing the wiring would re-create the
-        // sub-second-tool-call vs multi-minute-batch UX mismatch.
+    void expertTeamToolRegisteredWhenSwarmCoordinatorWired() {
         var session = CodeAgentFactory.createSession(minimalConfig(),
                 CodeAgentFactory.SessionOptions.empty()
                         .withModelProvider(new StubModelProvider())
                         .withSwarmCoordinator(newSwarmCoordinator()));
+        List<String> names = session.toolRegistry().getAll().stream()
+                .map(io.kairo.api.tool.ToolDefinition::name)
+                .toList();
+        assertThat(names).contains("expert_team");
+    }
+
+    @Test
+    void expertTeamToolNotRegisteredInChildSession() {
+        var session = CodeAgentFactory.createSession(minimalConfig(),
+                CodeAgentFactory.SessionOptions.empty()
+                        .withModelProvider(new StubModelProvider())
+                        .asChildSession());
         List<String> names = session.toolRegistry().getAll().stream()
                 .map(io.kairo.api.tool.ToolDefinition::name)
                 .toList();

@@ -62,6 +62,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
     private final ServerProperties serverProperties;
     private final WorkspacePersistenceService workspaces;
     private final MessageBus messageBus;
+    private final TeamEventBridge teamEventBridge;
 
     /** sessionId → WS sessions bound to it (multiple browser tabs supported). */
     private final ConcurrentHashMap<String, Set<WebSocketSession>> subscribers = new ConcurrentHashMap<>();
@@ -75,11 +76,13 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
     public AgentWebSocketHandler(AgentService agentService,
                                  ServerProperties serverProperties,
                                  WorkspacePersistenceService workspaces,
-                                 MessageBus messageBus) {
+                                 MessageBus messageBus,
+                                 TeamEventBridge teamEventBridge) {
         this.agentService = agentService;
         this.serverProperties = serverProperties;
         this.workspaces = workspaces;
         this.messageBus = messageBus;
+        this.teamEventBridge = teamEventBridge;
     }
 
     @Override
@@ -304,7 +307,10 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         }
         teamSubscribers.computeIfAbsent(teamId, k -> ConcurrentHashMap.newKeySet()).add(session);
         sendAck(session, "subscribeTeam");
-        // If lastSeq > 0, replay will be handled by TeamEventBridge (D4) when it's wired
+        long lastSeq = body.path("lastSeq").asLong(0);
+        if (lastSeq > 0 && teamEventBridge != null) {
+            teamEventBridge.replayEvents(session, teamId, lastSeq);
+        }
     }
 
     private void handleUnsubscribeTeam(WebSocketSession session, JsonNode body) {

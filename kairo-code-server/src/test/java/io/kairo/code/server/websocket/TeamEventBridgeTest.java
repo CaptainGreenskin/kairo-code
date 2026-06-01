@@ -47,7 +47,7 @@ class TeamEventBridgeTest {
                         java.nio.file.Path.of(System.getProperty("java.io.tmpdir"),
                                 "kairo-test-bridge-" + System.nanoTime(), "workspaces.json"));
         wsHandler = new AgentWebSocketHandler(agentService, props, workspaces,
-                new io.kairo.multiagent.team.InProcessMessageBus());
+                new io.kairo.multiagent.team.InProcessMessageBus(), null);
 
         stubEventBus = new StubKairoEventBus();
         stubRepository = new StubTeamRepository();

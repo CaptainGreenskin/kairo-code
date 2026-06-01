@@ -45,17 +45,23 @@ invocation, and reasoning step gets a span.
 
 ### Span catalog
 
-Names emitted by `kairo-core` + `kairo-observability` that you'll see in any
+Names emitted by `OtelTracer` (kairo-code-server) that you'll see in any
 backend:
 
 | Span | When | Key attributes |
 |---|---|---|
-| `kairo.agent.call` | One LLM round trip | `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` |
-| `kairo.reasoning.step` | One ReAct step | `step.index`, `tool.calls.count` |
-| `kairo.tool.invoke` | Tool execution | `tool.name`, `tool.risk`, `tool.duration_ms`, `tool.outcome` |
-| `kairo.session.create` | Session bootstrap | `session.id`, `session.mode` (agent/team), `workspace.id` |
-| `kairo.plan.review` | exit_plan_mode prompt | `plan.items_count`, `plan.approved` |
-| `kairo.guardrail.block` | Policy refused a tool | `policy.name`, `tool.name`, `policy.reason` |
+| `agent.run` | Root span per session turn | `session.id` |
+| `iteration-{N}` | One ReAct iteration (N = 0-based) | `iter`, token counts |
+| `{toolName}` (e.g. `Bash`, `Read`) | Tool execution (name = raw tool name; `agent.tool` when null) | `tool.name`, `tool.duration_ms` |
+
+LLM calls within iterations get `gen_ai.*` attributes from the Spring AI
+observation layer (`gen_ai.request.model`, `gen_ai.usage.input_tokens`,
+`gen_ai.usage.output_tokens`), which backends like Langfuse and Honeycomb
+interpret automatically.
+
+> **Note**: `session.create`, `plan.review`, and `guardrail.block` spans are
+> not yet emitted by the tracer. The attributes above reflect the current
+> implementation in `OtelTracer.java`.
 
 LLM-focused backends (Langfuse, Helicone) read the `gen_ai.*` attributes per
 OpenTelemetry's GenAI semconv — you get input/output/usage/cost grouped per
@@ -113,7 +119,7 @@ open http://localhost:3001       # Grafana, admin/admin
 The compose file:
 - `otel-collector` (port 4318): receives OTLP-HTTP, forwards traces → Tempo, metrics → Prometheus
 - `tempo` (port 3200): trace storage
-- `prometheus` (port 9090): scrapes `/actuator/prometheus` from kairo-code-server + otel-collector internal metrics
+- `prometheus` (port 9090): scrapes `/actuator/prometheus` from kairo-code-server (Prometheus registry is on the classpath and the endpoint is exposed by default) + otel-collector internal metrics
 - `grafana` (port 3001): pre-provisioned with Tempo + Prometheus datasources and a "Kairo Code Overview" dashboard
 
 The dashboard tracks: requests/sec by tool, agent call latency p50/p95/p99,

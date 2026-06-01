@@ -80,7 +80,7 @@ cancel mid-turn (also clears the budget).
 ## Tip: combine with batch mode
 
 ```bash
-kairo-code --headless --prompt "+1m audit src/main/ for null-safety violations"
+kairo-code --task "+1m audit src/main/ for null-safety violations"
 ```
 
 In one-shot / batch mode the budget is especially useful because there's

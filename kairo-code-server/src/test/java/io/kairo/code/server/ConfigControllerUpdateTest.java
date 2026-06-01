@@ -26,9 +26,17 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        classes = KairoCodeServerApplication.class)
-@AutoConfigureMockMvc
+        classes = KairoCodeServerApplication.class,
+        properties = {
+            "spring.autoconfigure.exclude="
+                + "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration,"
+                + "org.springframework.boot.autoconfigure.security.servlet.SecurityFilterAutoConfiguration,"
+                + "org.springframework.boot.autoconfigure.security.oauth2.client.servlet.OAuth2ClientAutoConfiguration"
+        })
+@AutoConfigureMockMvc(addFilters = false)
 @TestPropertySource(properties = {
+    "kairo-server.security.oauth.enabled=false",
+    "kairo-server.security.enabled=false",
     "kairo.code.api-key=sk-test-key",
     "kairo.code.model=gpt-4o",
     "kairo.code.provider=openai",

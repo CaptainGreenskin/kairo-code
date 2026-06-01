@@ -196,6 +196,13 @@ export interface Message {
     thinking?: string;
 }
 
+export interface SubagentEvent {
+    childEventType: 'TOOL_CALL' | 'TOOL_RESULT';
+    childToolName?: string;
+    childIsError?: boolean;
+    timestamp: number;
+}
+
 export interface ToolCall {
     id: string;
     toolName: string;
@@ -213,9 +220,12 @@ export interface ToolCall {
     progressElapsedMs?: number;
     /** Accumulated streaming output chunks (bash stdout/stderr). */
     partialOutput?: string;
-    /** Epoch ms when the TOOL_CALL event was received — used to compute duration
-     *  on the frontend when the backend doesn't provide it (streaming-eager tools). */
+    /** Epoch ms when the TOOL_CALL event was received. */
     createdAt?: number;
+    /** Full metadata from TOOL_RESULT (task.outcome, task.files_changed, etc.) */
+    resultMetadata?: Record<string, unknown>;
+    /** Child agent events forwarded via SUBAGENT_EVENT (task tool only). */
+    subagentEvents?: SubagentEvent[];
 }
 
 export interface ServerConfig {

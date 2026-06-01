@@ -54,6 +54,10 @@ public class MessageBus {
 
     /**
      * Drain all pending messages for the given session.
+     *
+     * <p><strong>WIP</strong>: team P2P member spawning is not yet implemented, so no agent
+     * currently calls this method. Messages are enqueued by {@link #send} but never consumed.
+     * Full P2P support (member lifecycle + polling loop) is tracked as a follow-on task.
      */
     public List<TeamMessage> poll(String sessionId) {
         BlockingQueue<TeamMessage> queue = mailboxes.get(sessionId);

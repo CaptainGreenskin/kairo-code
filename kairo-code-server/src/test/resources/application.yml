@@ -1,0 +1,5 @@
+kairo-server:
+  security:
+    enabled: false
+    oauth:
+      enabled: false

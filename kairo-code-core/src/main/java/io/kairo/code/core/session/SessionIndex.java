@@ -3,7 +3,13 @@ package io.kairo.code.core.session;
 import java.util.List;
 
 /**
- * Index for searching session turns by keyword.
+ * Index for searching session turns by keyword using TF-IDF ranking.
+ *
+ * <p><strong>Status</strong>: the interface and {@link InMemorySessionIndex} implementation are
+ * complete, but the write-side hook ({@code SessionAppendHook}) is not registered in
+ * {@code CodeAgentFactory}, so no data flows into the index at runtime. The server's
+ * {@code SessionSnapshotController.searchMessages} provides a simpler substring-based
+ * search as a working alternative. TF-IDF upgrade is tracked as a follow-on task.
  */
 public interface SessionIndex {
 

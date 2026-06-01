@@ -56,7 +56,19 @@ public record AgentEvent(
          */
         PEER_MESSAGE,
         /** Emitted when a stopped session is resumed (phase reset from FAILED_* to IDLE). */
-        SESSION_RESUMED
+        SESSION_RESUMED,
+        /**
+         * Emitted by a child agent (spawned via the task tool) to report its internal progress
+         * to the parent session's event stream. Carries the child's tool calls and results so
+         * the frontend can render a live view of what the subagent is doing.
+         *
+         * <p>{@code toolName} holds the child's tool name (e.g. "bash", "read"),
+         * {@code content} holds a human-readable summary, and {@code resultMetadata} carries
+         * structured fields: {@code taskId}, {@code taskDescription}, {@code childEventType}
+         * ("TOOL_CALL" / "TOOL_RESULT" / "TEXT_CHUNK"), {@code childToolName},
+         * {@code childIsError}, {@code childElapsedMs}.
+         */
+        SUBAGENT_EVENT
     }
 
     public static AgentEvent thinking(String sessionId) {
@@ -242,6 +254,22 @@ public record AgentEvent(
     public static AgentEvent modeEscalated(String sessionId, String reason) {
         return new AgentEvent(EventType.MODE_ESCALATED, sessionId, reason, null, null,
                 false, null, null, null, null, null, null, null,
+                System.currentTimeMillis());
+    }
+
+    public static AgentEvent subagentEvent(String parentSessionId,
+                                              String taskId, String taskDescription,
+                                              String childEventType, String childToolName,
+                                              boolean childIsError) {
+        Map<String, Object> meta = new java.util.LinkedHashMap<>();
+        meta.put("taskId", taskId);
+        meta.put("taskDescription", taskDescription);
+        meta.put("childEventType", childEventType);
+        if (childToolName != null) meta.put("childToolName", childToolName);
+        meta.put("childIsError", childIsError);
+        String summary = childEventType + (childToolName != null ? ": " + childToolName : "");
+        return new AgentEvent(EventType.SUBAGENT_EVENT, parentSessionId, summary,
+                childToolName, null, false, null, null, null, null, null, null, meta,
                 System.currentTimeMillis());
     }
 

@@ -12,6 +12,7 @@ import io.kairo.api.message.Msg;
 import io.kairo.api.model.ModelConfig;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.api.model.ModelResponse;
+import io.kairo.code.core.LlmClassifierConfig;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -43,11 +44,12 @@ import reactor.core.publisher.Mono;
 class CodeAgentFactoryLlmClassifierTest {
 
     @Test
-    void disabledByDefault_obscureCommandNeverHitsLlm() {
+    void explicitlyDisabled_obscureCommandNeverHitsLlm() {
         CountingStubProvider provider = new CountingStubProvider("{\"category\":\"UNKNOWN\"}");
         CodeAgentConfig config =
                 new CodeAgentConfig(
-                        "test-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null);
+                        "test-key", "https://api.openai.com", "gpt-4o", 50, null, null, 0, 0, null,
+                        LlmClassifierConfig.disabled());
 
         var classifier =
                 CodeAgentFactory.buildLlmBashClassifierIfEnabled(

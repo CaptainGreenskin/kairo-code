@@ -4,6 +4,7 @@ import { useSessionStore } from '@store/sessionStore';
 import { useSessionModeStore } from '@store/sessionModeStore';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
 import { useExpertTeamStore } from '@store/expertTeamStore';
+import { appendTokenToWsUrl } from '@/api/auth';
 
 /**
  * Agent WebSocket hook — talks to /ws/agent over native WebSocket + JSON.
@@ -21,7 +22,7 @@ const STALLED_RUNNING_TIMEOUT_MS = 10_000;
 
 function buildWsUrl(): string {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${window.location.host}${WS_PATH}`;
+    return appendTokenToWsUrl(`${proto}//${window.location.host}${WS_PATH}`);
 }
 
 /**
@@ -58,15 +59,19 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 },
             };
         }
-        case 'AGENT_DONE':
+        case 'AGENT_DONE': {
+            const totalTokens = (raw.tokenUsage as number) ?? 0;
+            const inputTokens = (raw.inputTokens as number) ?? totalTokens;
+            const outputTokens = (raw.outputTokens as number) ?? Math.max(0, totalTokens - inputTokens);
             return {
                 type: 'AGENT_DONE', sessionId, timestamp: ts,
                 payload: {
-                    inputTokens: (raw.tokenUsage as number) ?? 0,
-                    outputTokens: 0,
+                    inputTokens,
+                    outputTokens,
                     cost: (raw.cost as number) ?? undefined,
                 },
             };
+        }
         case 'AGENT_ERROR':
             return {
                 type: 'AGENT_ERROR', sessionId, timestamp: ts,
@@ -336,7 +341,24 @@ export function useAgentWebSocket(
         // Non-AgentEvent envelopes consumed elsewhere: TEAM_EVENT is handled by the expert-team
         // raw handler (onRawMessage above); ACK is a command acknowledgement. Skip them so they
         // don't fall through to the "Unknown event type" error path.
-        if (type === 'TEAM_EVENT' || type === 'ACK') {
+        if (type === 'SUBAGENT_EVENT' || type === 'TEAM_EVENT' || type === 'ACK') {
+            if (type === 'SUBAGENT_EVENT') {
+                clearStalledTimer();
+                const meta = (raw.resultMetadata ?? {}) as Record<string, unknown>;
+                onEventRef.current({
+                    type: 'SUBAGENT_EVENT',
+                    sessionId: (raw.sessionId as string) ?? '',
+                    timestamp: (raw.timestamp as number) ?? Date.now(),
+                    payload: {
+                        taskId: (meta.taskId as string) ?? '',
+                        taskDescription: (meta.taskDescription as string) ?? '',
+                        childEventType: (meta.childEventType as string) ?? '',
+                        childToolName: (raw.toolName as string) ?? (meta.childToolName as string) ?? '',
+                        childIsError: (meta.childIsError as boolean) ?? false,
+                    },
+                } as any);
+                return;
+            }
             // A streaming TEAM_EVENT proves the session is alive — during experts execution the
             // chat channel emits no AGENT_THINKING/TEXT_CHUNK/TOOL_CALL (those are team events),
             // so without this the stalled-probe would wrongly cancel a long-running expert step.

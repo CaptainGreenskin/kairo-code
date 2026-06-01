@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { X, Minimize2, Maximize2, RotateCcw } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
+import { appendTokenToWsUrl } from '@/api/auth';
 
 interface ShellPanelProps {
     onClose: () => void;
@@ -31,7 +32,8 @@ export function ShellPanel({ onClose, externalCommand, workspaceId, embedded = f
         }
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
-        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/shell${qs}`);
+        const ws = new WebSocket(
+            appendTokenToWsUrl(`${protocol}//${window.location.host}/ws/shell${qs}`));
         wsRef.current = ws;
 
         ws.onopen = () => {

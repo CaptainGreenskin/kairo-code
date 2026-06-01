@@ -64,6 +64,7 @@ public class SkillCommand implements SlashCommand {
             case "load" -> handleLoad(rest, registry, context, writer);
             case "unload" -> handleUnload(rest, context, writer);
             case "info" -> handleInfo(rest, registry, context, writer);
+            case "reload" -> handleReload(context, writer);
             default -> printUsage(writer);
         }
     }
@@ -168,8 +169,18 @@ public class SkillCommand implements SlashCommand {
         writer.flush();
     }
 
+    private void handleReload(ReplContext context, PrintWriter writer) {
+        try {
+            context.reloadSkills();
+            writer.println("Skills reloaded. Use :skill list to see available skills.");
+        } catch (Exception e) {
+            writer.println("Reload failed: " + e.getMessage());
+        }
+        writer.flush();
+    }
+
     private void printUsage(PrintWriter writer) {
-        writer.println("Usage: :skill <list [category]|loaded|load <name>|unload <name>|info <name>>");
+        writer.println("Usage: :skill <list [category]|loaded|load <name>|unload <name>|reload|info <name>>");
         writer.flush();
     }
 

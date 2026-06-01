@@ -7,8 +7,7 @@ import io.kairo.api.model.ModelProvider;
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.cli.SlashCommand;
 import io.kairo.code.core.CodeAgentConfig;
-import io.kairo.code.core.compact.ConversationCompactor;
-import io.kairo.core.model.openai.OpenAIProvider;
+import io.kairo.code.core.CodeAgentFactory;
 import java.io.PrintWriter;
 import java.time.Duration;
 import java.util.List;
@@ -70,9 +69,24 @@ public class CompactCommand implements SlashCommand {
         try {
             ModelProvider provider = testProvider != null
                     ? testProvider
-                    : new OpenAIProvider(config.apiKey(), config.baseUrl());
-            String summary = ConversationCompactor.compact(history, provider, config.modelName())
-                    .block(TIMEOUT);
+                    : CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+            var modelCfg = io.kairo.api.model.ModelConfig.builder()
+                    .model(config.modelName()).maxTokens(2048).build();
+            String prompt = "Summarize the following conversation into a concise continuation prompt. "
+                    + "Preserve key facts, decisions, and file paths mentioned. Be brief.";
+            List<Msg> compactInput = List.of(
+                    Msg.of(io.kairo.api.message.MsgRole.SYSTEM, prompt),
+                    Msg.of(io.kairo.api.message.MsgRole.USER,
+                            history.stream().map(Msg::text).filter(t -> t != null)
+                                    .collect(java.util.stream.Collectors.joining("\n---\n"))));
+            io.kairo.api.model.ModelResponse response = provider.call(compactInput, modelCfg).block(TIMEOUT);
+            String summary = null;
+            if (response != null && response.contents() != null) {
+                summary = response.contents().stream()
+                        .filter(io.kairo.api.message.Content.TextContent.class::isInstance)
+                        .map(c -> ((io.kairo.api.message.Content.TextContent) c).text())
+                        .collect(java.util.stream.Collectors.joining("\n"));
+            }
 
             if (summary == null || summary.isBlank()) {
                 writer.println("Failed to generate summary: empty response from model.");

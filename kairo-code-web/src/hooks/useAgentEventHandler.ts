@@ -266,6 +266,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                             failureReason,
                             progressPhase: undefined,
                             progressElapsedMs: undefined,
+                            resultMetadata: payload.resultMetadata,
                         });
                         // Auto-refresh file tree when a write/edit tool completes successfully.
                         if (tc && !payload.isError) {
@@ -298,6 +299,36 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                             progressPhase: payload.phase,
                             progressElapsedMs: payload.elapsedMs,
                         });
+                    }
+                    break;
+                }
+
+                case 'SUBAGENT_EVENT' as any: {
+                    const payload = event.payload as {
+                        taskId: string;
+                        taskDescription: string;
+                        childEventType: string;
+                        childToolName: string;
+                        childIsError: boolean;
+                    };
+                    const msgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
+                    for (const m of msgs) {
+                        const tc = (m.toolCalls ?? []).find(
+                            (t) => t.toolName === 'task' && (t.status === 'approved' || t.status === 'pending'),
+                        );
+                        if (tc) {
+                            const newEvent = {
+                                childEventType: payload.childEventType as 'TOOL_CALL' | 'TOOL_RESULT',
+                                childToolName: payload.childToolName,
+                                childIsError: payload.childIsError,
+                                timestamp: Date.now(),
+                            };
+                            const existing = tc.subagentEvents ?? [];
+                            updateToolCallIn(sid, m.id, tc.id, {
+                                subagentEvents: [...existing, newEvent],
+                            });
+                            break;
+                        }
                     }
                     break;
                 }
@@ -390,8 +421,10 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         input: payload.inputTokens,
                         output: payload.outputTokens,
                     });
+                    // Use server-provided cost when available; fall back to a blended
+                    // estimate (GPT-4o-class pricing) for servers that don't report it.
                     const cost = payload.cost
-                        ?? (payload.inputTokens * 0.001 + payload.outputTokens * 0.003) / 1000;
+                        ?? (payload.inputTokens * 2.5 + payload.outputTokens * 10.0) / 1_000_000;
                     setEstimatedCostFor(sid, cost);
                     {
                         const msgs = useSessionStore.getState().sessions[sid]?.messages ?? [];

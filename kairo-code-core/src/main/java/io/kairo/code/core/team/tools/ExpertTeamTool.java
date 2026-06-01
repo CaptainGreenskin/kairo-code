@@ -54,6 +54,8 @@ public class ExpertTeamTool implements SyncTool {
 
     private final SwarmCoordinator swarmCoordinator;
 
+    ExpertTeamTool() { this.swarmCoordinator = null; }
+
     public ExpertTeamTool(SwarmCoordinator swarmCoordinator) {
         this.swarmCoordinator = swarmCoordinator;
     }
@@ -110,13 +112,38 @@ public class ExpertTeamTool implements SyncTool {
     private TeamConfig buildConfig(Map<String, Object> input) {
         Integer maxRounds = intInput(input, "max_rounds");
         Integer timeoutMin = intInput(input, "timeout_minutes");
+        Integer parallelLimit = intInput(input, "parallel_limit");
+        Double budgetUsd = doubleInput(input, "budget_usd");
 
-        if (maxRounds == null && timeoutMin == null) {
+        if (maxRounds == null && timeoutMin == null && parallelLimit == null && budgetUsd == null) {
             return TeamConfig.defaults();
         }
 
         int rounds = maxRounds != null ? maxRounds : 3;
         long timeout = timeoutMin != null ? timeoutMin : 10L;
+
+        // Honor parallel_limit and budget_usd via the resource constraint the framework
+        // actually enforces. Start from the unbounded ceilings and tighten only what was
+        // requested. budget_usd has no native field on TeamResourceConstraint (which is
+        // token-based), so convert it to a maxTotalTokens ceiling using the CostBudget
+        // pricing model — this is how the USD budget becomes an enforced limit instead of
+        // being silently ignored as before.
+        TeamResourceConstraint base = TeamResourceConstraint.unbounded();
+        long maxTokens = base.maxTotalTokens();
+        int maxParallel = parallelLimit != null && parallelLimit > 0
+                ? parallelLimit : base.maxParallelSteps();
+        if (budgetUsd != null && budgetUsd > 0) {
+            // Blended $/token across input+output for an unknown model (DEFAULT_PRICING).
+            double costPerTokenPair = new io.kairo.code.core.team.CostPricingConfig()
+                    .estimate(1, 1, "");
+            double costPerToken = costPerTokenPair / 2.0;
+            if (costPerToken > 0) {
+                maxTokens = (long) Math.max(1, budgetUsd / costPerToken);
+            }
+        }
+
+        TeamResourceConstraint constraint = new TeamResourceConstraint(
+                maxTokens, Duration.ofMinutes(timeout), maxParallel, rounds);
 
         return new TeamConfig(
             RiskProfile.MEDIUM,
@@ -124,7 +151,7 @@ public class ExpertTeamTool implements SyncTool {
             Duration.ofMinutes(timeout),
             EvaluatorPreference.AUTO,
             PlannerFailureMode.FAIL_FAST,
-            TeamResourceConstraint.unbounded());
+            constraint);
     }
 
     // ── input helpers ──
@@ -140,6 +167,17 @@ public class ExpertTeamTool implements SyncTool {
         if (v instanceof Number n) return n.intValue();
         try {
             return Integer.parseInt(v.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Double doubleInput(Map<String, Object> input, String key) {
+        Object v = input.get(key);
+        if (v == null) return null;
+        if (v instanceof Number n) return n.doubleValue();
+        try {
+            return Double.parseDouble(v.toString());
         } catch (NumberFormatException e) {
             return null;
         }

@@ -5,6 +5,8 @@ import io.kairo.api.agent.AgentDiagnostics;
 import io.kairo.api.agent.AgentSnapshot;
 import io.kairo.api.agent.AgentState;
 import io.kairo.api.message.Msg;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import reactor.core.publisher.Mono;
 
@@ -14,12 +16,16 @@ import reactor.core.publisher.Mono;
  * <p>SwarmCoordinator workers share a single Agent bean, but DefaultReActAgent accumulates
  * conversation history in its ContextManager across calls. This proxy ensures each swarm
  * step starts with a clean context by constructing a new agent from the provided supplier.
+ *
+ * <p>All active delegates are tracked so {@link #interrupt()} cancels every in-flight call,
+ * not just the most recent one (which was the previous behavior and caused parallel workers
+ * to silently ignore cancel).
  */
 final class StatelessAgentProxy implements Agent {
 
     private final Supplier<Agent> factory;
     private final String name;
-    private volatile Agent lastDelegate;
+    private final Set<Agent> activeDelegates = ConcurrentHashMap.newKeySet();
 
     StatelessAgentProxy(String name, Supplier<Agent> factory) {
         this.name = name;
@@ -29,8 +35,9 @@ final class StatelessAgentProxy implements Agent {
     @Override
     public Mono<Msg> call(Msg input) {
         Agent fresh = factory.get();
-        lastDelegate = fresh;
-        return fresh.call(input);
+        activeDelegates.add(fresh);
+        return fresh.call(input)
+                .doFinally(sig -> activeDelegates.remove(fresh));
     }
 
     @Override
@@ -45,14 +52,16 @@ final class StatelessAgentProxy implements Agent {
 
     @Override
     public AgentState state() {
-        Agent d = lastDelegate;
-        return d != null ? d.state() : AgentState.IDLE;
+        for (Agent d : activeDelegates) {
+            AgentState s = d.state();
+            if (s != AgentState.IDLE && s != AgentState.COMPLETED) return s;
+        }
+        return AgentState.IDLE;
     }
 
     @Override
     public void interrupt() {
-        Agent d = lastDelegate;
-        if (d != null) {
+        for (Agent d : activeDelegates) {
             d.interrupt();
         }
     }
@@ -64,7 +73,10 @@ final class StatelessAgentProxy implements Agent {
 
     @Override
     public AgentDiagnostics diagnostics() {
-        Agent d = lastDelegate;
-        return d != null ? d.diagnostics() : null;
+        for (Agent d : activeDelegates) {
+            AgentDiagnostics diag = d.diagnostics();
+            if (diag != null) return diag;
+        }
+        return null;
     }
 }

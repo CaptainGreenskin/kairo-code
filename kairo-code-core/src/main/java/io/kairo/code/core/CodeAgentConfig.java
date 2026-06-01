@@ -20,8 +20,8 @@ import io.kairo.code.core.mcp.McpConfig;
  * @param repetitiveToolThreshold consecutive turns threshold for RepetitiveToolHook (0 = use default)
  * @param thinkingBudget the Anthropic extended thinking budget in tokens (null = disabled, 0 = use default)
  * @param llmClassifier  controls the LLM fallback for {@code BashCommandClassifier.UNKNOWN}
- *   commands inside {@code DangerousCommandPolicy} (nullable → heuristic-only). See
- *   {@link LlmClassifierConfig}.
+ *   commands inside {@code DangerousCommandPolicy} (nullable → enabled with defaults; pass
+ *   {@link LlmClassifierConfig#disabled()} for heuristic-only). See {@link LlmClassifierConfig}.
  */
 public record CodeAgentConfig(
         String apiKey,
@@ -82,7 +82,11 @@ public record CodeAgentConfig(
             thinkingBudget = 0;
         }
         if (llmClassifier == null) {
-            llmClassifier = LlmClassifierConfig.disabled();
+            // Default ON: the LLM bash-command classifier is a safety guardrail (it only
+            // fires for commands the static regex catalogue can't categorize, then LRU-caches
+            // the verdict). Callers that want a fully offline guardrail must pass
+            // LlmClassifierConfig.disabled() explicitly.
+            llmClassifier = LlmClassifierConfig.enabledDefault();
         }
     }
 

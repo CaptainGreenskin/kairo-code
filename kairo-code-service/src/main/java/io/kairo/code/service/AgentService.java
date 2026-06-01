@@ -49,6 +49,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import io.kairo.code.core.task.TaskToolDependencies;
+import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
+import io.kairo.code.core.workspace.WorktreeLifecycle;
+import io.kairo.code.service.agent.ServerChildSessionSpawner;
+import io.kairo.code.service.agent.AutoMergePrompter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -173,6 +178,8 @@ public class AgentService implements DisposableBean, InitializingBean {
     @Autowired
     private WorkspaceSnapshotService workspaceSnapshotService;
 
+    private final SessionMetaPersistence sessionMetaPersistence = new SessionMetaPersistence();
+
     private volatile CodeAgentConfig defaultConfig;
 
     /**
@@ -267,7 +274,8 @@ public class AgentService implements DisposableBean, InitializingBean {
                     config.mcpConfig(),
                     config.toolBudgetForce(),
                     config.repetitiveToolThreshold(),
-                    config.thinkingBudget()
+                    config.thinkingBudget(),
+                    config.llmClassifier()
             );
         }
 
@@ -382,6 +390,24 @@ public class AgentService implements DisposableBean, InitializingBean {
                             AgentEvent.toolOutputChunk(chunkSessionId, toolCallId, chunkText));
                 }
             };
+            // Wire the task tool so Agent mode can spawn sub-agents for parallel work.
+            // WorktreeWorkspaceProvider manages per-task worktrees; AutoMergePrompter auto-merges
+            // child changes (no terminal to prompt in server mode).
+            if (finalWorkingDir != null && !finalWorkingDir.isBlank()) {
+                Path kairoDir = Path.of(System.getProperty("user.home"), ".kairo-code");
+                WorktreeLifecycle lifecycle = new WorktreeLifecycle(
+                        kairoDir.resolve("worktrees"), "git");
+                WorktreeWorkspaceProvider workspaceProvider =
+                        new WorktreeWorkspaceProvider(Path.of(finalWorkingDir), lifecycle);
+                io.kairo.api.model.ModelProvider mp =
+                        CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+                TaskToolDependencies taskDeps = new TaskToolDependencies(
+                        workspaceProvider,
+                        new ServerChildSessionSpawner(config, mp, sink, sessionId),
+                        new AutoMergePrompter());
+                opts = opts.withTaskTool(taskDeps);
+            }
+
             Map<String, Object> extraToolDeps = Map.of(
                     io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, chunkSink);
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts, extraToolDeps);
@@ -417,6 +443,11 @@ public class AgentService implements DisposableBean, InitializingBean {
                     approvalHandler, System.currentTimeMillis());
             sessions.put(sessionId, entry);
             lastActivityNs.put(sessionId, new AtomicLong(System.nanoTime()));
+
+            sessionMetaPersistence.save(new SessionMetaPersistence.SessionMeta(
+                    sessionId, workspaceId, config.workingDir(), config.modelName(),
+                    config.baseUrl(), "", phaseRef.get().name(), normalizedMode,
+                    System.currentTimeMillis()));
 
             log.info("Session {} created successfully", sessionId);
             return sessionId;
@@ -642,9 +673,10 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     /**
      * Resume a session that was interrupted (FAILED_EXECUTION or FAILED_PLANNING).
-     * Resets the phase to IDLE so the next {@code handleMessage()} proceeds normally.
-     * The agent object is still alive with its full conversation history — the user
-     * can send "Continue from where you left off" and the LLM picks up context.
+     * Resets the phase to IDLE and then drives a "Continue from where you left off"
+     * message through the normal execution path so the agent actually resumes work
+     * (previously it only flipped the phase flag, requiring the user to manually send
+     * a follow-up message).
      */
     public boolean resumeSession(String sessionId) {
         SessionEntry entry = sessions.get(sessionId);
@@ -661,7 +693,7 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         SessionPhase current = phaseRef.get();
         if (current != SessionPhase.FAILED_EXECUTION && current != SessionPhase.FAILED_PLANNING) {
-            log.info("resumeSession: session {} phase is {} — nothing to resume", sessionId, current);
+            log.info("resumeSession: session {} phase is {} -- nothing to resume", sessionId, current);
             return false;
         }
 
@@ -676,7 +708,24 @@ public class AgentService implements DisposableBean, InitializingBean {
             AgentRuntimeContext.emitSerialized(sink, AgentEvent.sessionResumed(sessionId));
         }
 
-        log.info("Session {} resumed from {}", sessionId, current);
+        log.info("Session {} resumed from {} -- injecting continuation message", sessionId, current);
+
+        // Drive the agent with a continuation prompt so it actually picks up where
+        // it left off. The subscription is fire-and-forget (events flow to the sink
+        // which the WS transport already subscribes to). Wrapped in try-catch because
+        // unit tests may construct AgentService without Spring wiring (no concurrency
+        // controller etc.), and the resume flag itself is the important contract.
+        try {
+            sendMessage(sessionId, "Continue from where you left off. "
+                    + "Review what was done so far and complete the remaining work.")
+                    .subscribe(
+                            event -> { /* events already routed via sink */ },
+                            err -> log.warn("Resume continuation failed for session {}: {}",
+                                    sessionId, err.getMessage()));
+        } catch (Exception e) {
+            log.warn("Resume continuation could not start for session {}: {}",
+                    sessionId, e.getMessage());
+        }
         return true;
     }
 
@@ -818,6 +867,7 @@ public class AgentService implements DisposableBean, InitializingBean {
         // Clean up plan-pending state
         sessionPhases.remove(sessionId);
         planOverviews.remove(sessionId);
+        sessionMetaPersistence.remove(sessionId);
 
         Sinks.Many<AgentEvent> sink = eventSinks.remove(sessionId);
         if (sink != null) {
@@ -1112,7 +1162,8 @@ public class AgentService implements DisposableBean, InitializingBean {
                 current.mcpConfig(),
                 current.toolBudgetForce(),
                 current.repetitiveToolThreshold(),
-                defaults.thinkingBudget());
+                defaults.thinkingBudget(),
+                current.llmClassifier());
     
         Sinks.Many<AgentEvent> sink = eventSinks.get(entry.sessionId());
         WebSocketApprovalHandler approvalHandler = entry.approvalHandler();
@@ -1232,6 +1283,11 @@ public class AgentService implements DisposableBean, InitializingBean {
         } catch (IOException e) {
             log.debug("Failed to persist phase for workingDir {}: {}", workingDir, e.getMessage());
         }
+    }
+
+    void persistPhase(String sessionId, String workingDir, SessionPhase phase) {
+        persistPhase(workingDir, phase);
+        sessionMetaPersistence.updatePhase(sessionId, phase);
     }
 
     /**
@@ -1362,9 +1418,32 @@ public class AgentService implements DisposableBean, InitializingBean {
                                             sessionId,
                                             inflight.toolCallId(),
                                             emit);
+                                } else {
+                                    // Touch the agent's diagnostics so StallDetector doesn't
+                                    // kill the parent while a long-running tool (e.g. task
+                                    // subagent) is executing. The heartbeat proves the session
+                                    // is alive even though the agent thread is blocked.
+                                    touchAgentDiagnostics(sessionId);
                                 }
                             });
                 });
+    }
+
+    private void touchAgentDiagnostics(String sessionId) {
+        SessionEntry entry = sessions.get(sessionId);
+        if (entry == null) return;
+        try {
+            var diag = entry.session().agent().diagnostics();
+            if (diag != null) {
+                // Use reflection to call recordEvent on the package-private
+                // MutableDiagnostics interface. This keeps StallDetector from killing
+                // the parent session while a subagent tool blocks its thread.
+                java.lang.reflect.Method m = diag.getClass().getMethod("recordEvent", String.class);
+                m.invoke(diag, "tool_progress");
+            }
+        } catch (Exception e) {
+            // Best-effort; don't let diagnostics failure break the heartbeat loop.
+        }
     }
 
     @Override
@@ -1381,7 +1460,42 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
+        rehydrateSessions();
         startIdleReaper();
+    }
+
+    private void rehydrateSessions() {
+        List<SessionMetaPersistence.SessionMeta> pending = sessionMetaPersistence.loadNonTerminal();
+        if (pending.isEmpty()) {
+            log.info("No sessions to rehydrate on startup");
+            return;
+        }
+        log.info("Rehydrating {} session(s) from previous run", pending.size());
+        int restored = 0;
+        for (SessionMetaPersistence.SessionMeta meta : pending) {
+            try {
+                if (defaultConfig == null) {
+                    log.warn("Cannot rehydrate session {} -- no default config available yet", meta.sessionId());
+                    continue;
+                }
+                CodeAgentConfig config = new CodeAgentConfig(
+                        defaultConfig.apiKey(),
+                        meta.baseUrl() != null && !meta.baseUrl().isBlank() ? meta.baseUrl() : defaultConfig.baseUrl(),
+                        meta.modelName() != null && !meta.modelName().isBlank() ? meta.modelName() : defaultConfig.modelName(),
+                        Integer.MAX_VALUE,
+                        meta.workingDir(),
+                        null, 0, 0,
+                        defaultConfig.thinkingBudget(),
+                        defaultConfig.llmClassifier());
+                String sid = createSession(config, meta.workspaceId(), false, meta.mode(), null);
+                log.info("Rehydrated session {} (original={}, workspace={})", sid, meta.sessionId(), meta.workspaceId());
+                restored++;
+            } catch (Exception e) {
+                log.warn("Failed to rehydrate session {}: {}", meta.sessionId(), e.getMessage());
+                sessionMetaPersistence.remove(meta.sessionId());
+            }
+        }
+        log.info("Rehydrated {}/{} sessions", restored, pending.size());
     }
 
     void startIdleReaper() {

@@ -264,7 +264,8 @@ public class KairoCodeMain implements Callable<Integer> {
                     System.err.println("Error: task-list file not found: " + taskListFile);
                     return 1;
                 }
-                return new ParallelTaskRunner(config, modelProvider, timeoutSeconds, System.err)
+                return new ParallelTaskRunner(config, modelProvider, timeoutSeconds, System.err,
+                        outputFile)
                         .run(taskListFile);
             }
 
@@ -398,20 +399,37 @@ public class KairoCodeMain implements Callable<Integer> {
             return 0;
         }
 
+        // Parse and strip output-budget DSL ("+500k", "+1m", etc.) from the task text
+        // so the budget nudge hook fires during the agent loop, matching REPL behavior.
+        io.kairo.core.context.budget.OutputBudgetTracker budgetTracker = null;
+        String effectiveTask = resolvedTask;
+        try {
+            var parsed = io.kairo.core.context.budget.OutputBudgetParser.parseAndStrip(resolvedTask);
+            if (parsed.budget().isPresent()) {
+                budgetTracker = new io.kairo.core.context.budget.OutputBudgetTracker();
+                budgetTracker.startTurn(parsed.budget().get());
+                effectiveTask = parsed.strippedPrompt();
+            }
+        } catch (Exception e) {
+            // Budget parsing is best-effort; proceed without it.
+        }
+
         PlanModeHook planHook = planMode ? new PlanModeHook(true) : null;
         PrintWriter sysErr = new PrintWriter(System.err, true);
         AgentEventPrinter eventPrinter = new AgentEventPrinter(sysErr, "", false, null, false);
-        List<Object> baseHooks = noHooks ? List.of() : List.of(new ProgressPrinter(), eventPrinter);
-        List<Object> hooks;
-        if (planHook != null) {
-            List<Object> merged = new java.util.ArrayList<>();
-            merged.add(planHook);
-            merged.addAll(baseHooks);
-            hooks = List.copyOf(merged);
-        } else {
-            hooks = baseHooks;
+        List<Object> allHooks = new java.util.ArrayList<>();
+        if (!noHooks) {
+            allHooks.add(new ProgressPrinter());
+            allHooks.add(eventPrinter);
         }
-        String taskWithDiscipline = ONE_SHOT_DISCIPLINE_PREFIX + resolvedTask;
+        if (planHook != null) {
+            allHooks.add(0, planHook);
+        }
+        if (budgetTracker != null) {
+            allHooks.add(new io.kairo.core.context.budget.OutputBudgetHook(budgetTracker));
+        }
+        List<Object> hooks = List.copyOf(allHooks);
+        String taskWithDiscipline = ONE_SHOT_DISCIPLINE_PREFIX + effectiveTask;
         Msg userMsg = Msg.of(MsgRole.USER, taskWithDiscipline);
 
         // Handle --resume: load checkpoint and inject messages via AgentSnapshot.
@@ -425,18 +443,14 @@ public class KairoCodeMain implements Callable<Integer> {
             CodeAgentFactory.SessionOptions opts = CodeAgentFactory.SessionOptions.empty()
                     .withModelProvider(modelProvider)
                     .withRestoreFrom(restoreSnapshot)
-                    .withCheckpointInitialMessage(userMsg);
-            if (!noHooks) {
-                opts = opts.withHooks(hooks);
-            }
+                    .withCheckpointInitialMessage(userMsg)
+                    .withHooks(hooks);
             agent = CodeAgentFactory.createSession(config, opts).agent();
         } else {
             CodeAgentFactory.SessionOptions opts = CodeAgentFactory.SessionOptions.empty()
                     .withModelProvider(modelProvider)
-                    .withCheckpointInitialMessage(userMsg);
-            if (!noHooks) {
-                opts = opts.withHooks(hooks);
-            }
+                    .withCheckpointInitialMessage(userMsg)
+                    .withHooks(hooks);
             agent = CodeAgentFactory.createSession(config, opts).agent();
         }
 
@@ -545,12 +559,12 @@ public class KairoCodeMain implements Callable<Integer> {
             try {
                 if (Files.exists(resultFile)) {
                     String json = Files.readString(resultFile, StandardCharsets.UTF_8);
-                    // Minimal JSON parsing — no extra dependency needed.
                     finalState = extractJsonStringField(json, "finalState");
                     iterations = extractJsonIntField(json, "iterations");
+                    tools = extractJsonIntField(json, "totalToolCalls");
                 }
             } catch (Exception e) {
-                // Ignore — best-effort summary.
+                // Ignore -- best-effort summary.
             }
         }
 

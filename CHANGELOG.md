@@ -138,8 +138,8 @@ See task IDs in the dispatch tracker for these:
 - **M-A6** — `kairo-code-cli` surefire parallel deadlock under multi-core
   load (`<parallel>methods</parallel>` + `<forkCount>1.5C</forkCount>`).
   All test classes pass individually; the parallel pool hangs at scale.
-- **M-B4** — extend PII redaction to `_streaming_result` (the streaming
-  bridge's tool-result snapshot embedded in `ToolUseContent` args).
+- **M-B4** (done) — PII redaction extended to `_streaming_result` (the streaming
+  bridge's tool-result snapshot in `ToolUseContent` args). See `CheckpointWriterHook:252`.
 - **M-D1'** — wire LSP `snapshotBaseline → notifyChange → diagnosticsSince`
   into `WriteTool` / `EditTool` so tool results report "did this edit
   introduce new compile errors?".

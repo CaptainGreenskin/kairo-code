@@ -162,9 +162,19 @@ public class SwarmCoordinator {
                     manifest.teamId(), TeamStatus.COMPLETED, List.of(), Duration.ZERO, List.of()));
         }
 
-        // Re-run with the full goal; the coordinator will re-plan from scratch
-        // using completed step outputs as available dependency inputs
-        return startExpertTeam(manifest.goal(), TeamConfig.defaults(), List.of());
+        // Build a focused goal that references the original and lists only the incomplete
+        // steps, so the coordinator does not redo completed work.
+        StringBuilder resumeGoal = new StringBuilder();
+        resumeGoal.append("Resume the following task (some steps already completed):\n\n");
+        resumeGoal.append("Original goal: ").append(manifest.goal()).append("\n\n");
+        resumeGoal.append("Completed steps (do NOT redo these): ")
+                .append(String.join(", ", manifest.completedStepIds())).append("\n\n");
+        resumeGoal.append("Steps still to do:\n");
+        for (TeamManifest.StepEntry step : incompleteSteps) {
+            resumeGoal.append("- ").append(step.stepId())
+                    .append(": ").append(step.description()).append("\n");
+        }
+        return startExpertTeam(resumeGoal.toString(), TeamConfig.defaults(), List.of());
     }
 
     private io.kairo.api.team.Team buildTeam(List<String> roleIds) {

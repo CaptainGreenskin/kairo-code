@@ -7,6 +7,7 @@ import { getToolRisk, RISK_LABELS, RISK_COLORS, RISK_BADGE_COLORS } from '@utils
 import { extractFileWriteInfo, getToolRiskLevel } from '@utils/toolPreview';
 import { FileContentPreview } from './FileContentPreview';
 import { InlineTodoCard, parseTodoWriteInput } from './InlineTodoCard';
+import { SubagentCard } from './SubagentCard';
 import { LazyMarkdown } from './LazyMarkdown';
 
 const FILE_WRITE_TOOLS = new Set([
@@ -581,6 +582,10 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     // Backed by ExitPlanModeTool's {overview, items: [{content, priority?}]} schema.
     // The card surfaces items as an editable checklist; on approve we send the user's
     // current edits via editedArgs.items, on reject we send their feedback as `reason`.
+    if (toolCall.toolName === 'task') {
+        return <SubagentCard toolCall={toolCall} />;
+    }
+
     if (toolCall.toolName === 'exit_plan_mode') {
         return (
             <ExitPlanModeCard

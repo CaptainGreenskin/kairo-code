@@ -1,6 +1,53 @@
 server:
   port: 8080
 
+# Inbound access control for the HTTP/WS surface. This server can fork an
+# interactive shell and read/write arbitrary files, so it must not be exposed
+# to a network unauthenticated. Defaults are fail-closed: auth is enabled, and
+# with no token set only loopback callers are allowed through.
+kairo-server:
+  security:
+    enabled: ${KAIRO_SERVER_AUTH_ENABLED:true}
+    # Shared bearer token. Inject via env; never commit a real value.
+    # When blank, all non-loopback requests are rejected.
+    auth-token: ${KAIRO_SERVER_AUTH_TOKEN:}
+    # Loopback (127.0.0.1/::1) bypasses the token so local dev keeps working.
+    allow-loopback: ${KAIRO_SERVER_ALLOW_LOOPBACK:true}
+    # CORS + WebSocket origin whitelist. Empty = same-origin only (no cross-origin).
+    allowed-origins: ${KAIRO_SERVER_ALLOWED_ORIGINS:}
+    rate-limit:
+      enabled: ${KAIRO_SERVER_RATE_LIMIT_ENABLED:true}
+      requests-per-minute: ${KAIRO_SERVER_RATE_LIMIT_RPM:240}
+      burst: ${KAIRO_SERVER_RATE_LIMIT_BURST:60}
+    # OAuth/SSO -- set enabled=true and configure a provider below to switch
+    # from token-based auth to OAuth2 login. When disabled (default), the server
+    # uses ApiAuthFilter with shared bearer tokens.
+    oauth:
+      enabled: ${KAIRO_SERVER_OAUTH_ENABLED:false}
+
+# Spring Security OAuth2 client registration. Uncomment and configure one or
+# more providers. These only take effect when kairo-server.security.oauth.enabled=true.
+#spring:
+#  security:
+#    oauth2:
+#      client:
+#        registration:
+#          github:
+#            client-id: ${GITHUB_CLIENT_ID:}
+#            client-secret: ${GITHUB_CLIENT_SECRET:}
+#            scope: read:user,user:email
+#          dingtalk:
+#            client-id: ${DINGTALK_CLIENT_ID:}
+#            client-secret: ${DINGTALK_CLIENT_SECRET:}
+#            authorization-grant-type: authorization_code
+#            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+#        provider:
+#          dingtalk:
+#            authorization-uri: https://login.dingtalk.com/oauth2/auth
+#            token-uri: https://api.dingtalk.com/v1.0/oauth2/userAccessToken
+#            user-info-uri: https://api.dingtalk.com/v1.0/contact/users/me
+#            user-name-attribute: nick
+
 kairo:
   # kairo-spring-boot-starter-core auto-config: must match kairo.code.* settings
   model:
@@ -32,7 +79,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always
@@ -44,9 +91,11 @@ management:
         ai: true
 
 # Langfuse OTLP exporter — see LangfuseConfig.
-# secret-key falls back to env so dev machines can opt out by simply not setting it.
+# All values come from env with NO inline defaults: credentials must never be
+# committed. When host/keys are absent, set enabled=false (or leave LANGFUSE_ENABLED
+# unset) so the exporter stays off rather than shipping with baked-in secrets.
 langfuse:
-  enabled: ${LANGFUSE_ENABLED:true}
-  host: ${LANGFUSE_HOST:https://langfuse.alibaba-inc.com}
-  public-key: ${LANGFUSE_PUBLIC_KEY:pk-lf-7bab33fe-26b2-449c-81bb-63ce26afa4aa}
-  secret-key: ${LANGFUSE_SECRET_KEY:sk-lf-abd5d685-b1cb-4c7b-9abe-e26440fe4c6a}
+  enabled: ${LANGFUSE_ENABLED:false}
+  host: ${LANGFUSE_HOST:}
+  public-key: ${LANGFUSE_PUBLIC_KEY:}
+  secret-key: ${LANGFUSE_SECRET_KEY:}

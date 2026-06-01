@@ -54,10 +54,10 @@ public final class PluginManagerFactory {
     private PluginManagerFactory() {}
 
     /**
-     * Build a {@link PluginManager} rooted under {@code kairoDir}. Component binding is currently
-     * a no-op — kairo-code reads enabled plugins' skill directories directly via {@link
-     * #enabledSkillDirs(PluginManager)} and feeds them to {@code FsSkillLoader}. Hook / MCP /
-     * command bridges are follow-on work.
+     * Build a {@link PluginManager} rooted under {@code kairoDir}. Component registration is
+     * handled by {@link KairoComponentRegistrar} which routes skills, commands, hooks, and MCP
+     * servers to the appropriate kairo-code registries. Skills are also loaded via the directory
+     * side-channel ({@link #enabledSkillDirs}) for backward compatibility.
      */
     public static PluginManager create(Path kairoDir) throws IOException {
         Path pluginsRoot = kairoDir.resolve("plugins");
@@ -81,7 +81,7 @@ public final class PluginManagerFactory {
                 new DefaultPluginRegistry(),
                 new PluginLoader(),
                 dataRoot,
-                ComponentRegistrar.noOp(),
+                new KairoComponentRegistrar(),
                 fetchers);
     }
 

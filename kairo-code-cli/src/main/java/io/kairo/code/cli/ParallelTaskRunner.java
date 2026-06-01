@@ -33,22 +33,33 @@ public final class ParallelTaskRunner {
     private final ModelProvider modelProvider;
     private final int timeoutSeconds;
     private final PrintStream err;
+    private final Path outputFile;
 
     public ParallelTaskRunner(
             CodeAgentConfig config,
             ModelProvider modelProvider,
             int timeoutSeconds,
             PrintStream err) {
+        this(config, modelProvider, timeoutSeconds, err, null);
+    }
+
+    public ParallelTaskRunner(
+            CodeAgentConfig config,
+            ModelProvider modelProvider,
+            int timeoutSeconds,
+            PrintStream err,
+            Path outputFile) {
         this.config = config;
         this.modelProvider = modelProvider;
         this.timeoutSeconds = timeoutSeconds;
         this.err = err;
+        this.outputFile = outputFile;
     }
 
     /**
-     * Reads {@code taskListFile}, runs all tasks concurrently, prints each result to stdout.
+     * Reads {@code taskListFile}, runs all tasks concurrently, writes results.
      *
-     * @return 0 if all tasks succeed or some fail (failures printed to stderr), 1 on file error
+     * @return 0 if all tasks succeed, 1 on any failure (task error or file error)
      */
     public int run(Path taskListFile) {
         List<TaskEntry> entries;
@@ -75,16 +86,31 @@ public final class ParallelTaskRunner {
 
         if (results == null) results = List.of();
 
+        StringBuilder output = new StringBuilder();
+        boolean anyFailed = false;
         for (TaskResult result : results) {
-            System.out.printf("=== %s ===%n", result.id());
+            output.append("=== ").append(result.id()).append(" ===\n");
             if (result.error() != null) {
-                System.out.println("[ERROR] " + result.error());
+                output.append("[ERROR] ").append(result.error()).append("\n");
+                anyFailed = true;
             } else {
-                System.out.println(result.response());
+                output.append(result.response()).append("\n");
             }
-            System.out.println();
+            output.append("\n");
         }
-        return 0;
+
+        String text = output.toString();
+        if (outputFile != null) {
+            try {
+                Files.writeString(outputFile, text, StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                err.println("Failed to write output file: " + e.getMessage());
+                System.out.print(text);
+            }
+        } else {
+            System.out.print(text);
+        }
+        return anyFailed ? 1 : 0;
     }
 
     private Mono<TaskResult> runOne(TaskEntry entry) {

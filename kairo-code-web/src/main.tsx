@@ -3,6 +3,10 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/globals.css';
 import { initMonaco } from './monaco/setup';
+import { installAuthInterceptor } from './api/auth';
+
+// Inject the server auth token into all /api requests before anything fetches.
+installAuthInterceptor();
 
 // Theme persistence: restore saved theme or fall back to system preference
 const savedTheme = localStorage.getItem('kairo-theme');

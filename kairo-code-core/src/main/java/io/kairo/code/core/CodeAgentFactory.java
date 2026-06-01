@@ -12,8 +12,15 @@ import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.api.memory.MemoryStore;
 import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.mcp.McpConfig;
+import io.kairo.code.core.evolution.FailurePatternTracker;
 import io.kairo.code.core.evolution.LearnedLessonStore;
+import io.kairo.code.core.evolution.ReflectionPipeline;
+import io.kairo.code.core.memory.AutoMemoryHook;
 import io.kairo.code.core.memory.KairoMdContextSource;
+import io.kairo.code.core.team.ExpertTeamFactory;
+import io.kairo.code.core.team.tools.ExpertTeamTool;
+import io.kairo.code.core.profile.UserProfile;
+import io.kairo.code.core.profile.UserProfileContextSource;
 import io.kairo.code.core.prompt.SessionContextEnricher;
 import io.kairo.code.core.prompt.SessionMemoryEnricher;
 import io.kairo.code.core.stats.ToolUsageTracker;
@@ -265,15 +272,20 @@ public final class CodeAgentFactory {
             registry.registerTool(TaskTool.class);
         }
 
-        // Note: SessionOptions.swarmCoordinator is intentionally NOT exposed to Agent mode
-        // as a model-facing tool. Experts mode (TeamSessionPayload + ExpertsPresetConfig,
-        // post M-Experts-Upgrade) uses SwarmCoordinator out-of-band as a session-level
-        // orchestrator; making it a tool call in Agent mode
-        // would smuggle a multi-minute batch workflow into a tool-result loop, which
-        // breaks both UX (looks like a hang) and qoder's own use-case split
-        // ("Agent mode is more efficient for simple, well-defined edits"). The field is
-        // retained on SessionOptions for the future Team mode (claude-style long-lived
-        // P2P agents) — see ADR-001 in kairo-code/docs/adr/.
+        // Register expert_team as a model-callable tool in Agent mode. The coordinator is
+        // created lazily (via ExpertTeamFactory.create) on first tool invocation to avoid
+        // the cost of pre-building the worker agent pool for sessions that never use it.
+        // Child sessions are excluded (recursion guard).
+        if (!options.childSession()) {
+            SwarmCoordinator sc = options.swarmCoordinator();
+            if (sc == null) {
+                final CodeAgentConfig cfgCopy = config;
+                final ModelProvider mpCopy = modelProvider;
+                sc = ExpertTeamFactory.create(cfgCopy, mpCopy, 3);
+            }
+            registry.registerTool(ExpertTeamTool.class);
+            registry.registerInstance("expert_team", new ExpertTeamTool(sc));
+        }
 
         // M-Team (#60): register team-collaboration tools (team_create / send_message /
         // team_delete) only when team primitives are wired AND this is not a child session.
@@ -441,6 +453,32 @@ public final class CodeAgentFactory {
         // Auto-register ContextWindowGuardHook: warns on large context to prevent GLM-5.1
         // overflow. Active in both REPL and one-shot mode.
         builder.hook(new ContextWindowGuardHook());
+
+        // Auto-register AutoMemoryHook: after each reasoning step, heuristically extracts
+        // durable facts/preferences/decisions into the MemoryStore so future sessions can
+        // recall them. No-op when no MemoryStore is wired (REPL-safe). The READ side is
+        // already wired via SessionMemoryEnricher in resolveSystemPrompt(); this closes the
+        // WRITE side that was previously never registered. Active in both modes.
+        builder.hook(new AutoMemoryHook(options.memoryStore()));
+
+        // Auto-register the self-reflection write path: when the same tool fails 3 times in
+        // a row, FailurePatternTracker fires and ReflectionPipeline asks the LLM (async, off
+        // the agent thread) to distill a one-line lesson, saved as PENDING in the global
+        // LearnedLessonStore. Approved lessons are injected into later system prompts via
+        // SessionContextEnricher (already wired). Without this the evolution loop never
+        // produced any lessons. Approval happens out-of-band (CLI :evolve / EvolutionController).
+        Path evolutionDir = Path.of(System.getProperty("user.home"), ".kairo-code");
+        LearnedLessonStore evolutionLessons = LearnedLessonStore.fromKairoDir(evolutionDir);
+        builder.hook(new FailurePatternTracker(
+                strike -> ReflectionPipeline.generateAndSave(strike, config, evolutionLessons)));
+
+        // Auto-register the user-profile write path: before each reasoning step, re-extract
+        // preferred languages/frameworks/communication style from the conversation and persist
+        // to ~/.kairo-code/profile.json. The READ side (resolveSystemPrompt) injects it into the
+        // next session's system prompt. Previously the extractor + context source existed but
+        // nothing drove them, so personalization never happened. Active in both modes.
+        builder.hook(new io.kairo.code.core.profile.UserProfileUpdateHook(
+                io.kairo.code.core.profile.UserProfileStore.fromKairoDir(evolutionDir)));
 
         // Auto-register ContextCompactionHook: when context approaches the limit, injects a
         // compaction request so the model summarizes work and continues. Non-REPL only.
@@ -803,6 +841,18 @@ public final class CodeAgentFactory {
             }
         }
         Path globalKairoDir = Path.of(System.getProperty("user.home"), ".kairo-code");
+
+        // Personalization: inject the persisted user profile (preferred languages/frameworks/
+        // communication style) collected by UserProfileUpdateHook across prior sessions.
+        UserProfile persistedProfile =
+                io.kairo.code.core.profile.UserProfileStore.fromKairoDir(globalKairoDir).load();
+        if (persistedProfile != null) {
+            String profileSection = new UserProfileContextSource(persistedProfile).collect();
+            if (profileSection != null && !profileSection.isEmpty()) {
+                prompt.append("\n\n").append(profileSection);
+            }
+        }
+
         LearnedLessonStore lessonStore = LearnedLessonStore.fromKairoDir(globalKairoDir);
         String enriched = SessionContextEnricher.enrich(prompt.toString(), toolUsageTracker, lessonStore);
 

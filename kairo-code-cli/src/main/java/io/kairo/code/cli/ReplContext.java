@@ -407,7 +407,8 @@ public class ReplContext {
                         config.mcpConfig(),
                         config.toolBudgetForce(),
                         config.repetitiveToolThreshold(),
-                        config.thinkingBudget());
+                        config.thinkingBudget(),
+                        config.llmClassifier());
         rebuildSession(null);
     }
 

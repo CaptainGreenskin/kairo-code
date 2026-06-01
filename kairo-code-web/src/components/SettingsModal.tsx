@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Eye, EyeOff, Check, Settings2, ChevronRight, KeyRound, Cpu, Plug, Info, ExternalLink } from 'lucide-react';
 import type { ServerConfig } from '@/types/agent';
 import { updateConfig, getModels, getProviders, type ProviderInfo } from '@api/config';
+import { getAuthToken, setAuthToken } from '@/api/auth';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -37,6 +38,8 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
     const [apiKey, setApiKey] = useState('');
     const [model, setModel] = useState(config.model || '');
     const [baseUrl, setBaseUrl] = useState(config.baseUrl || '');
+    const [serverToken, setServerToken] = useState(getAuthToken());
+    const [showServerToken, setShowServerToken] = useState(false);
     const [localThinkingBudget, setLocalThinkingBudget] = useState(String(config.thinkingBudget ?? 0));
     const [showApiKey, setShowApiKey] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -84,6 +87,7 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
             setProvider(config.provider || 'openai');
             setModel(config.model || '');
             setBaseUrl(config.baseUrl || '');
+            setServerToken(getAuthToken());
             setLocalThinkingBudget(String(config.thinkingBudget ?? 0));
         }
     }, [isOpen, config]);
@@ -105,6 +109,10 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
     const handleSave = async () => {
         setSaving(true);
         setError(null);
+        // Server access token is a client-only credential (localStorage), not part
+        // of the server config payload. Persist it before the network call so the
+        // updateConfig request itself carries the new token.
+        setAuthToken(serverToken.trim());
         try {
             const req: Parameters<typeof updateConfig>[0] = {};
             if (apiKey) req.apiKey = apiKey;
@@ -245,6 +253,34 @@ export function SettingsModal({ isOpen, onClose, config, onSaved, onOpenMcpServe
                                         <p className={helpClass}>Override the default endpoint for this provider.</p>
                                     </div>
                                 )}
+
+                                <div>
+                                    <label className={labelClass}>
+                                        Server Access Token{' '}
+                                        <span className="text-[var(--text-muted)]">(for remote/secured servers)</span>
+                                    </label>
+                                    <div className="relative">
+                                        <input
+                                            type={showServerToken ? 'text' : 'password'}
+                                            className={`${inputClass} pr-10`}
+                                            placeholder="Leave blank for local (loopback) servers"
+                                            value={serverToken}
+                                            onChange={(e) => setServerToken(e.target.value)}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                            onClick={() => setShowServerToken(!showServerToken)}
+                                            aria-label={showServerToken ? 'Hide token' : 'Show token'}
+                                        >
+                                            {showServerToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                                        </button>
+                                    </div>
+                                    <p className={helpClass}>
+                                        Sent as a bearer token on every API/WebSocket request. Must match the server's
+                                        KAIRO_SERVER_AUTH_TOKEN. Stored only in this browser.
+                                    </p>
+                                </div>
                             </div>
                         )}
 

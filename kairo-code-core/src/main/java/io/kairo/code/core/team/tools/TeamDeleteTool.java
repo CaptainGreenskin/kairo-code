@@ -39,6 +39,8 @@ public class TeamDeleteTool implements SyncTool {
 
     private final TeamManager teamManager;
 
+    TeamDeleteTool() { this.teamManager = null; }
+
     public TeamDeleteTool(TeamManager teamManager) {
         this.teamManager = teamManager;
     }

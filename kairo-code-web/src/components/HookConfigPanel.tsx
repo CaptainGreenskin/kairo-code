@@ -14,13 +14,18 @@ interface HookConfigPanelProps {
 export function HookConfigPanel({ onClose }: HookConfigPanelProps) {
     const [hooks, setHooks] = useState<HookInfo[]>([]);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [toggling, setToggling] = useState<string | null>(null);
 
     const refresh = async () => {
         setLoading(true);
+        setError(null);
         try {
             const res = await fetch('/api/hooks');
-            if (res.ok) setHooks(await res.json());
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            setHooks(await res.json());
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to load hooks');
         } finally {
             setLoading(false);
         }
@@ -30,12 +35,14 @@ export function HookConfigPanel({ onClose }: HookConfigPanelProps) {
 
     const toggle = async (name: string) => {
         setToggling(name);
+        setError(null);
         try {
             const res = await fetch(`/api/hooks/${name}/toggle`, { method: 'POST' });
-            if (res.ok) {
-                const updated: HookInfo = await res.json();
-                setHooks(prev => prev.map(h => h.name === name ? updated : h));
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const updated: HookInfo = await res.json();
+            setHooks(prev => prev.map(h => h.name === name ? updated : h));
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to toggle hook');
         } finally {
             setToggling(null);
         }
@@ -70,8 +77,20 @@ export function HookConfigPanel({ onClose }: HookConfigPanelProps) {
                     </div>
                 </div>
 
+                {error && (
+                    <div className="px-4 py-2 text-xs text-red-400 bg-red-500/10 border-b border-[var(--border)]">
+                        {error}
+                    </div>
+                )}
+
                 {/* Hook list */}
                 <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]">
+                    {hooks.length === 0 && !loading && !error && (
+                        <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
+                            <ZapOff size={32} className="opacity-30 mb-2" />
+                            <p className="text-sm">No hooks configured.</p>
+                        </div>
+                    )}
                     {hooks.map(hook => (
                         <div key={hook.name}
                             className={`flex items-center gap-3 px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors ${

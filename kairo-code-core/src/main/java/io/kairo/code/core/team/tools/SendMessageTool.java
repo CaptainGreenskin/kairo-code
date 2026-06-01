@@ -43,6 +43,8 @@ public class SendMessageTool implements SyncTool {
     private final TeamManager teamManager;
     private final MessageBus messageBus;
 
+    SendMessageTool() { this.teamManager = null; this.messageBus = null; }
+
     public SendMessageTool(TeamManager teamManager, MessageBus messageBus) {
         this.teamManager = teamManager;
         this.messageBus = messageBus;
@@ -81,7 +83,11 @@ public class SendMessageTool implements SyncTool {
 
         String msgId;
         if ("*".equals(toIn)) {
-            // Broadcast: use the caller's session if available, otherwise empty string
+            if (team.members().isEmpty()) {
+                return Mono.just(ToolResult.error(null,
+                        "Team '" + teamIdIn + "' has no members yet. "
+                        + "P2P member spawning is not yet implemented; use expert_team for multi-agent work."));
+            }
             String fromSessionId = (String) input.getOrDefault("fromSessionId", "");
             boolean ok = messageBus.broadcast(teamIdIn, fromSessionId, messageIn, teamManager);
             if (!ok) {

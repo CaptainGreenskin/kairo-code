@@ -105,11 +105,7 @@ public class SessionCommand implements SlashCommand {
         }
 
         if (tokensAvailable && totalTokens > 0) {
-            // Assume 2:1 input-to-output ratio for breakdown
-            long inputTokens = (totalTokens * 2) / 3;
-            long outputTokens = totalTokens - inputTokens;
-            writer.printf("Est. tokens (input):  %,9d%n", inputTokens);
-            writer.printf("Est. tokens (output): %,9d%n", outputTokens);
+            writer.printf("Total tokens:         %,9d%n", totalTokens);
 
             OptionalDouble cost = CostEstimator.estimate(modelName, totalTokens);
             if (cost.isPresent()) {

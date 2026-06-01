@@ -16,13 +16,18 @@ interface EvolutionPanelProps {
 export function EvolutionPanel({ onClose }: EvolutionPanelProps) {
     const [lessons, setLessons] = useState<Lesson[]>([]);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
 
     const refresh = async () => {
         setLoading(true);
+        setError(null);
         try {
             const res = await fetch('/api/evolution/lessons');
-            if (res.ok) setLessons(await res.json());
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            setLessons(await res.json());
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to load lessons');
         } finally {
             setLoading(false);
         }
@@ -31,17 +36,27 @@ export function EvolutionPanel({ onClose }: EvolutionPanelProps) {
     useEffect(() => { refresh(); }, []);
 
     const updateStatus = async (id: string, status: string) => {
-        await fetch(`/api/evolution/lessons/${id}/status`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status }),
-        });
-        await refresh();
+        try {
+            const res = await fetch(`/api/evolution/lessons/${id}/status`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await refresh();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to update status');
+        }
     };
 
     const deleteLesson = async (id: string) => {
-        await fetch(`/api/evolution/lessons/${id}`, { method: 'DELETE' });
-        await refresh();
+        try {
+            const res = await fetch(`/api/evolution/lessons/${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await refresh();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to delete lesson');
+        }
     };
 
     const filtered = filter === 'ALL' ? lessons : lessons.filter(l => l.status === filter);
@@ -96,6 +111,12 @@ export function EvolutionPanel({ onClose }: EvolutionPanelProps) {
                         </button>
                     ))}
                 </div>
+
+                {error && (
+                    <div className="px-4 py-2 text-xs text-red-400 bg-red-500/10 border-b border-[var(--border)]">
+                        {error}
+                    </div>
+                )}
 
                 {/* Lessons list */}
                 <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]">

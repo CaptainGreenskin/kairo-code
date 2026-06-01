@@ -35,7 +35,7 @@ class TeamSubscriptionTest {
         WorkspacePersistenceService workspaces = new WorkspacePersistenceService(
                 java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "kairo-test-ws-" + System.nanoTime(), "workspaces.json"));
         handler = new AgentWebSocketHandler(agentService, props, workspaces,
-                new io.kairo.multiagent.team.InProcessMessageBus());
+                new io.kairo.multiagent.team.InProcessMessageBus(), null);
     }
 
     // ---- subscribeTeam ----

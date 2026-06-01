@@ -5,6 +5,7 @@ import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.model.ModelProvider;
 import io.kairo.code.core.CodeAgentConfig;
+import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.evolution.LearnedLessonStore.Lesson;
 import io.kairo.code.core.evolution.LearnedLessonStore.Status;
 import io.kairo.core.agent.AgentBuilder;
@@ -44,7 +45,11 @@ public final class ReflectionPipeline {
             ToolStrikeEvent event, CodeAgentConfig config, LearnedLessonStore lessonStore) {
         return CompletableFuture.runAsync(() -> {
             try {
-                ModelProvider provider = new io.kairo.core.model.openai.OpenAIProvider(
+                // Use the factory's provider builder which handles GLM/Qwen/Claude URL
+                // routing correctly. The previous direct OpenAIProvider construction
+                // appended /v1/chat/completions to URLs like /api/coding/paas/v4,
+                // producing a 404 on non-OpenAI endpoints.
+                ModelProvider provider = CodeAgentFactory.buildModelProvider(
                         config.apiKey(), config.baseUrl());
                 String lesson = generateLesson(event, provider, config.modelName());
                 if (lesson != null && !lesson.isBlank()) {

@@ -9,7 +9,7 @@ upstream — same `PiiRedactionPolicy` that any Kairo-based agent uses.
 
 ## What's redacted by default
 
-16 patterns ship out of the box:
+15 patterns ship out of the box:
 
 | Marker | Matches |
 |---|---|

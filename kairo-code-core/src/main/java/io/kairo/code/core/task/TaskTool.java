@@ -177,13 +177,17 @@ public class TaskTool implements SyncTool {
 
         Msg childResponse;
         Throwable childFailure = null;
+        CodeAgentSession child = null;
         try {
-            CodeAgentSession child = deps.spawner().spawn(taskId, workDir);
+            child = deps.spawner().spawn(taskId, workDir);
             childResponse =
                     child.agent().call(Msg.of(MsgRole.USER, effectivePrompt)).block();
         } catch (Throwable t) {
             childResponse = null;
             childFailure = t;
+            if (child != null) {
+                try { child.agent().interrupt(); } catch (Exception ignored) {}
+            }
             LOG.warn("Child agent for task {} threw: {}", taskId, t.toString());
         }
 
