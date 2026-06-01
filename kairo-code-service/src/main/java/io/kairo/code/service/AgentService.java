@@ -1460,8 +1460,14 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
-        rehydrateSessions();
         startIdleReaper();
+        // Delay rehydrate by 5s to let Spring finish wiring all beans (defaultConfig
+        // is set by ServerConfig @Bean which may not be ready during afterPropertiesSet).
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "kairo-session-rehydrate");
+            t.setDaemon(true);
+            return t;
+        }).schedule(this::rehydrateSessions, 5, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     private void rehydrateSessions() {
