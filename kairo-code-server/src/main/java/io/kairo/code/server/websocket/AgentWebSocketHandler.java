@@ -77,7 +77,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                                  ServerProperties serverProperties,
                                  WorkspacePersistenceService workspaces,
                                  MessageBus messageBus,
-                                 TeamEventBridge teamEventBridge) {
+                                 @org.springframework.context.annotation.Lazy TeamEventBridge teamEventBridge) {
         this.agentService = agentService;
         this.serverProperties = serverProperties;
         this.workspaces = workspaces;
