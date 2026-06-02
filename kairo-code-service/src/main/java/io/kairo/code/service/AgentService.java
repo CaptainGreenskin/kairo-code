@@ -367,9 +367,11 @@ public class AgentService implements DisposableBean, InitializingBean {
                         null);
                 hooks.add(checkpointHook);
             }
+            ToolUsageTracker usageTracker = new ToolUsageTracker();
             SessionOptions opts = SessionOptions.empty()
                     .asReplSession()
                     .withApprovalHandler(approvalHandler)
+                    .withToolUsageTracker(usageTracker)
                     .withHooks(hooks);
             if (tracer != null) {
                 // Wrap so every span carries session.id + langfuse.session.id +
