@@ -1770,6 +1770,11 @@ ${content}
                 onOpenMemory={handleOpenMemory}
                 onOpenShortcuts={handleOpenShortcuts}
                 onToggleTheme={handleToggleTheme}
+                onOpenShell={() => { if (!useLayoutStore.getState().bottomPanelOpen) toggleBottomPanel(); }}
+                onOpenBookmarks={() => setShowBookmarks(true)}
+                onOpenTimeline={() => setShowTimeline(true)}
+                onExport={() => handleExport('markdown')}
+                onOpenMcp={handleOpenMcpServers}
             />
 
             {showSettings && serverConfig && (

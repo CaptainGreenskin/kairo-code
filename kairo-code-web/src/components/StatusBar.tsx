@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings, Github, FileText, HelpCircle, Moon, Sun } from 'lucide-react';
+import { Settings, Github, FileText, HelpCircle, Moon, Sun, Terminal, Bookmark, Clock, Download, Plug } from 'lucide-react';
 import type { ConnectionStatus } from '@/types/agent';
 
 interface StatusBarProps {
@@ -9,6 +9,11 @@ interface StatusBarProps {
     onOpenMemory?: () => void;
     onOpenShortcuts?: () => void;
     onToggleTheme: () => void;
+    onOpenShell?: () => void;
+    onOpenBookmarks?: () => void;
+    onOpenTimeline?: () => void;
+    onExport?: () => void;
+    onOpenMcp?: () => void;
 }
 
 const statusDotClass: Record<ConnectionStatus, string> = {
@@ -32,6 +37,11 @@ export function StatusBar({
     onOpenMemory,
     onOpenShortcuts,
     onToggleTheme,
+    onOpenShell,
+    onOpenBookmarks,
+    onOpenTimeline,
+    onExport,
+    onOpenMcp,
 }: StatusBarProps) {
     const [isDark, setIsDark] = useState(() =>
         document.documentElement.classList.contains('dark'),
@@ -72,6 +82,31 @@ export function StatusBar({
                         aria-label="Memory"
                     >
                         <FileText size={13} />
+                    </button>
+                )}
+                {onOpenShell && (
+                    <button onClick={onOpenShell} className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="Shell Terminal" aria-label="Shell">
+                        <Terminal size={13} />
+                    </button>
+                )}
+                {onOpenBookmarks && (
+                    <button onClick={onOpenBookmarks} className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="Bookmarks" aria-label="Bookmarks">
+                        <Bookmark size={13} />
+                    </button>
+                )}
+                {onOpenTimeline && (
+                    <button onClick={onOpenTimeline} className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="Execution Timeline" aria-label="Timeline">
+                        <Clock size={13} />
+                    </button>
+                )}
+                {onExport && (
+                    <button onClick={onExport} className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="Export Chat" aria-label="Export">
+                        <Download size={13} />
+                    </button>
+                )}
+                {onOpenMcp && (
+                    <button onClick={onOpenMcp} className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="MCP Servers" aria-label="MCP">
+                        <Plug size={13} />
                     </button>
                 )}
                 <button
