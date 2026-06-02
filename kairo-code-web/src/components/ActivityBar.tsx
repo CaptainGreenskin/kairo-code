@@ -1,4 +1,4 @@
-import { Files, Search, GitBranch, Layers, Brain, Zap, BarChart3 } from 'lucide-react';
+import { Files, Search, GitBranch, Brain, Zap, BarChart3 } from 'lucide-react';
 import { useLayoutStore } from '@store/layoutStore';
 import type { ActivityView } from '@utils/userPrefs';
 
@@ -13,7 +13,6 @@ const ITEMS: ActivityItem[] = [
     { id: 'files', label: 'Explorer', icon: Files, shortcut: '⌘⇧E' },
     { id: 'search', label: 'Search', icon: Search, shortcut: '⌘F' },
     { id: 'git', label: 'Source Control', icon: GitBranch },
-    { id: 'workspaces', label: 'Workspaces', icon: Layers },
 ];
 
 interface QuickAction {
