@@ -1,4 +1,4 @@
-import { Files, Search, GitBranch, Layers } from 'lucide-react';
+import { Files, Search, GitBranch, Layers, Brain, Zap, BarChart3 } from 'lucide-react';
 import { useLayoutStore } from '@store/layoutStore';
 import type { ActivityView } from '@utils/userPrefs';
 
@@ -16,10 +16,27 @@ const ITEMS: ActivityItem[] = [
     { id: 'workspaces', label: 'Workspaces', icon: Layers },
 ];
 
-export function ActivityBar() {
+interface QuickAction {
+    id: string;
+    label: string;
+    icon: typeof Brain;
+    onClick: () => void;
+}
+
+export function ActivityBar({ onOpenEvolution, onOpenHooks, onOpenStats }: {
+    onOpenEvolution?: () => void;
+    onOpenHooks?: () => void;
+    onOpenStats?: () => void;
+}) {
     const activeView = useLayoutStore((s) => s.activityView);
     const sidebarOpen = useLayoutStore((s) => s.primarySidebarOpen);
     const selectActivity = useLayoutStore((s) => s.selectActivity);
+
+    const quickActions: QuickAction[] = [
+        { id: 'evolution', label: 'Self-Evolution Lessons', icon: Brain, onClick: () => onOpenEvolution?.() },
+        { id: 'hooks', label: 'Hook Configuration', icon: Zap, onClick: () => onOpenHooks?.() },
+        { id: 'stats', label: 'Session Stats', icon: BarChart3, onClick: () => onOpenStats?.() },
+    ];
 
     return (
         <nav
@@ -49,6 +66,26 @@ export function ActivityBar() {
                     </button>
                 );
             })}
+
+            <div className="flex-1" />
+
+            {/* Quick access to key capabilities */}
+            <div className="flex flex-col items-center gap-1 border-t border-[var(--border)] pt-2 mt-1">
+                {quickActions.map((action) => {
+                    const Icon = action.icon;
+                    return (
+                        <button
+                            key={action.id}
+                            onClick={action.onClick}
+                            className="w-10 h-10 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
+                            title={action.label}
+                            aria-label={action.label}
+                        >
+                            <Icon size={18} />
+                        </button>
+                    );
+                })}
+            </div>
         </nav>
     );
 }

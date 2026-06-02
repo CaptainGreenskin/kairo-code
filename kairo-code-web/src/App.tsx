@@ -1358,7 +1358,11 @@ ${content}
                     </>
                 ) : (
                     <>
-                    <ActivityBar />
+                    <ActivityBar
+                        onOpenEvolution={() => setShowEvolution(true)}
+                        onOpenHooks={() => setShowHookConfig(true)}
+                        onOpenStats={() => setShowToolStats(true)}
+                    />
                     {primarySidebarOpen && (
                         <>
                             <div
