@@ -393,6 +393,7 @@ public class ConfigController {
 
         try (Stream<Path> stream = Files.list(dir)) {
             return stream
+                    .filter(p -> !isHiddenBuildDir(p))
                     .sorted(Comparator.comparing(Path::getFileName))
                     .map(p -> {
                         String relative = wd.relativize(p).toString();
@@ -581,5 +582,15 @@ public class ConfigController {
             case "gradle" -> "groovy";
             default -> "";
         };
+    }
+
+    private static final java.util.Set<String> HIDDEN_DIRS = java.util.Set.of(
+            ".git", ".idea", ".vscode", ".mvn", ".gradle", ".aone",
+            ".omc", ".kiro", "node_modules", "target", "build", "dist",
+            "__pycache__", ".pytest_cache", ".next", ".nuxt", ".DS_Store");
+
+    private static boolean isHiddenBuildDir(Path p) {
+        String name = p.getFileName().toString();
+        return HIDDEN_DIRS.contains(name);
     }
 }

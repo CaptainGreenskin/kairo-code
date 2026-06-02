@@ -1513,9 +1513,7 @@ ${content}
                                     <ThinkingIndicator isVisible={true} phase="thinking" thinkingText={thinkingText} />
                                 </div>
                             ) : messages.length === 0 ? (
-                                <div className="flex-1 flex items-center justify-center px-4 text-center text-[var(--text-muted)] text-sm">
-                                    Send a message to start a session.
-                                </div>
+                                <div className="flex-1" />
                             ) : (
                                 <>
                                     {showMessageSearch && (
