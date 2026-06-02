@@ -1,4 +1,4 @@
-import { Code2, GitBranch, Search, Wrench, Bug, FileText, Clock } from 'lucide-react';
+import { Code2, GitBranch, Search, Wrench, Bug, FileText, Clock, Brain, Users, Zap, Terminal, BookmarkIcon, AtSign } from 'lucide-react';
 
 interface QuickPrompt {
     icon: React.ReactNode;
@@ -151,8 +151,32 @@ export function WelcomeScreen({ onSelectPrompt, appVersion, recentSessions, onSe
                 ))}
             </div>
 
+            {/* Capabilities hint strip */}
+            <div className="w-full max-w-lg mt-6 pt-4 border-t border-[var(--border)]">
+                <div className="flex flex-wrap justify-center gap-3 text-[10px] text-[var(--text-muted)]">
+                    <span className="flex items-center gap-1" title="Switch to Experts mode for multi-agent collaboration">
+                        <Users size={11} className="text-purple-400" /> Experts Team
+                    </span>
+                    <span className="flex items-center gap-1" title="Agent learns from failures automatically">
+                        <Brain size={11} className="text-blue-400" /> Self-Evolution
+                    </span>
+                    <span className="flex items-center gap-1" title="Use @ to reference files in your prompt">
+                        <AtSign size={11} className="text-emerald-400" /> @Context
+                    </span>
+                    <span className="flex items-center gap-1" title="Press Shift+Tab for plan mode">
+                        <Zap size={11} className="text-amber-400" /> Plan Mode
+                    </span>
+                    <span className="flex items-center gap-1" title="Open terminal via ⌘K → Shell">
+                        <Terminal size={11} className="text-cyan-400" /> Shell
+                    </span>
+                    <span className="flex items-center gap-1" title="Bookmark important messages">
+                        <BookmarkIcon size={11} className="text-pink-400" /> Bookmarks
+                    </span>
+                </div>
+            </div>
+
             {/* Hint */}
-            <p className="text-[11px] text-[var(--text-muted)] mt-8">
+            <p className="text-[11px] text-[var(--text-muted)] mt-4">
                 Press{' '}
                 <kbd className="px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-tertiary)] font-mono text-[10px]">&#8984;K</kbd>
                 {' '}for commands
