@@ -98,6 +98,15 @@ export async function getDirs(path: string): Promise<DirEntry[]> {
     return request<DirEntry[]>(`/dirs?path=${encodeURIComponent(path)}`);
 }
 
+export async function chooseDir(): Promise<string | null> {
+    try {
+        const res = await request<{ path: string }>('/choose-dir');
+        return res.path || null;
+    } catch {
+        return null;
+    }
+}
+
 export async function putFileContent(path: string, content: string, workspaceId?: string): Promise<void> {
     const response = await fetch(`/api/files/content${buildQuery({ path, workspaceId })}`, {
         method: 'PUT',

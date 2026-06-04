@@ -5,6 +5,7 @@ import { useOpenFilesStore } from '../store/openFilesStore';
 import { RejectFeedbackModal } from './RejectFeedbackModal';
 import { SynthesizerCard } from './SynthesizerCard';
 import { useThinkingTimer } from '../hooks/useThinkingTimer';
+import { DagGraphView } from './DagGraphView';
 
 // ── Role metadata ────────────────────────────────────────────────────────────
 
@@ -18,7 +19,8 @@ const ROLE_META: Record<string, { icon: string; label: string }> = {
 };
 
 function getRoleMeta(roleId: string) {
-  return ROLE_META[roleId.toLowerCase()] ?? { icon: '⚙️', label: roleId };
+  const key = roleId.includes(':') ? roleId.split(':').pop()!.toLowerCase() : roleId.toLowerCase();
+  return ROLE_META[key] ?? { icon: '⚙️', label: roleId };
 }
 
 // ── Status colors ────────────────────────────────────────────────────────────
@@ -118,11 +120,13 @@ function rosterStatusText(step: StepState | undefined, thinkingTime: string): st
   return null;
 }
 
-function RosterRow({ entry, step, onOpen }: {
+function RosterRow({ entry, step, onOpen, index }: {
   entry: RosterEntry;
   step: StepState | undefined;
   onOpen: () => void;
+  index: number;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const meta = getRoleMeta(entry.roleId);
   const status = step?.status ?? 'pending';
   const colors = getStatusColors(status);
@@ -131,29 +135,42 @@ function RosterRow({ entry, step, onOpen }: {
   const detail = rosterStatusText(step, thinkingTime);
 
   return (
-    <button
-      onClick={onOpen}
-      className="group w-full flex items-center gap-2.5 px-3 py-2.5 text-left rounded-lg
-                 border border-[var(--border)] bg-[var(--bg-secondary)]
-                 hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
-      title="Open full execution in a tab"
-    >
-      <span className={`text-base shrink-0 ${active ? 'animate-pulse' : ''}`}>{meta.icon}</span>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[var(--text-primary)]">{meta.label}</span>
-          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full capitalize ${colors.bg} ${colors.text}`}>
-            {status}
-          </span>
-        </div>
-        {(detail || entry.instruction) && (
-          <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">
-            {detail ?? entry.instruction}
+    <div className="border border-[var(--border)] rounded-lg bg-[var(--bg-secondary)] overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="group w-full flex items-center gap-2.5 px-3 py-2.5 text-left
+                   hover:bg-[var(--bg-hover)] transition-colors"
+      >
+        <span className="text-[10px] font-mono text-[var(--text-muted)] w-4 shrink-0">{index + 1}</span>
+        <span className={`text-base shrink-0 ${active ? 'animate-pulse' : ''}`}>{meta.icon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-[var(--text-primary)]">{meta.label}</span>
+            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full capitalize ${colors.bg} ${colors.text}`}>
+              {status}
+            </span>
           </div>
-        )}
-      </div>
-      <ExternalLink size={13} className="shrink-0 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
-    </button>
+          {detail && (
+            <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">{detail}</div>
+          )}
+          {!detail && !expanded && entry.instruction && (
+            <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">{entry.instruction}</div>
+          )}
+        </div>
+        <ExternalLink
+          size={13}
+          className="shrink-0 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+          onClick={(e) => { e.stopPropagation(); onOpen(); }}
+        />
+      </button>
+      {expanded && entry.instruction && (
+        <div className="px-3 pb-2.5 pt-0 ml-[52px] border-t border-[var(--border)]/50">
+          <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">
+            {entry.instruction}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -202,6 +219,30 @@ export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendActio
     <div className="flex flex-col h-full bg-[var(--bg-primary)] overflow-hidden">
       <TopBar team={team} />
 
+      {/* Plan summary — concise overview before execution */}
+      {team.dag.length > 0 && team.status !== 'completed' && (
+        <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--bg-secondary)]/50 shrink-0">
+          <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+            <span className="font-medium text-[var(--text-primary)]">{team.dag.length} 步计划</span>
+            {' · '}
+            {team.dag.map((n, i) => {
+              const meta = getRoleMeta(n.roleId);
+              return (
+                <span key={n.stepId}>
+                  {i > 0 && ' → '}
+                  <span title={n.instruction}>{meta.icon}</span>
+                </span>
+              );
+            })}
+            {team.dag.some(n => (n.dependsOn?.length ?? 0) === 0 && team.dag.filter(m => (m.dependsOn?.length ?? 0) === 0).length > 1) && (
+              <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">
+                含并行
+              </span>
+            )}
+          </p>
+        </div>
+      )}
+
       {/* Synthesizer card when completed */}
       {team.status === 'completed' && team.finalOutput && (
         <div className="p-3 overflow-y-auto shrink-0 border-b border-[var(--border)]">
@@ -216,14 +257,35 @@ export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendActio
         </div>
       )}
 
+      {/* DAG graph: visual dependency graph when steps exist */}
+      {team.dag.length > 1 && (
+        <div className="shrink-0 border-b border-[var(--border)]" style={{ height: 240 }}>
+          <DagGraphView
+            dag={team.dag}
+            steps={team.steps}
+            onOpenStep={(stepId) => {
+              const dagNode = team.dag.find(n => n.stepId === stepId);
+              if (dagNode) {
+                openExpertStepTab({
+                  teamId,
+                  stepId,
+                  title: getRoleMeta(dagNode.roleId).label,
+                });
+              }
+            }}
+          />
+        </div>
+      )}
+
       {/* Roster: one row per expert — click opens the full trace in a main-area tab */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
         {roster.length > 0 ? (
-          roster.map((entry) => (
+          roster.map((entry, idx) => (
             <RosterRow
               key={entry.stepId}
               entry={entry}
               step={team.steps[entry.stepId]}
+              index={idx}
               onOpen={() =>
                 openExpertStepTab({
                   teamId,

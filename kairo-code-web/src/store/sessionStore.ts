@@ -360,7 +360,7 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
                     messages,
                     isThinking: running,
                     thinkingText: '',
-                    todos: todos ?? prev.todos ?? [],
+                    todos: todos ?? [],
                     running,
                     lastEventAt: Date.now(),
                     // Preserve resumable: periodic WS rebinds fire SESSION_RESTORED, and a stopped

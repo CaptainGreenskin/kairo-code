@@ -188,8 +188,9 @@ export interface Message {
     imageMediaType?: string;   // e.g. "image/png"
     /** When set, this message renders as a live expert-step card (qoder-style inline agent
      *  card) bound to expertTeamStore, instead of a plain text bubble. */
-    kind?: 'expertStep';
+    kind?: 'expertStep' | 'compaction';
     stepRef?: { teamId: string; stepId: string };
+    compactionMeta?: { beforeTokens: number; maxTokens: number; summary?: string };
     /** Reasoning_content captured during AGENT_THINKING events. Pinned onto the
      *  message so users can expand it in the chat after the response completes,
      *  mirroring Claude Code's collapsible 思考过程 box. */
@@ -263,6 +264,7 @@ export interface SessionInfo {
 export interface PlanReadyPayload {
     planSummary?: string;
     teamId?: string;
+    goal?: string;
     steps?: Array<{
         stepId: string;
         roleId: string;

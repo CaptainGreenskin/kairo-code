@@ -94,7 +94,8 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
     }
 
     @Override
-    public CodeAgentSession spawn(String taskId, Path workingDir) {
+    public CodeAgentSession spawn(String taskId, Path workingDir,
+            io.kairo.code.core.task.AgentType agentType, String modelOverride) {
         CodeAgentConfig childConfig =
                 new CodeAgentConfig(
                         parentConfig.apiKey(),

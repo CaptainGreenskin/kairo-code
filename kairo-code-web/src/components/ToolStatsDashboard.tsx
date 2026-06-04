@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { Wrench, TrendingUp, Clock, CheckCircle, XCircle, X } from 'lucide-react';
+import { useSessionStore } from '@store/sessionStore';
 
 export interface ToolStat {
     calls: number;
@@ -26,60 +27,52 @@ function formatMs(ms: number): string {
 }
 
 export function ToolStatsDashboard({ sessionId, onClose }: ToolStatsDashboardProps) {
-    const [stats, setStats] = useState<ToolStatsMap | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const messages = useSessionStore((s) => s.messages);
     const [sortBy, setSortBy] = useState<'calls' | 'totalMillis' | 'successRate'>('calls');
 
-    const refresh = useCallback(async () => {
-        if (!sessionId) {
-            setStats(null);
-            return;
-        }
-        setLoading(true);
-        setError(null);
-        try {
-            const res = await fetch(`/api/tool-stats/${sessionId}`);
-            if (!res.ok) {
-                if (res.status === 404) {
-                    setStats(null);
-                    return;
+    const stats = useMemo<ToolStatsMap>(() => {
+        const map: Record<string, { calls: number; successes: number; totalMillis: number }> = {};
+        for (const msg of messages) {
+            for (const tc of msg.toolCalls ?? []) {
+                if (!tc.toolName) continue;
+                if (!map[tc.toolName]) {
+                    map[tc.toolName] = { calls: 0, successes: 0, totalMillis: 0 };
                 }
-                throw new Error(`HTTP ${res.status}`);
+                map[tc.toolName].calls++;
+                if (tc.status === 'done') map[tc.toolName].successes++;
+                if (tc.durationMs) map[tc.toolName].totalMillis += tc.durationMs;
             }
-            setStats(await res.json());
-        } catch (e) {
-            setError(e instanceof Error ? e.message : 'Failed to load tool stats');
         }
-        setLoading(false);
-    }, [sessionId]);
+        const result: ToolStatsMap = {};
+        for (const [name, s] of Object.entries(map)) {
+            result[name] = {
+                calls: s.calls,
+                successes: s.successes,
+                totalMillis: s.totalMillis,
+                successRate: s.calls > 0 ? (s.successes / s.calls) * 100 : 0,
+                avgMillis: s.calls > 0 ? Math.round(s.totalMillis / s.calls) : 0,
+            };
+        }
+        return result;
+    }, [messages]);
 
-    useEffect(() => { refresh(); }, [refresh]);
+    const loading = false;
+    const error: string | null = null;
 
-    useEffect(() => {
-        if (!sessionId) return;
-        const interval = setInterval(refresh, 3000);
-        return () => clearInterval(interval);
-    }, [sessionId, refresh]);
+    const sortedTools = Object.entries(stats).sort(([, a], [, b]) => {
+        if (sortBy === 'calls') return b.calls - a.calls;
+        if (sortBy === 'totalMillis') return b.totalMillis - a.totalMillis;
+        return a.successRate - b.successRate;
+    });
 
-    const sortedTools = stats
-        ? Object.entries(stats).sort(([, a], [, b]) => {
-              if (sortBy === 'calls') return b.calls - a.calls;
-              if (sortBy === 'totalMillis') return b.totalMillis - a.totalMillis;
-              return a.successRate - b.successRate;
-          })
-        : [];
-
-    const totals = stats
-        ? Object.values(stats).reduce(
-              (acc, s) => ({
-                  calls: acc.calls + s.calls,
-                  successes: acc.successes + s.successes,
-                  totalMillis: acc.totalMillis + s.totalMillis,
-              }),
-              { calls: 0, successes: 0, totalMillis: 0 }
-          )
-        : null;
+    const totals = Object.values(stats).reduce(
+        (acc, s) => ({
+            calls: acc.calls + s.calls,
+            successes: acc.successes + s.successes,
+            totalMillis: acc.totalMillis + s.totalMillis,
+        }),
+        { calls: 0, successes: 0, totalMillis: 0 }
+    );
 
     return (
         <div className="h-full flex flex-col bg-[var(--bg-primary)]">
@@ -100,7 +93,7 @@ export function ToolStatsDashboard({ sessionId, onClose }: ToolStatsDashboardPro
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-3">
-                {loading && !stats && (
+                {loading && (
                     <div className="text-center text-[var(--text-muted)] text-sm py-8">Loading...</div>
                 )}
                 {error && (
@@ -111,7 +104,7 @@ export function ToolStatsDashboard({ sessionId, onClose }: ToolStatsDashboardPro
                         No active session
                     </div>
                 )}
-                {stats && Object.keys(stats).length === 0 && (
+                {sortedTools.length === 0 && sessionId && (
                     <div className="text-center text-[var(--text-muted)] text-sm py-8">
                         No tool calls yet
                     </div>
@@ -120,7 +113,7 @@ export function ToolStatsDashboard({ sessionId, onClose }: ToolStatsDashboardPro
                 {sortedTools.length > 0 && (
                     <>
                         {/* Totals row */}
-                        {totals && totals.calls > 0 && (
+                        {totals.calls > 0 && (
                             <div className="mb-3 p-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-xs">
                                 <div className="grid grid-cols-4 gap-2 text-center">
                                     <div>

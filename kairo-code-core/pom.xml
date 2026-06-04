@@ -35,7 +35,7 @@
         </dependency>
         <dependency>
             <groupId>io.github.captaingreenskin</groupId>
-            <artifactId>kairo-expert-team</artifactId>
+            <artifactId>kairo-multi-agent</artifactId>
         </dependency>
         <dependency>
             <groupId>io.github.captaingreenskin</groupId>

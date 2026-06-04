@@ -9,6 +9,8 @@ interface TerminalOutputProps {
     streaming?: boolean;
 }
 
+const SIMPLE_THRESHOLD = 10;
+
 export function TerminalOutput({ output, streaming }: TerminalOutputProps) {
     const terminalRef = useRef<HTMLDivElement>(null);
     const [collapsed, setCollapsed] = useState(true);
@@ -20,6 +22,7 @@ export function TerminalOutput({ output, streaming }: TerminalOutputProps) {
 
     const lineCount = output.split('\n').length;
     const shouldCollapse = !streaming && lineCount > COLLAPSE_THRESHOLD;
+    const useSimpleRender = !streaming && lineCount <= SIMPLE_THRESHOLD;
 
     useEffect(() => {
         if (!streaming) {
@@ -130,6 +133,23 @@ export function TerminalOutput({ output, streaming }: TerminalOutputProps) {
         setTimeout(() => setCopied(false), 1500);
     }, [output]);
 
+    if (useSimpleRender) {
+        return (
+            <div className="relative group">
+                <pre className="px-3 py-2 text-xs font-mono text-[var(--text-secondary)] whitespace-pre-wrap break-all bg-[var(--code-bg)] rounded-md">
+                    {output.trim()}
+                </pre>
+                <button
+                    onClick={handleCopy}
+                    className="absolute top-1.5 right-1.5 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Copy"
+                >
+                    <Copy size={12} />
+                </button>
+            </div>
+        );
+    }
+
     return (
         <div className="border border-[var(--border)] rounded-lg overflow-hidden bg-[var(--code-bg)]">
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
@@ -164,10 +184,9 @@ export function TerminalOutput({ output, streaming }: TerminalOutputProps) {
             {(!shouldCollapse || !collapsed) && (
                 <div
                     ref={terminalRef}
-                    className={collapsed && shouldCollapse ? '' : ''}
                     style={{
                         minHeight: '40px',
-                        maxHeight: shouldCollapse && !collapsed ? '400px' : 'none',
+                        maxHeight: shouldCollapse && !collapsed ? '400px' : '300px',
                         overflow: 'auto',
                     }}
                 />

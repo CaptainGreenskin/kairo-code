@@ -31,8 +31,8 @@ import io.kairo.code.core.workspace.DiffStats;
 import io.kairo.code.core.workspace.WorktreeException;
 import io.kairo.code.core.workspace.WorktreeLifecycle;
 import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
-import io.kairo.expertteam.role.ExpertProfile;
-import io.kairo.expertteam.role.ExpertRoleRegistry;
+import io.kairo.multiagent.subagent.ExpertProfile;
+import io.kairo.multiagent.subagent.ExpertRoleRegistry;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -72,6 +72,7 @@ import reactor.core.publisher.Mono;
                         + "merge/discard/keep the changes when the sub-agent finishes.",
         category = ToolCategory.GENERAL,
         sideEffect = ToolSideEffect.WRITE,
+        timeoutSeconds = 14400,
         usageGuidance =
                 "Prefer one task call per coherent sub-goal. Keep prompts concrete: state the inputs, the "
                         + "expected output, and any constraints. Avoid spawning a task for trivial work that "
@@ -100,6 +101,47 @@ public class TaskTool implements SyncTool {
 
     @ToolParam(
             description =
+                    "The type of specialized agent to spawn. Available types: "
+                            + "'general-purpose' (default, full capabilities), "
+                            + "'explore' (read-only search/analysis), "
+                            + "'plan' (architecture/design planning, read-only), "
+                            + "'coder' (implementation with full write access), "
+                            + "'reviewer' (code review, read-only). "
+                            + "Choose based on what tools the agent needs.",
+            required = false)
+    private String subagent_type;
+
+    @ToolParam(
+            description =
+                    "Agents run in the background by default — the tool returns immediately with a "
+                            + "task ID and you are notified on completion. Set to false only when you "
+                            + "need the result before your next step (blocks until the agent finishes).",
+            required = false)
+    private Boolean run_in_background;
+
+    @ToolParam(
+            description =
+                    "Model override for this agent. Use a specific model name to override the default. "
+                            + "Omit to inherit the parent's model.",
+            required = false)
+    private String model;
+
+    @ToolParam(
+            description =
+                    "When true, the child agent inherits the parent's conversation context. "
+                            + "Use for tasks that need to understand what has been discussed so far.",
+            required = false)
+    private Boolean fork;
+
+    @ToolParam(
+            description =
+                    "Name for the spawned agent. Makes it addressable via SendMessage while running. "
+                            + "Use for agents that need to communicate with other agents.",
+            required = false)
+    private String name;
+
+    @ToolParam(
+            description =
                     "Optional expert role ID to specialize the child agent. When set, the child receives "
                             + "role-specific system instructions, tool restrictions, and skill context from the "
                             + "resolved ExpertProfile. Built-in roles use the 'expert:' prefix: "
@@ -124,6 +166,11 @@ public class TaskTool implements SyncTool {
         String promptIn = stringInput(input, "prompt");
         String isoIn = stringInput(input, "isolation");
         String roleId = stringInput(input, "expert_role");
+        String agentTypeId = stringInput(input, "subagent_type");
+        Boolean background = boolInput(input, "run_in_background");
+        String modelOverride = stringInput(input, "model");
+        Boolean forkContext = boolInput(input, "fork");
+        String agentName = stringInput(input, "name");
         if (descIn == null || descIn.isBlank()) {
             return Mono.just(error(null, "Parameter 'description' is required and must be non-blank."));
         }
@@ -131,7 +178,18 @@ public class TaskTool implements SyncTool {
             return Mono.just(error(null, "Parameter 'prompt' is required and must be non-blank."));
         }
 
-        // Resolve expert role if provided
+        // Resolve agent type (new subagent_type parameter takes priority over expert_role)
+        AgentType agentType = AgentType.GENERAL_PURPOSE;
+        if (agentTypeId != null && !agentTypeId.isBlank()) {
+            agentType = AgentType.resolve(agentTypeId);
+            if (agentType == null) {
+                return Mono.just(error(null,
+                        "Unknown subagent_type '" + agentTypeId + "'. Available types: "
+                                + AgentType.availableIds() + "."));
+            }
+        }
+
+        // Resolve expert role if provided (legacy path, complementary to subagent_type)
         ExpertProfile resolvedProfile = null;
         if (roleId != null && !roleId.isBlank()) {
             ExpertRoleRegistry registry =
@@ -141,7 +199,6 @@ public class TaskTool implements SyncTool {
                         "expert_role '" + roleId + "' specified but no ExpertRoleRegistry is available. "
                                 + "Register an ExpertRoleRegistry in toolDependencies."));
             }
-            // Try exact match first, then with 'expert:' prefix
             resolvedProfile = registry.resolve(roleId).orElse(null);
             if (resolvedProfile == null && !roleId.contains(":")) {
                 resolvedProfile = registry.resolve("expert:" + roleId).orElse(null);
@@ -172,14 +229,107 @@ public class TaskTool implements SyncTool {
         boolean isolated = "worktree".equals(ws.metadata().get("kairo.workspace.isolation"));
         Path workDir = ws.root();
 
-        // Build effective prompt: prepend role instructions if profile resolved
-        String effectivePrompt = buildEffectivePrompt(promptIn, resolvedProfile);
+        // Build effective prompt: prepend agent type system prompt + role instructions
+        String agentPrefix = agentType.systemPromptPrefix();
+        String basePrompt = agentPrefix.isEmpty() ? promptIn : agentPrefix + "\n\n" + promptIn;
 
+        // Fork: prepend parent conversation context if available
+        if (Boolean.TRUE.equals(forkContext) && deps.parentContextProvider() != null) {
+            String parentContext = deps.parentContextProvider().get();
+            if (parentContext != null && !parentContext.isBlank()) {
+                basePrompt = "<parent_context>\n" + parentContext + "\n</parent_context>\n\n"
+                        + "The above is the conversation context from the parent agent. "
+                        + "Use it to understand what has been discussed. Now handle this task:\n\n"
+                        + basePrompt;
+            }
+        }
+
+        String effectivePrompt = buildEffectivePrompt(basePrompt, resolvedProfile);
+
+        // Async execution is the default — prevents parent stall.
+        // Only run synchronously when explicitly requested via run_in_background=false.
+        boolean runAsync = !Boolean.FALSE.equals(background);
+        if (runAsync) {
+            String toolUseIdBg = (String) input.getOrDefault("__tool_use_id", null);
+            final AgentType finalAgentType = agentType;
+            final String finalModelOverride = modelOverride;
+            final String finalDescIn = descIn;
+            try {
+                final String finalAgentName = agentName;
+                final boolean hasName = finalAgentName != null && !finalAgentName.isBlank();
+                if (hasName && deps.subagentRegistry() != null) {
+                    deps.subagentRegistry().register(finalAgentName, taskId);
+                }
+                CodeAgentSession child = hasName && deps.subagentRegistry() != null
+                        ? deps.spawner().spawn(taskId, workDir, finalAgentType, finalModelOverride,
+                                finalAgentName, deps.subagentRegistry())
+                        : deps.spawner().spawn(taskId, workDir, finalAgentType, finalModelOverride);
+                Thread.startVirtualThread(() -> {
+                    long startMs = System.currentTimeMillis();
+                    String resultText = null;
+                    Throwable failure = null;
+                    try {
+                        Msg response = child.agent().call(Msg.of(MsgRole.USER, effectivePrompt)).block();
+                        if (response != null) {
+                            resultText = response.text();
+                        }
+                    } catch (Throwable t) {
+                        failure = t;
+                        LOG.warn("Background task {} failed: {}", taskId, t.toString());
+                    } finally {
+                        if (isolated) {
+                            try { provider.release(ws.id()); } catch (Exception ignored) {}
+                        }
+                        if (finalAgentName != null && !finalAgentName.isBlank()
+                                && deps.subagentRegistry() != null) {
+                            if (failure != null) {
+                                deps.subagentRegistry().markFailed(finalAgentName);
+                            } else {
+                                deps.subagentRegistry().markCompleted(finalAgentName);
+                            }
+                        }
+                    }
+                    long durationMs = System.currentTimeMillis() - startMs;
+                    if (deps.asyncCompletionCallback() != null) {
+                        deps.asyncCompletionCallback().accept(taskId, finalDescIn,
+                                resultText, failure, durationMs);
+                    }
+                    LOG.info("Background task {} completed in {}ms (success={})",
+                            taskId, durationMs, failure == null);
+                });
+            } catch (Throwable t) {
+                LOG.warn("Failed to spawn background task {}: {}", taskId, t.getMessage());
+                provider.release(ws.id());
+                return Mono.just(error(toolUseIdBg, "Failed to launch background task: " + t.getMessage()));
+            }
+            Map<String, Object> meta = new LinkedHashMap<>();
+            meta.put("task.id", taskId);
+            meta.put("task.status", "async_launched");
+            meta.put("task.description", descIn);
+            meta.put("task.subagent_type", agentType.id());
+            if (agentName != null && !agentName.isBlank()) {
+                meta.put("task.name", agentName);
+            }
+            String nameAttr = (agentName != null && !agentName.isBlank())
+                    ? " name=\"" + agentName + "\"" : "";
+            return Mono.just(ToolResult.success(
+                    "<task_launched task_id=\"" + taskId + "\" description=\"" + descIn
+                            + "\" subagent_type=\"" + agentType.id() + "\"" + nameAttr
+                            + " status=\"running\">\n"
+                            + "Sub-agent launched in background."
+                            + (agentName != null && !agentName.isBlank()
+                                ? " Addressable as '" + agentName + "' via SendMessage."
+                                : " You will be notified when it completes.")
+                            + "\n</task_launched>",
+                    toolUseIdBg, meta));
+        }
+
+        // Synchronous execution (original path)
         Msg childResponse;
         Throwable childFailure = null;
         CodeAgentSession child = null;
         try {
-            child = deps.spawner().spawn(taskId, workDir);
+            child = deps.spawner().spawn(taskId, workDir, agentType, modelOverride);
             childResponse =
                     child.agent().call(Msg.of(MsgRole.USER, effectivePrompt)).block();
         } catch (Throwable t) {
@@ -298,6 +448,13 @@ public class TaskTool implements SyncTool {
     private static String stringInput(Map<String, Object> input, String key) {
         Object v = input.get(key);
         return v == null ? null : v.toString();
+    }
+
+    private static Boolean boolInput(Map<String, Object> input, String key) {
+        Object v = input.get(key);
+        if (v == null) return null;
+        if (v instanceof Boolean b) return b;
+        return Boolean.parseBoolean(v.toString());
     }
 
     private static String newTaskId() {

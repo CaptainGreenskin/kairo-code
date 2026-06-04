@@ -33,7 +33,6 @@ import io.kairo.code.cli.commands.PluginCommand;
 import io.kairo.code.cli.commands.StatsCommand;
 import io.kairo.code.cli.commands.MetricsCommand;
 import io.kairo.code.cli.commands.SessionCommand;
-import io.kairo.code.cli.commands.SwarmCommand;
 import io.kairo.code.cli.commands.UsageCommand;
 import io.kairo.api.memory.MemoryStore;
 import io.kairo.code.core.evolution.FailurePatternTracker;
@@ -66,7 +65,7 @@ import io.kairo.observability.AgentMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.kairo.code.core.CodeAgentSession;
-import io.kairo.code.core.ConsoleApprovalHandler;
+import io.kairo.core.tool.ConsoleApprovalHandler;
 import io.kairo.code.core.task.TaskToolDependencies;
 import io.kairo.code.core.workspace.WorktreeLifecycle;
 import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
@@ -350,7 +349,7 @@ public class ReplLoop {
             }
             CodeAgentSession session = CodeAgentFactory.createSession(config, baseOpts);
 
-            // Build SwarmCoordinator on demand for :expert / :team / :swarm. Wired here at
+            // Build SwarmCoordinator on demand for :expert / :team. Wired here at
             // REPL bootstrap so the commands aren't dead — without this every team command
             // reports "kairo-expert-team not on classpath" even though the jar IS resolved.
             // Build failures are non-fatal: the commands fall back to the same "unavailable"
@@ -677,7 +676,6 @@ public class ReplLoop {
         registry.register(new ClassifierCommand());
         registry.register(new MetricsCommand());
         registry.register(new SessionCommand());
-        registry.register(new SwarmCommand());
         registry.register(new ExpertCommand());
         registry.register(new InitCommand());
         registry.register(new DoctorCommand());
@@ -893,7 +891,7 @@ public class ReplLoop {
     }
 
     /**
-     * Build a {@link SwarmCoordinator} for the :expert / :team / :swarm commands. Returns null
+     * Build a {@link SwarmCoordinator} for the :expert / :team commands. Returns null
      * if construction fails — the commands handle null gracefully by showing an unavailable
      * message. Default worker pool size is 3, matching ExpertTeamFactory's intended use.
      */

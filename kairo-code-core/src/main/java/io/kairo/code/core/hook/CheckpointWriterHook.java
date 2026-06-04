@@ -79,14 +79,25 @@ public final class CheckpointWriterHook {
      * @param initialUserMessage the first user message that started the session.
      */
     public CheckpointWriterHook(Path workingDir, ObjectMapper objectMapper, Msg initialUserMessage) {
+        this(workingDir, null, objectMapper, initialUserMessage);
+    }
+
+    /**
+     * @param workingDir project working directory; null disables checkpointing.
+     * @param sessionId explicit session ID for per-session isolation; null falls back to timestamp.
+     * @param objectMapper Jackson mapper for serializing messages.
+     * @param initialUserMessage the first user message that started the session.
+     */
+    public CheckpointWriterHook(
+            Path workingDir, String sessionId, ObjectMapper objectMapper, Msg initialUserMessage) {
         this.workingDir = workingDir;
         this.objectMapper = objectMapper != null
                 ? objectMapper.copy().enable(SerializationFeature.INDENT_OUTPUT)
                 : new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+        this.sessionId = sessionId != null ? sessionId : "session-" + System.currentTimeMillis();
         this.checkpointPath = workingDir != null
-                ? workingDir.resolve(CHECKPOINT_DIR).resolve(CHECKPOINT_FILE)
+                ? workingDir.resolve(CHECKPOINT_DIR).resolve(this.sessionId).resolve(CHECKPOINT_FILE)
                 : null;
-        this.sessionId = "session-" + System.currentTimeMillis();
         this.initialUserMessage = initialUserMessage;
         this.messages = new ArrayList<>();
         if (initialUserMessage != null) {
@@ -218,7 +229,7 @@ public final class CheckpointWriterHook {
             if (c instanceof Content.TextContent tc) {
                 sb.append(tc.text());
             } else if (c instanceof Content.ThinkingContent tc) {
-                sb.append(tc.thinking());
+                sb.append("<think>").append(tc.thinking()).append("</think>");
             } else if (c instanceof Content.ToolResultContent tc) {
                 sb.append(tc.content());
             }

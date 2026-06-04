@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Folder, Check, Trash2 } from 'lucide-react';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import type { Workspace } from '@/utils/workspaceApi';
+import { chooseDir } from '@api/config';
 import { DirPicker } from './DirPicker';
 
 interface WorkspaceSettingsModalProps {
@@ -162,7 +163,14 @@ export function WorkspaceSettingsModal({ isOpen, onClose, workspaceId }: Workspa
                             />
                             <button
                                 type="button"
-                                onClick={() => setShowDirPicker((v) => !v)}
+                                onClick={async () => {
+                                    const picked = await chooseDir();
+                                    if (picked) {
+                                        setWorkingDir(picked);
+                                    } else {
+                                        setShowDirPicker((v) => !v);
+                                    }
+                                }}
                                 className={`px-2.5 py-2 rounded-lg border transition-colors ${showDirPicker ? 'border-[var(--color-primary)] text-[var(--color-primary)] bg-[var(--color-primary-bg)]' : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
                                 title="Browse directories"
                             >

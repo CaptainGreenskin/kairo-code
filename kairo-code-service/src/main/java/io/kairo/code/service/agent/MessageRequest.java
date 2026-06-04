@@ -1,5 +1,8 @@
 package io.kairo.code.service.agent;
 
+import io.kairo.api.message.Msg;
+import javax.annotation.Nullable;
+
 /**
  * Transport-agnostic representation of an inbound user message.
  *
@@ -9,20 +12,31 @@ package io.kairo.code.service.agent;
  * @param text           the user's text message (required, may be empty)
  * @param imageData      base64-encoded image data (nullable)
  * @param imageMediaType MIME type of the image, e.g. "image/png" (nullable)
+ * @param prebuiltMsg    pre-built Msg with metadata (nullable; when set, text/image are ignored)
  */
-public record MessageRequest(String text, String imageData, String imageMediaType) {
+public record MessageRequest(
+        String text,
+        String imageData,
+        String imageMediaType,
+        @Nullable Msg prebuiltMsg) {
 
-    /**
-     * Convenience factory for text-only messages.
-     */
+    public MessageRequest(String text, String imageData, String imageMediaType) {
+        this(text, imageData, imageMediaType, null);
+    }
+
+    public MessageRequest(Msg prebuiltMsg) {
+        this(null, null, null, prebuiltMsg);
+    }
+
     public static MessageRequest text(String msg) {
         return new MessageRequest(msg, null, null);
     }
 
-    /**
-     * @return {@code true} when this request carries an image attachment.
-     */
     public boolean hasImage() {
         return imageData != null && !imageData.isEmpty();
+    }
+
+    public boolean hasPrebuiltMsg() {
+        return prebuiltMsg != null;
     }
 }

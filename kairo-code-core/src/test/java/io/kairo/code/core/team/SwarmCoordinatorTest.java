@@ -21,12 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.kairo.api.team.TeamConfig;
 import io.kairo.api.team.TeamResult;
-import io.kairo.expertteam.ExpertTeamCoordinator;
-import io.kairo.expertteam.SimpleEvaluationStrategy;
-import io.kairo.expertteam.internal.DefaultPlanner;
-import io.kairo.expertteam.role.ExpertRoleRegistry;
-import io.kairo.expertteam.tck.NoopMessageBus;
-import io.kairo.expertteam.tck.StubAgent;
+import io.kairo.multiagent.orchestration.ExpertTeamCoordinator;
+import io.kairo.multiagent.orchestration.SimpleEvaluationStrategy;
+import io.kairo.multiagent.orchestration.internal.DefaultPlanner;
+import io.kairo.multiagent.subagent.ExpertRoleRegistry;
+import io.kairo.multiagent.orchestration.tck.NoopMessageBus;
+import io.kairo.multiagent.orchestration.tck.StubAgent;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

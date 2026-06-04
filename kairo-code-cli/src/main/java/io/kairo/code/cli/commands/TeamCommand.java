@@ -18,7 +18,7 @@ package io.kairo.code.cli.commands;
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.cli.SlashCommand;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.expertteam.role.ExpertRoleRegistry;
+import io.kairo.multiagent.subagent.ExpertRoleRegistry;
 import java.io.PrintWriter;
 import java.util.Set;
 

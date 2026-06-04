@@ -13,7 +13,7 @@ import io.kairo.code.cli.hooks.HooksConfig;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentSession;
-import io.kairo.code.core.ConsoleApprovalHandler;
+import io.kairo.core.tool.ConsoleApprovalHandler;
 import io.kairo.api.cron.CronScheduler;
 import io.kairo.api.lsp.LspService;
 import io.kairo.code.core.team.SwarmCoordinator;

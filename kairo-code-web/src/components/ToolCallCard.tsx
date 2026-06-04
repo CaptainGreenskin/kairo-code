@@ -486,14 +486,9 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     const riskLabel = RISK_LABELS[risk];
     const [expanded, setExpanded] = useState(false);
 
-    // Card-level collapse: completed cards start collapsed, showing only a preview.
-    // Pending/running cards are always expanded so the user sees live state.
+    // Card-level collapse: completed cards stay expanded to show output.
     const isComplete = toolCall.status === 'done' || toolCall.status === 'error' || toolCall.status === 'rejected';
-    const [cardCollapsed, setCardCollapsed] = useState(isComplete);
-    // Auto-collapse once the tool finishes executing
-    useEffect(() => {
-        if (isComplete) setCardCollapsed(true);
-    }, [isComplete]);
+    const [cardCollapsed, setCardCollapsed] = useState(false);
 
     const collapsedPreview = useMemo(
         () => getCollapsedPreview(toolCall.toolName, toolCall.input, toolCall.result),

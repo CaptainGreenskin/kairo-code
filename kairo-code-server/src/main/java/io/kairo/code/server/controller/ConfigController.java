@@ -375,6 +375,37 @@ public class ConfigController {
     }
 
     /**
+     * Open the native OS directory picker dialog (macOS only).
+     * Returns the selected path or null if the user cancelled.
+     */
+    @GetMapping("/choose-dir")
+    public Map<String, String> chooseDir() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("mac")) {
+            throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED, "Native directory picker is only available on macOS");
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder("osascript", "-e",
+                    "POSIX path of (choose folder with prompt \"选择项目文件夹\")");
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            String output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            int exitCode = proc.waitFor();
+            if (exitCode != 0) {
+                // User cancelled the dialog
+                return Map.of("path", "");
+            }
+            // Remove trailing slash if present
+            if (output.endsWith("/") && output.length() > 1) {
+                output = output.substring(0, output.length() - 1);
+            }
+            return Map.of("path", output);
+        } catch (IOException | InterruptedException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to open directory picker", e);
+        }
+    }
+
+    /**
      * List directory contents (files + subdirectories).
      */
     @GetMapping("/files")

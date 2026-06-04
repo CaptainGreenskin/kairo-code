@@ -18,6 +18,7 @@ import { getPreviewContent, countLines, COLLAPSE_PREVIEW_LINES } from '@utils/me
 import { MessageReaction } from './MessageReaction';
 import { ReportLayout, extractHeadings, shouldUseReportLayout } from './ReportLayout';
 import { ExpertStepChatCard } from './ExpertStepChatCard';
+import { CompactionEventCard } from './CompactionEventCard';
 
 interface ChatMessageProps {
     message: Message;
@@ -70,7 +71,7 @@ function thinkLabel(content: string): string {
 }
 
 function ThinkBlock({ content }: { content: string }) {
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(true);
     const label = thinkLabel(content);
     return (
         <div className="my-2 rounded border border-[var(--border)] bg-[var(--bg-secondary)]">
@@ -132,10 +133,19 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
         return <ExpertStepChatCard teamId={message.stepRef.teamId} stepId={message.stepRef.stepId} />;
     }
 
+    if (message.kind === 'compaction' && message.compactionMeta) {
+        return <CompactionEventCard
+            beforeTokens={message.compactionMeta.beforeTokens}
+            maxTokens={message.compactionMeta.maxTokens}
+            timestamp={message.timestamp}
+            summary={message.compactionMeta.summary}
+        />;
+    }
+
     if (message.role === 'user') {
         return (
-            <div className="flex justify-end mb-4 animate-slide-up group w-full min-w-0">
-                <div className="max-w-[85%] min-w-0 px-4 py-2.5 rounded-2xl rounded-br-sm bg-[var(--color-primary)] text-white overflow-hidden">
+            <div className="flex justify-end mb-6 animate-slide-up group w-full min-w-0">
+                <div className="relative max-w-[70%] min-w-[120px] px-5 py-3 rounded-2xl text-white shadow-lg shadow-indigo-500/10" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
                     {editing ? (
                         <div>
                             <textarea
@@ -189,27 +199,15 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                 />
                             )}
                             <p className="whitespace-pre-wrap break-words text-sm">{stripSystemReminders(message.content)}</p>
-                            <div className="flex items-center justify-between mt-1">
-                                <span className="text-[10px] opacity-60">
-                                    {message.timestamp && (
-                                        <span
-                                            className="opacity-0 group-hover:opacity-100 transition-opacity"
-                                            title={formatAbsoluteTime(message.timestamp)}
-                                        >
-                                            {formatRelativeTime(message.timestamp)}
-                                        </span>
-                                    )}
-                                </span>
-                                {onEditResend && !isStreaming && (
-                                    <button
-                                        onClick={() => setEditing(true)}
-                                        title="Edit message"
-                                        className="p-1 rounded hover:bg-white/10 text-white/60 hover:text-white transition-colors"
-                                    >
-                                        <Pencil size={14} />
-                                    </button>
-                                )}
-                            </div>
+                            {onEditResend && !isStreaming && (
+                                <button
+                                    onClick={() => setEditing(true)}
+                                    title="Edit message"
+                                    className="absolute -left-8 top-1/2 -translate-y-1/2 p-1 rounded-md bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                >
+                                    <Pencil size={12} />
+                                </button>
+                            )}
                         </>
                     )}
                 </div>
@@ -255,8 +253,8 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
 
     return (
         <div className="flex justify-start mb-4 animate-slide-up group">
-            <div className="max-w-[85%]">
-                <div className={`relative px-4 py-2.5 rounded-2xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)] ${searchHighlight ? 'ring-1 ring-[var(--accent)]/40' : ''} ${isCurrentMatch ? 'ring-2 ring-[var(--accent)]' : ''}`}>
+            <div className="w-full">
+                <div className={`relative pl-4 pr-3 py-3 rounded-lg border-l-[3px] border-l-[var(--accent)] bg-gradient-to-r from-[var(--accent)]/[0.03] to-transparent ${searchHighlight ? 'ring-1 ring-[var(--accent)]/40' : ''} ${isCurrentMatch ? 'ring-2 ring-[var(--accent)]' : ''}`}>
                     {/* Prefer message.thinking (from AGENT_THINKING events) over <think> blocks
                      *  extracted from the content. Some models emit reasoning via BOTH
                      *  reasoning_content deltas AND <think> tags in the text body; rendering
@@ -488,12 +486,6 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                         </button>
                     )}
 
-                    {/* Character count */}
-                    {!isStreaming && message.role === 'assistant' && (message.content?.length ?? 0) > 0 && (
-                        <div className="text-[10px] text-[var(--text-muted)] mt-1 text-right">
-                            {message.content.length.toLocaleString()} chars
-                        </div>
-                    )}
                 </div>
 
                 {/* Action row sits below the bubble so icons never overlap message text. */}

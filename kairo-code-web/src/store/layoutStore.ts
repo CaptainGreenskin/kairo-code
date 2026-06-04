@@ -9,6 +9,7 @@ interface LayoutState {
     fileTreeOpen: boolean;
     activityView: ActivityView;
     sidebarWidth: number;
+    canvasWidth: number;
     bottomHeight: number;
     filesWidth: number;
     chatSidebarOpen: boolean;
@@ -29,6 +30,7 @@ interface LayoutState {
     toggleChatSessions: () => void;
     setActivityView: (view: ActivityView) => void;
     setSidebarWidth: (w: number) => void;
+    setCanvasWidth: (w: number) => void;
     setBottomHeight: (h: number) => void;
     setFilesWidth: (w: number) => void;
     setChatWidth: (w: number) => void;
@@ -46,6 +48,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => ({
     // Migrate the now-removed 'sessions' view (legacy installs) → 'files'.
     activityView: ((prefs.activityView as string) === 'sessions' ? 'files' : (prefs.activityView ?? 'files')) as ActivityView,
     sidebarWidth: prefs.sidebarWidth ?? 280,
+    canvasWidth: prefs.canvasWidth ?? 380,
     bottomHeight: prefs.bottomHeight ?? 240,
     filesWidth: prefs.filesWidth ?? 320,
     chatSidebarOpen: prefs.chatSidebarOpen ?? true,
@@ -77,6 +80,10 @@ export const useLayoutStore = create<LayoutState>()((set, get) => ({
     setSidebarWidth: (w) => {
         set({ sidebarWidth: w });
         savePref('sidebarWidth', w);
+    },
+    setCanvasWidth: (w) => {
+        set({ canvasWidth: w });
+        savePref('canvasWidth', w);
     },
     setBottomHeight: (h) => {
         set({ bottomHeight: h });

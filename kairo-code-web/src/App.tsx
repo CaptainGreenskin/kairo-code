@@ -33,7 +33,7 @@ import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
 import { PendingApprovalBanner } from '@components/PendingApprovalBanner';
 import { MessageSearchBar } from '@components/MessageSearchBar';
-import { WelcomeScreen } from '@components/WelcomeScreen';
+import { OnboardingWizard, isOnboardingDone, markOnboardingDone } from '@components/OnboardingWizard';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
@@ -164,6 +164,7 @@ function App() {
     const [showSettings, setShowSettings] = useState(false);
     const [showWorkspaceSettings, setShowWorkspaceSettings] = useState<{ open: boolean; workspaceId: string | null }>({ open: false, workspaceId: null });
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
+    const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
 
     const workspaces = useWorkspaceStore((s) => s.workspaces);
     const currentWorkspaceId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -174,6 +175,8 @@ function App() {
     );
     const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
     const setSidebarWidthStore = useLayoutStore((s) => s.setSidebarWidth);
+    const canvasWidth = useLayoutStore((s) => s.canvasWidth);
+    const setCanvasWidth = useLayoutStore((s) => s.setCanvasWidth);
     const primarySidebarOpen = useLayoutStore((s) => s.primarySidebarOpen);
     const bottomPanelOpen = useLayoutStore((s) => s.bottomPanelOpen);
     const toggleBottomPanel = useLayoutStore((s) => s.toggleBottomPanel);
@@ -187,6 +190,7 @@ function App() {
     const chatSessionsWidth = useLayoutStore((s) => s.chatSessionsWidth);
     const setChatSessionsWidthStore = useLayoutStore((s) => s.setChatSessionsWidth);
     const openFileInEditor = useOpenFilesStore((s) => s.openFile);
+    const hasOpenTabs = useOpenFilesStore((s) => s.tabs.length > 0);
     const canvasTeamId = useExpertTeamStore((s) => s.canvasTeamId);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -414,15 +418,16 @@ function App() {
             .catch(() => {});
     }, [refreshWorkspaces]);
 
-    // Load config on mount
+    // Load config on mount; determine whether onboarding is needed
     useEffect(() => {
         getConfig()
             .then((config) => {
                 setCurrentModel(config.defaultModel);
                 setServerConfig(config);
+                setNeedsOnboarding(!isOnboardingDone());
             })
             .catch(() => {
-                // Backend not running yet
+                setNeedsOnboarding(!isOnboardingDone());
             });
     }, [setCurrentModel]);
 
@@ -562,15 +567,14 @@ function App() {
 
             hasErrorRef.current = false;
 
-            // Add user message to store
-            addMessage({
+            const userMsg = {
                 id: generateId(),
-                role: 'user',
+                role: 'user' as const,
                 content: text,
-                toolCalls: [],
+                toolCalls: [] as Message['toolCalls'],
                 timestamp: Date.now(),
                 ...(image ? { imageData: image.data, imageMediaType: image.mediaType } : {}),
-            });
+            };
 
             // Create session if needed
             if (!sessionId) {
@@ -583,7 +587,8 @@ function App() {
                 createSession(currentWorkspaceId)
                     .then((newId) => {
                         setSessionId(newId);
-                        // Auto-title from first user message via backend heuristic
+                        // Add user message AFTER session exists so it's stored correctly
+                        addMessage(userMsg);
                         autoNameSession(newId, text).then((name) => {
                             if (name) {
                                 window.dispatchEvent(new Event('storage'));
@@ -596,7 +601,8 @@ function App() {
                         console.error('[App] Failed to create session:', err);
                     });
             } else {
-                // Auto-title from first user message via backend heuristic
+                // Session exists — add message immediately
+                addMessage(userMsg);
                 const userMsgCount = messages.filter(m => m.role === 'user').length;
                 if (userMsgCount === 0) {
                     autoNameSession(sessionId, text).then((name) => {
@@ -615,6 +621,10 @@ function App() {
     const handleStop = useCallback(() => {
         if (sessionId) stopAgent(sessionId);
     }, [stopAgent, sessionId]);
+
+    const handleCompact = useCallback(() => {
+        if (sessionId) send({ action: 'compact', sessionId });
+    }, [send, sessionId]);
 
     const handleInterruptAndSend = useCallback(
         (text: string, image: AttachedImage | null) => {
@@ -964,15 +974,33 @@ function App() {
     }, []);
 
     const filteredMessages = useMemo(() => {
-        if (!searchQuery.trim()) return messages;
-        const q = searchQuery.toLowerCase();
-        return messages.filter(m =>
-            m.content?.toLowerCase().includes(q) ||
-            m.toolCalls?.some(tc =>
-                tc.toolName?.toLowerCase().includes(q) ||
-                tc.result?.toLowerCase().includes(q)
-            )
-        );
+        let msgs = messages;
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            msgs = msgs.filter(m =>
+                m.content?.toLowerCase().includes(q) ||
+                m.toolCalls?.some(tc =>
+                    tc.toolName?.toLowerCase().includes(q) ||
+                    tc.result?.toLowerCase().includes(q)
+                )
+            );
+        }
+        const merged: typeof msgs = [];
+        for (let i = 0; i < msgs.length; i++) {
+            const m = msgs[i];
+            const next = msgs[i + 1];
+            if (m.kind === 'compaction' && m.compactionMeta
+                && next && next.role === 'assistant' && next.kind !== 'compaction') {
+                merged.push({
+                    ...m,
+                    compactionMeta: { ...m.compactionMeta, summary: next.content },
+                });
+                i++;
+            } else {
+                merged.push(m);
+            }
+        }
+        return merged;
     }, [messages, searchQuery]);
 
     const estimatedTokens = useMemo(() => estimateMessagesTokens(messages), [messages]);
@@ -1273,6 +1301,26 @@ ${content}
         }] : []),
     ], [handleNewSession, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showSessionSearch, showEvolution, showHookConfig, setShowToolStats, showBookmarks, showTeamPanel, selectActivity, toggleBottomPanel]);
 
+    // Full-screen onboarding: covers entire screen when API key is not configured
+    if (needsOnboarding) {
+        return (
+            <div className="h-screen w-screen bg-[var(--bg-primary)]">
+                <OnboardingWizard
+                    onComplete={(cfg) => {
+                        setServerConfig(cfg);
+                        setCurrentModel(cfg.defaultModel);
+                        markOnboardingDone();
+                        setNeedsOnboarding(false);
+                    }}
+                    onSkip={() => {
+                        markOnboardingDone();
+                        setNeedsOnboarding(false);
+                    }}
+                />
+            </div>
+        );
+    }
+
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
             <Header
@@ -1361,7 +1409,6 @@ ${content}
                     <ActivityBar
                         onOpenEvolution={() => setShowEvolution(true)}
                         onOpenHooks={() => setShowHookConfig(true)}
-                        onOpenStats={() => setShowToolStats(true)}
                     />
                     {primarySidebarOpen && (
                         <>
@@ -1410,54 +1457,32 @@ ${content}
                     </>
                 )}
 
-                {/* Center: VS Code-style multi-tab editor area, falls back to welcome / chat-empty content. */}
-                <ErrorBoundary>
-                <EditorArea
-                    workspaceId={currentWorkspaceId ?? undefined}
-                    welcome={
-                        messages.length === 0 && connectionStatus === 'connecting' ? (
-                            <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-                                <div className="text-sm">Connecting…</div>
-                            </div>
-                        ) : messages.length === 0 && isRunning ? (
-                            <div className="flex-1 flex items-center justify-center">
-                                <ThinkingIndicator isVisible={true} phase="thinking" thinkingText={thinkingText} />
-                            </div>
-                        ) : messages.length === 0 ? (
-                            <WelcomeScreen
-                                onSelectPrompt={(prompt) => handleSend(prompt, null)}
-                                appVersion={__APP_VERSION__}
-                                recentSessions={persistedSessions.slice(0, 5).map((s) => ({
-                                    id: s.sessionId,
-                                    name: s.name,
-                                    updatedAt: s.savedAt,
-                                }))}
-                                onSelectSession={handleSelectSession}
-                            />
-                        ) : (
-                            <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] text-sm">
-                                Open a file from the Explorer, or use the chat on the right.
-                            </div>
-                        )
-                    }
-                />
-                </ErrorBoundary>
+                {/* Center: VS Code-style multi-tab editor area — only shown when files are open. */}
+                {hasOpenTabs && (
+                    <ErrorBoundary>
+                    <EditorArea workspaceId={currentWorkspaceId ?? undefined} />
+                    </ErrorBoundary>
+                )}
 
                 {/* Right chat sidebar — Cursor-style two-column: Sessions strip | Chat tabs+messages+input */}
                 {!isMobile && chatSidebarOpen && (
                     <>
-                        <ResizeHandle
-                            side="right"
-                            width={chatWidth}
-                            minWidth={420}
-                            maxWidth={1100}
-                            onResize={setChatWidthStore}
-                            onResizeEnd={(w) => setChatWidthStore(w)}
-                        />
+                        {hasOpenTabs && (
+                            <ResizeHandle
+                                side="right"
+                                width={chatWidth}
+                                minWidth={420}
+                                maxWidth={1100}
+                                onResize={setChatWidthStore}
+                                onResizeEnd={(w) => setChatWidthStore(w)}
+                            />
+                        )}
                         <aside
                             className="relative flex flex-row h-full bg-[var(--bg-primary)] border-l border-[var(--border)] min-w-0"
                             style={{
-                                flex: `0 1 ${isNarrow ? Math.min(chatWidth, 480) : chatWidth}px`,
+                                flex: hasOpenTabs
+                                    ? `0 1 ${isNarrow ? Math.min(chatWidth, 480) : chatWidth}px`
+                                    : '1 1 auto',
                                 minWidth: 360,
                             }}
                             aria-label="Chat sidebar"
@@ -1512,11 +1537,7 @@ ${content}
                                 <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
                                     <div className="text-sm">Connecting…</div>
                                 </div>
-                            ) : messages.length === 0 && isRunning ? (
-                                <div className="flex-1 flex items-center justify-center">
-                                    <ThinkingIndicator isVisible={true} phase="thinking" thinkingText={thinkingText} />
-                                </div>
-                            ) : messages.length === 0 ? (
+                            ) : messages.length === 0 && !isRunning ? (
                                 <div className="flex-1" />
                             ) : (
                                 <>
@@ -1534,7 +1555,7 @@ ${content}
                                         <div className="flex-1 min-h-0 overflow-hidden">
                                         <Virtuoso
                                             ref={virtuosoRef}
-                                            className="pt-6 pb-3 overflow-x-hidden [scrollbar-gutter:stable]"
+                                            className="overflow-x-hidden [scrollbar-gutter:stable]"
                                             style={{ height: '100%' }}
                                             defaultItemHeight={80}
                                             data={filteredMessages}
@@ -1588,6 +1609,7 @@ ${content}
                                                 );
                                             }}
                                             components={{
+                                                Header: () => <div className="h-12" />,
                                                 Footer: () => {
                                                     const buildPhase = useBuildPhaseStore((s) => s.phase);
                                                     const buildIsGit = useBuildPhaseStore((s) => s.isGit);
@@ -1700,11 +1722,13 @@ ${content}
                                 count={pendingToolCount}
                                 onScrollToPending={handleScrollToPending}
                             />
-                            <TodoListPanel
-                                todos={todos}
-                                collapsed={todoPanelCollapsed}
-                                onToggleCollapse={() => setTodoPanelCollapsed((v) => !v)}
-                            />
+                            {todos.length > 0 && (
+                                <TodoListPanel
+                                    todos={todos}
+                                    collapsed={todoPanelCollapsed}
+                                    onToggleCollapse={() => setTodoPanelCollapsed((v) => !v)}
+                                />
+                            )}
                             <ChatInput
                                 key={sessionId ?? 'no-session'}
                                 sessionId={sessionId ?? undefined}
@@ -1725,6 +1749,7 @@ ${content}
                                 tokenUsage={tokenUsage}
                                 contextWindow={getContextWindow(currentModel ?? '')}
                                 isCompacting={isCompacting}
+                                onCompact={handleCompact}
                                 onNewChat={handleNewChatTab}
                             />
                             </div>
@@ -1733,13 +1758,23 @@ ${content}
                 )}
 
                 {!isMobile && canvasTeamId !== null && (
-                    <aside
-                        className="relative flex flex-col h-full min-w-0"
-                        style={{ flex: '0 1 380px', minWidth: 36 }}
-                        aria-label="Experts Canvas"
-                    >
-                        <ExpertTeamCanvas sendAction={send} />
-                    </aside>
+                    <>
+                        <ResizeHandle
+                            side="right"
+                            width={canvasWidth}
+                            minWidth={280}
+                            maxWidth={700}
+                            onResize={setCanvasWidth}
+                            onResizeEnd={(w) => setCanvasWidth(w)}
+                        />
+                        <aside
+                            className="relative flex flex-col h-full min-w-0"
+                            style={{ width: canvasWidth, flexShrink: 0 }}
+                            aria-label="Experts Canvas"
+                        >
+                            <ExpertTeamCanvas sendAction={send} />
+                        </aside>
+                    </>
                 )}
             </div>
 

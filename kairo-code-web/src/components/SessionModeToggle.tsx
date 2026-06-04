@@ -1,6 +1,6 @@
-import { Bot, Users } from 'lucide-react';
+import { Bot, Users, Lock } from 'lucide-react';
 import { useSessionModeStore, type SessionMode } from '@store/sessionModeStore';
-import { useWorkspaceStore } from '@store/workspaceStore';
+import { useSessionStore } from '@store/sessionStore';
 
 interface Props {
     disabled?: boolean;
@@ -12,14 +12,26 @@ const MODES: { value: SessionMode; label: string; icon: typeof Bot }[] = [
 ];
 
 export function SessionModeToggle({ disabled }: Props) {
-    const workspaceId = useWorkspaceStore(s => s.currentWorkspaceId) ?? '';
-    const mode = useSessionModeStore(s => s.getMode(workspaceId));
-    const setMode = useSessionModeStore(s => s.setMode);
+    const activeSessionId = useSessionStore(s => s.activeSessionId);
+    const sessionMode = useSessionModeStore(s => activeSessionId ? s.getSessionMode(activeSessionId) : null);
+    const pendingMode = useSessionModeStore(s => s.pendingMode);
+    const setPendingMode = useSessionModeStore(s => s.setPendingMode);
+
+    const messages = useSessionStore(s => {
+        if (!activeSessionId) return [];
+        return s.sessions[activeSessionId]?.messages ?? [];
+    });
+
+    // Session already has messages → mode is locked (was fixed at session creation)
+    const locked = messages.length > 0 && sessionMode != null;
+
+    // Display mode: locked session mode > pending mode for new sessions
+    const mode: SessionMode = sessionMode ?? pendingMode;
 
     const toggle = () => {
-        if (disabled || !workspaceId) return;
+        if (disabled || locked) return;
         const next: SessionMode = mode === 'agent' ? 'experts' : 'agent';
-        setMode(workspaceId, next);
+        setPendingMode(next);
     };
 
     const current = MODES.find(m => m.value === mode) ?? MODES[0];
@@ -28,17 +40,20 @@ export function SessionModeToggle({ disabled }: Props) {
     return (
         <button
             onClick={toggle}
-            disabled={disabled}
+            disabled={disabled || locked}
             className={`flex items-center gap-1 px-3 py-1 rounded-[10px] text-xs font-semibold transition-all
                 ${mode === 'experts'
                     ? 'text-white shadow-md'
                     : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}
                 disabled:opacity-40 disabled:cursor-not-allowed`}
             style={mode === 'experts' ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' } : undefined}
-            title={`Mode: ${current.label}. Click to toggle.`}
+            title={locked
+                ? `Mode: ${current.label} (locked — create a new chat to change)`
+                : `Mode: ${current.label}. Click to toggle.`}
         >
             <Icon size={13} />
             <span>{current.label}</span>
+            {locked && <Lock size={10} className="ml-0.5 opacity-60" />}
         </button>
     );
 }

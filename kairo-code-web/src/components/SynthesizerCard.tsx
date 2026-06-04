@@ -125,10 +125,13 @@ export function SynthesizerCard({
                   <span className="text-xs font-semibold text-[var(--text-primary)]">{title}</span>
                   {copyable && <CopyButton text={content} />}
                 </div>
-                <div className="px-3 py-2 prose prose-sm prose-invert max-w-none
+                <div className="px-3 py-2 prose prose-sm prose-invert max-w-none overflow-x-auto
                                 text-xs text-[var(--text-secondary)]
                                 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0.5 [&_code]:text-[11px]
-                                [&_pre]:bg-[var(--bg-primary)] [&_pre]:rounded [&_pre]:p-2">
+                                [&_pre]:bg-[var(--bg-primary)] [&_pre]:rounded [&_pre]:p-2
+                                [&_table]:w-full [&_table]:text-[11px] [&_table]:border-collapse
+                                [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:border [&_th]:border-[var(--border)] [&_th]:bg-[var(--bg-primary)]
+                                [&_td]:px-2 [&_td]:py-1 [&_td]:border [&_td]:border-[var(--border)]">
                   <LazyMarkdown>{content}</LazyMarkdown>
                 </div>
               </div>
@@ -136,12 +139,16 @@ export function SynthesizerCard({
           })
         ) : (
           // Render full output as markdown
-          <div className="prose prose-sm prose-invert max-w-none
+          <div className="prose prose-sm prose-invert max-w-none overflow-x-auto
                           text-xs text-[var(--text-secondary)]
                           [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0.5 [&_code]:text-[11px]
                           [&_pre]:bg-[var(--bg-primary)] [&_pre]:rounded [&_pre]:p-2
                           [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-[var(--text-primary)]
-                          [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:text-[var(--text-primary)]">
+                          [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:text-[var(--text-primary)]
+                          [&_table]:w-full [&_table]:text-[11px] [&_table]:border-collapse
+                          [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:border [&_th]:border-[var(--border)] [&_th]:bg-[var(--bg-primary)]
+                          [&_td]:px-2 [&_td]:py-1 [&_td]:border [&_td]:border-[var(--border)]
+                          [&_table]:rounded [&_table]:overflow-hidden">
             <LazyMarkdown>{finalOutput}</LazyMarkdown>
           </div>
         )}

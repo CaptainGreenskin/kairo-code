@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Folder, ChevronRight, ChevronLeft, Home } from 'lucide-react';
-import { getDirs, type DirEntry } from '@api/config';
+import { Folder, ChevronRight, ChevronLeft, Home, FolderOpen } from 'lucide-react';
+import { getDirs, chooseDir, type DirEntry } from '@api/config';
 
 interface DirPickerProps {
     currentPath: string;
@@ -67,8 +67,25 @@ export function DirPicker({ currentPath, onSelect, onClose }: DirPickerProps) {
         loadDirs(parent);
     };
 
+    const handleNativePick = async () => {
+        const picked = await chooseDir();
+        if (picked) {
+            onSelect(picked);
+            onClose();
+        }
+    };
+
     return (
         <div className="mt-1 border border-[var(--border)] rounded-lg bg-[var(--bg-primary)] overflow-hidden">
+            {/* Native dialog button */}
+            <button
+                type="button"
+                onClick={handleNativePick}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--accent)] hover:bg-[var(--accent)]/10 border-b border-[var(--border)] transition-colors"
+            >
+                <FolderOpen size={13} />
+                打开系统文件选择器
+            </button>
             {/* Path bar */}
             <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
                 <button

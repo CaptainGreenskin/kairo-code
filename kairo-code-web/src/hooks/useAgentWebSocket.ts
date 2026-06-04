@@ -130,6 +130,7 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 payload: {
                     planSummary: (raw.content as string) ?? '',
                     teamId: (meta.teamId as string) ?? undefined,
+                    goal: (meta.goal as string) ?? undefined,
                     steps: meta.steps as PlanReadyPayload['steps'],
                     mode: (meta.mode as string) ?? undefined,
                     planId: (meta.planId as string) ?? undefined,

@@ -16,7 +16,10 @@
 package io.kairo.code.core.task;
 
 import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
+import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
+import javax.annotation.Nullable;
 
 /**
  * Dependency bundle for {@link TaskTool}, registered in an agent's {@code toolDependencies} map
@@ -34,7 +37,31 @@ import java.util.Objects;
 public record TaskToolDependencies(
         WorktreeWorkspaceProvider workspaceProvider,
         ChildSessionSpawner spawner,
-        WorktreeMergePrompter mergePrompter) {
+        WorktreeMergePrompter mergePrompter,
+        @Nullable Supplier<String> parentContextProvider,
+        @Nullable AsyncCompletionCallback asyncCompletionCallback,
+        @Nullable SubagentRegistry subagentRegistry) {
+
+    @FunctionalInterface
+    public interface AsyncCompletionCallback {
+        void accept(String taskId, String description,
+                    @Nullable String result, @Nullable Throwable error, long durationMs);
+    }
+
+    public TaskToolDependencies(WorktreeWorkspaceProvider workspaceProvider,
+                                ChildSessionSpawner spawner,
+                                WorktreeMergePrompter mergePrompter) {
+        this(workspaceProvider, spawner, mergePrompter, null, null, null);
+    }
+
+    public TaskToolDependencies(WorktreeWorkspaceProvider workspaceProvider,
+                                ChildSessionSpawner spawner,
+                                WorktreeMergePrompter mergePrompter,
+                                @Nullable Supplier<String> parentContextProvider,
+                                @Nullable AsyncCompletionCallback asyncCompletionCallback) {
+        this(workspaceProvider, spawner, mergePrompter, parentContextProvider,
+                asyncCompletionCallback, null);
+    }
 
     public TaskToolDependencies {
         Objects.requireNonNull(workspaceProvider, "workspaceProvider");

@@ -22,8 +22,9 @@ import io.kairo.api.tool.ToolParam;
 import io.kairo.api.tool.ToolResult;
 import io.kairo.api.tool.SyncTool;
 import io.kairo.api.tool.ToolSideEffect;
-import io.kairo.code.core.team.Team;
-import io.kairo.code.core.team.TeamManager;
+import io.kairo.api.team.Team;
+import io.kairo.api.team.TeamCreateRequest;
+import io.kairo.api.team.TeamManager;
 import java.util.Map;
 import reactor.core.publisher.Mono;
 
@@ -64,7 +65,7 @@ public class TeamCreateTool implements SyncTool {
             return Mono.just(ToolResult.error(null, "Parameter 'goal' is required and must be non-blank."));
         }
 
-        Team team = teamManager.createTeam(nameIn, goalIn);
+        Team team = teamManager.create(TeamCreateRequest.of(nameIn, goalIn));
         String json = "{\"teamId\": \"" + team.teamId()
             + "\", \"name\": \"" + escape(team.name())
             + "\", \"status\": \"" + team.status() + "\"}";

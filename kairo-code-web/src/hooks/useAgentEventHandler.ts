@@ -561,6 +561,23 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     setResumableFor(sid, payload.resumable ?? false);
                     streamingStore.clear(sid);
                     if (isActive) setLoadingSessionId(null);
+
+                    // Restore Experts Canvas from sessionStorage if the session
+                    // had an active expert team before the page refresh.
+                    const savedCanvasTeamId = sessionStorage.getItem('kairo-canvas-team-id');
+                    if (savedCanvasTeamId) {
+                        const store = useExpertTeamStore.getState();
+                        store.setCanvasTeamId(savedCanvasTeamId);
+                        const snapshotJson = sessionStorage.getItem('kairo-canvas-team-snapshot');
+                        if (snapshotJson) {
+                            try {
+                                const teamState = JSON.parse(snapshotJson);
+                                useExpertTeamStore.setState((prev) => ({
+                                    teams: { ...prev.teams, [savedCanvasTeamId]: teamState },
+                                }));
+                            } catch { /* malformed snapshot — ignore */ }
+                        }
+                    }
                     break;
                 }
 
@@ -572,11 +589,12 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
 
                 case 'CONTEXT_COMPACTED': {
                     const cp = event.payload as ContextCompactedPayload;
-                    const pct = cp.maxTokens > 0 ? Math.round((cp.beforeTokens / cp.maxTokens) * 100) : 0;
                     addMessageTo(sid, {
                         id: generateId(),
                         role: 'assistant',
-                        content: `⚡ **Context compacted** — ${cp.beforeTokens.toLocaleString()} / ${cp.maxTokens.toLocaleString()} tokens (${pct}%). Earlier messages have been summarized to free up context space.`,
+                        kind: 'compaction',
+                        compactionMeta: { beforeTokens: cp.beforeTokens, maxTokens: cp.maxTokens },
+                        content: '',
                         toolCalls: [],
                         timestamp: Date.now(),
                     });
@@ -607,6 +625,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                                 seq: 1,
                                 attributes: {
                                     mode: planPayload.mode ?? 'dag',
+                                    goal: planPayload.goal,
                                     steps: planPayload.steps,
                                     planId: planPayload.planId,
                                     totalSteps: planPayload.totalSteps,

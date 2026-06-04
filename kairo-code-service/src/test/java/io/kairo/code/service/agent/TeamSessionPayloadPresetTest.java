@@ -452,8 +452,8 @@ class TeamSessionPayloadPresetTest {
                         Duration.ZERO, List.of()));
         volatile String lastTeamIdToReturn = "stub-team";
 
-        private RecordingSwarmCoordinator(io.kairo.expertteam.ExpertTeamCoordinator coord,
-                                          io.kairo.expertteam.role.ExpertRoleRegistry registry,
+        private RecordingSwarmCoordinator(io.kairo.multiagent.orchestration.ExpertTeamCoordinator coord,
+                                          io.kairo.multiagent.subagent.ExpertRoleRegistry registry,
                                           io.kairo.api.team.MessageBus bus,
                                           List<Agent> agents) {
             super(coord, registry, bus, agents);
@@ -463,13 +463,13 @@ class TeamSessionPayloadPresetTest {
             // The superclass needs non-null collaborators. We pass the lightest possible real
             // instances; we never actually delegate to them because the overrides below
             // intercept every call TeamSessionPayload makes.
-            var registry = new io.kairo.expertteam.role.ExpertRoleRegistry();
-            var planner = new io.kairo.expertteam.internal.DefaultPlanner(registry, null, null);
-            var coord = new io.kairo.expertteam.ExpertTeamCoordinator(
-                    null, new io.kairo.expertteam.SimpleEvaluationStrategy(),
+            var registry = new io.kairo.multiagent.subagent.ExpertRoleRegistry();
+            var planner = new io.kairo.multiagent.orchestration.internal.DefaultPlanner(registry, null, null);
+            var coord = new io.kairo.multiagent.orchestration.ExpertTeamCoordinator(
+                    null, new io.kairo.multiagent.orchestration.SimpleEvaluationStrategy(),
                     null, planner, registry);
             return new RecordingSwarmCoordinator(
-                    coord, registry, new io.kairo.expertteam.tck.NoopMessageBus(), List.of());
+                    coord, registry, new io.kairo.multiagent.orchestration.tck.NoopMessageBus(), List.of());
         }
 
         @Override

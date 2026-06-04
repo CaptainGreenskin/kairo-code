@@ -19,9 +19,10 @@ import io.kairo.api.tool.ToolDefinition;
 import io.kairo.api.tool.ToolSideEffect;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
-import io.kairo.code.core.team.MessageBus;
+import io.kairo.api.message.Content;
+import io.kairo.api.team.MessageBus;
+import io.kairo.api.team.TeamManager;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.SessionPhase;
 import io.kairo.code.service.agent.tools.NoNarrationTool;
@@ -337,12 +338,18 @@ public final class TeamSessionPayload implements SessionPayload {
                 .doOnSuccess(result -> {
                     log.debug("confirmAndExecute completed (session={}), result={}",
                             sessionId, result != null ? result.status() : "null");
+                    if (narrator != null) {
+                        narrator.dispose();
+                    }
                     ctx.runningState().set(false);
                     phaseRef.set(SessionPhase.COMPLETED);
                     ctx.persistPhase().accept(SessionPhase.COMPLETED);
                     emitDoneOnce(sessionId);
                 })
                 .doOnError(err -> {
+                    if (narrator != null) {
+                        narrator.dispose();
+                    }
                     ctx.runningState().set(false);
                     phaseRef.set(SessionPhase.FAILED_EXECUTION);
                     ctx.persistPhase().accept(SessionPhase.FAILED_EXECUTION);
@@ -490,6 +497,7 @@ public final class TeamSessionPayload implements SessionPayload {
             meta.put("mode", planAttrs.get("mode"));
             meta.put("planId", planAttrs.get("planId"));
             meta.put("totalSteps", planAttrs.get("totalSteps"));
+            meta.put("goal", planAttrs.get("goal"));
         }
         return meta;
     }
@@ -607,28 +615,27 @@ public final class TeamSessionPayload implements SessionPayload {
     // ── Peer-message poller ──────────────────────────────────────────────────────
 
     /**
-     * Spawn a background poller that drains the session's MessageBus mailbox every
-     * {@link #POLL_INTERVAL} and projects each {@code TeamMessage} onto the shared sink as a
-     * {@code PEER_MESSAGE} event. Disposed in {@link #stop()}.
+     * Subscribe to the session's MessageBus inbox reactively. Each received {@code Msg} is projected
+     * onto the shared sink as a {@code PEER_MESSAGE} event. Disposed in {@link #stop()}.
      */
     private void startPeerPoller() {
         String sessionId = ctx.sessionId();
-        Sinks.Many<AgentEvent> sink = ctx.sharedSink();
-        Disposable d = Flux.interval(POLL_INTERVAL, Schedulers.boundedElastic())
-                .doOnNext(tick -> {
-                    try {
-                        List<MessageBus.TeamMessage> msgs = messageBus.poll(sessionId);
-                        for (MessageBus.TeamMessage msg : msgs) {
-                            ctx.emit(AgentEvent.peerMessage(
-                                    sessionId, msg.fromSessionId(),
-                                    msg.content(), msg.messageId()));
-                        }
-                    } catch (Exception e) {
-                        log.warn("Peer-message poll failed for session {}: {}",
-                                sessionId, e.getMessage());
-                    }
-                })
-                .subscribe();
+        Disposable d = messageBus.receive(sessionId)
+                .publishOn(Schedulers.boundedElastic())
+                .subscribe(
+                        msg -> {
+                            String fromId = msg.metadata() != null
+                                    ? String.valueOf(msg.metadata().getOrDefault("from", "unknown"))
+                                    : "unknown";
+                            String content = msg.contents().stream()
+                                    .filter(Content.TextContent.class::isInstance)
+                                    .map(c -> ((Content.TextContent) c).text())
+                                    .findFirst()
+                                    .orElse("");
+                            ctx.emit(AgentEvent.peerMessage(sessionId, fromId, content, msg.id()));
+                        },
+                        err -> log.warn("Peer-message stream error session={}: {}",
+                                sessionId, err.getMessage()));
         peerPoller.set(d);
     }
 

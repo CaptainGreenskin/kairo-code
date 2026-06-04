@@ -176,7 +176,14 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
   canvasTeamId: null,
 
   setActiveTeam: (teamId) => set({ activeTeamId: teamId }),
-  setCanvasTeamId: (teamId) => set({ canvasTeamId: teamId }),
+  setCanvasTeamId: (teamId) => {
+    set({ canvasTeamId: teamId });
+    if (teamId) {
+      sessionStorage.setItem('kairo-canvas-team-id', teamId);
+    } else {
+      sessionStorage.removeItem('kairo-canvas-team-id');
+    }
+  },
 
   getActiveTeam: () => {
     const { teams, activeTeamId } = get();
@@ -194,7 +201,10 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
     return teamId ? teams[teamId] ?? null : null;
   },
 
-  reset: () => set({ teams: {}, activeTeamId: null, teamByMessageId: {}, canvasTeamId: null }),
+  reset: () => {
+    set({ teams: {}, activeTeamId: null, teamByMessageId: {}, canvasTeamId: null });
+    sessionStorage.removeItem('kairo-canvas-team-id');
+  },
 
   handleBatchEvents: (events) => {
     if (events.length === 0) return;
@@ -282,6 +292,9 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
 
         case 'PLAN_READY': {
           updatedTeam.status = 'plan-ready';
+          if (attributes.goal) {
+            updatedTeam.goal = attributes.goal as string;
+          }
           const mode = attributes.mode as string;
           if (mode === 'dag' && attributes.steps) {
             const rawSteps = attributes.steps as Array<Record<string, unknown>>;
@@ -303,6 +316,10 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
               instruction: s.instruction,
               dependsOn: s.dependsOn,
             }));
+            // Build edges from dependsOn for DAG visualization
+            updatedTeam.edges = updatedTeam.dag.flatMap((n) =>
+              (n.dependsOn ?? []).map((dep) => ({ source: dep, target: n.stepId })),
+            );
           }
           break;
         }
@@ -452,5 +469,18 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
         teams: { ...state.teams, [teamId]: updatedTeam },
       };
     });
+
+    // Persist canvas team snapshot to sessionStorage for refresh recovery
+    const { canvasTeamId, teams } = get();
+    if (canvasTeamId && teams[canvasTeamId]) {
+      try {
+        sessionStorage.setItem(
+          'kairo-canvas-team-snapshot',
+          JSON.stringify(teams[canvasTeamId]),
+        );
+      } catch {
+        // quota exceeded or serialization error — ignore
+      }
+    }
   },
 }));

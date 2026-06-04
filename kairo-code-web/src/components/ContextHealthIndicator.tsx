@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, Zap } from 'lucide-react';
+import { Activity, Zap, Shrink } from 'lucide-react';
 
 interface ContextHealthProps {
     /** Current tokens used in the context window (input + output of latest turn). */
@@ -8,6 +8,8 @@ interface ContextHealthProps {
     maxTokens: number;
     /** True briefly after a CONTEXT_COMPACTED event arrives. */
     isCompacting: boolean;
+    /** Callback to trigger manual compaction. */
+    onCompact?: () => void;
 }
 
 /**
@@ -15,7 +17,7 @@ interface ContextHealthProps {
  * short-lived "compacted" flash whenever the backend ContextCompactionHook fires. Hidden when
  * {@link maxTokens} is unknown to avoid showing a misleading 0% bar.
  */
-export function ContextHealthIndicator({ tokenUsage, maxTokens, isCompacting }: ContextHealthProps) {
+export function ContextHealthIndicator({ tokenUsage, maxTokens, isCompacting, onCompact }: ContextHealthProps) {
     const [justCompacted, setJustCompacted] = useState(false);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -77,6 +79,16 @@ export function ContextHealthIndicator({ tokenUsage, maxTokens, isCompacting }: 
                 <span className="text-[var(--accent)] animate-fade-out" data-testid="context-compacted-flash">
                     compacted
                 </span>
+            )}
+            {onCompact && pct > 0 && (
+                <button
+                    onClick={onCompact}
+                    className="ml-0.5 p-0.5 rounded hover:bg-[var(--hover)] transition-colors"
+                    title="Compact context"
+                    aria-label="Compact context"
+                >
+                    <Shrink size={10} className="text-[var(--text-tertiary)]" />
+                </button>
             )}
         </div>
     );

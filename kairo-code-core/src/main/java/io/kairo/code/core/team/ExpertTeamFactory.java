@@ -21,8 +21,8 @@ import io.kairo.api.team.TeamConfig;
 import io.kairo.api.team.TeamResult;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
-import io.kairo.expertteam.ExpertTeamCoordinator;
-import io.kairo.expertteam.role.ExpertRoleRegistry;
+import io.kairo.multiagent.orchestration.ExpertTeamCoordinator;
+import io.kairo.multiagent.subagent.ExpertRoleRegistry;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
@@ -58,7 +58,7 @@ public final class ExpertTeamFactory {
         // kairo-code-specific worker factory. This is what made kairo-assistant unable to
         // reuse the original method — it hardcoded CodeAgentFactory.
         var composition =
-                io.kairo.expertteam.ExpertTeamComposer.create(
+                io.kairo.multiagent.orchestration.ExpertTeamComposer.create(
                         agentCount,
                         () ->
                                 CodeAgentFactory.createSession(

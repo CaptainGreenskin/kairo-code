@@ -27,7 +27,7 @@ public class HookConfigController {
         new HookMeta("AutoCommitOnSuccessHook", "Auto-commit when all tests pass"),
         new HookMeta("CheckpointWriterHook", "Write checkpoint after each successful turn"),
         new HookMeta("CompileErrorFeedbackHook", "Inject compile error context on failure"),
-        new HookMeta("ContextCompactionHook", "Summarize context when window is nearly full"),
+        new HookMeta("CompactionEventBridgeHook", "Emit SSE events when framework compaction fires"),
         new HookMeta("ContextWindowGuardHook", "Warn agent when context window is large"),
         new HookMeta("ExecutionTraceHook", "Record execution trace to JSONL"),
         new HookMeta("FullTestSuiteHook", "Remind agent to run full test suite before finishing"),

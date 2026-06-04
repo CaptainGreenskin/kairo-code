@@ -1,4 +1,4 @@
-import { Files, Search, GitBranch, Brain, Zap, BarChart3 } from 'lucide-react';
+import { Files, Search, GitBranch, Brain, Zap } from 'lucide-react';
 import { useLayoutStore } from '@store/layoutStore';
 import type { ActivityView } from '@utils/userPrefs';
 
@@ -22,10 +22,9 @@ interface QuickAction {
     onClick: () => void;
 }
 
-export function ActivityBar({ onOpenEvolution, onOpenHooks, onOpenStats }: {
+export function ActivityBar({ onOpenEvolution, onOpenHooks }: {
     onOpenEvolution?: () => void;
     onOpenHooks?: () => void;
-    onOpenStats?: () => void;
 }) {
     const activeView = useLayoutStore((s) => s.activityView);
     const sidebarOpen = useLayoutStore((s) => s.primarySidebarOpen);
@@ -34,7 +33,6 @@ export function ActivityBar({ onOpenEvolution, onOpenHooks, onOpenStats }: {
     const quickActions: QuickAction[] = [
         { id: 'evolution', label: 'Self-Evolution Lessons', icon: Brain, onClick: () => onOpenEvolution?.() },
         { id: 'hooks', label: 'Hook Configuration', icon: Zap, onClick: () => onOpenHooks?.() },
-        { id: 'stats', label: 'Session Stats', icon: BarChart3, onClick: () => onOpenStats?.() },
     ];
 
     return (

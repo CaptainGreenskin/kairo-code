@@ -25,21 +25,20 @@ import io.kairo.api.tool.ToolExecutor;
 import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.api.tool.ToolRegistry;
 import io.kairo.api.workspace.Workspace;
+import io.kairo.api.team.TeamManager;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.core.team.persistence.JsonFileTeamRepository;
 import io.kairo.code.core.team.persistence.TeamRepository;
-import io.kairo.code.core.team.tools.ExpertTeamTool;
 import io.kairo.core.a2a.InProcessA2aClient;
 import io.kairo.core.a2a.InProcessAgentCardResolver;
 import io.kairo.core.agent.AgentBuilder;
 import io.kairo.core.shutdown.GracefulShutdownManager;
-import io.kairo.expertteam.ExpertTeamCoordinator;
-import io.kairo.expertteam.SimpleEvaluationStrategy;
-import io.kairo.expertteam.internal.DefaultPlanner;
-import io.kairo.expertteam.memory.ExpertMemoryStore;
-import io.kairo.expertteam.role.ExpertRoleRegistry;
-import io.kairo.expertteam.strategy.SynthesizerStep;
+import io.kairo.multiagent.orchestration.ExpertTeamCoordinator;
+import io.kairo.multiagent.orchestration.SimpleEvaluationStrategy;
+import io.kairo.multiagent.orchestration.internal.DefaultPlanner;
+import io.kairo.multiagent.orchestration.ExpertMemoryStore;
+import io.kairo.multiagent.subagent.ExpertRoleRegistry;
+import io.kairo.multiagent.orchestration.SynthesizerStep;
 import io.kairo.multiagent.a2a.TeamAwareA2aClient;
 import io.kairo.multiagent.team.DefaultTeamManager;
 import io.kairo.multiagent.team.InProcessMessageBus;
@@ -60,24 +59,8 @@ import reactor.core.publisher.Mono;
 public class TeamConfig {
 
     @Bean
-    public TeamManager teamManager() {
-        return new TeamManager();
-    }
-
-    /**
-     * M-Team (#60): in-process message bus for live Team-mode sessions.
-     *
-     * <p>This is the kairo-code-core {@code MessageBus} (concrete class) used by the
-     * Claude-style live multi-agent {@link io.kairo.code.service.agent.TeamSessionPayload}
-     * — distinct from the kairo-api {@link MessageBus} interface bean at
-     * {@link #messageBus()}, which is bound to the Experts-mode
-     * {@link io.kairo.expertteam.ExpertTeamCoordinator}. Both coexist on purpose: Experts
-     * (qoder lineage) and Team (Claude lineage) keep separate buses so changes in one
-     * don't bleed into the other.
-     */
-    @Bean
-    public io.kairo.code.core.team.MessageBus codeTeamMessageBus() {
-        return new io.kairo.code.core.team.MessageBus();
+    public TeamManager teamManager(InProcessAgentCardResolver resolver) {
+        return new DefaultTeamManager(resolver);
     }
 
     // ── A2A Infrastructure ──
@@ -95,12 +78,6 @@ public class TeamConfig {
     @Bean
     public MessageBus messageBus() {
         return new InProcessMessageBus();
-    }
-
-    @Bean
-    public io.kairo.api.team.TeamManager apiTeamManager(
-            InProcessAgentCardResolver resolver) {
-        return new DefaultTeamManager(resolver);
     }
 
     @Bean
@@ -223,11 +200,6 @@ public class TeamConfig {
                 List.of(workerProxy));
         coordRef.set(sc);
         return sc;
-    }
-
-    @Bean
-    public ExpertTeamTool expertTeamTool(SwarmCoordinator swarmCoordinator) {
-        return new ExpertTeamTool(swarmCoordinator);
     }
 
     // ── Persistence (crash recovery) ──

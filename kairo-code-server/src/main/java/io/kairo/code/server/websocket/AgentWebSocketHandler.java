@@ -111,6 +111,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                 case "subscribeTeam"   -> handleSubscribeTeam(session, root);
                 case "unsubscribeTeam" -> handleUnsubscribeTeam(session, root);
                 case "rejectStep"      -> handleRejectStep(session, root);
+                case "compact"         -> handleCompact(session, root);
                 default -> sendErr(session, action, "unknown action: " + action);
             }
         } catch (Exception e) {
@@ -265,6 +266,17 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         }
         agentService.stopAgent(sid);
         log.info("Stop requested for session {}", sid);
+    }
+
+    private void handleCompact(WebSocketSession session, JsonNode body) {
+        String sid = text(body, "sessionId");
+        if (sid == null) {
+            sendErr(session, "compact", "missing sessionId");
+            return;
+        }
+        agentService.compactSession(sid).subscribe();
+        sendAck(session, "compact");
+        log.info("Manual compaction requested for session {}", sid);
     }
 
     private void handleRevert(WebSocketSession session, JsonNode body) {

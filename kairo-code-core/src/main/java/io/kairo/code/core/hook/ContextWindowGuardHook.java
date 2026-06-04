@@ -19,15 +19,15 @@ import io.kairo.api.hook.HookHandler;
 import io.kairo.api.hook.HookPhase;
 import io.kairo.api.hook.HookResult;
 import io.kairo.api.hook.PreReasoningEvent;
-import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
+import io.kairo.core.context.HeuristicTokenEstimator;
 import java.util.List;
 
 /**
  * Warns the model when conversation context grows large, to prevent GLM-5.1 context overflow.
  *
- * <p>Estimates token count from the full message list (chars / 4) and injects warnings at two
+ * <p>Estimates token count via the framework's content-type-aware estimator and injects warnings at two
  * thresholds. Each threshold fires only once per session.
  *
  * <p>Active in both REPL and one-shot mode — context overflow can happen in either.
@@ -83,22 +83,9 @@ public final class ContextWindowGuardHook {
         return HookResult.proceed(event);
     }
 
-    /** Estimates tokens as total character count across all message content, divided by 4. */
+    private static final HeuristicTokenEstimator TOKEN_ESTIMATOR = new HeuristicTokenEstimator();
+
     int estimateTokens(List<Msg> messages) {
-        int totalChars = 0;
-        for (Msg msg : messages) {
-            for (Content c : msg.contents()) {
-                if (c instanceof Content.TextContent text) {
-                    totalChars += text.text().length();
-                } else if (c instanceof Content.ToolUseContent toolUse) {
-                    totalChars += toolUse.input().toString().length();
-                } else if (c instanceof Content.ToolResultContent toolResult) {
-                    totalChars += toolResult.content().length();
-                } else if (c instanceof Content.ThinkingContent thinking) {
-                    totalChars += thinking.thinking().length();
-                }
-            }
-        }
-        return totalChars / 4;
+        return TOKEN_ESTIMATOR.estimate(messages);
     }
 }

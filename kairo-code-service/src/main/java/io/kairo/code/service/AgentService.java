@@ -10,7 +10,6 @@ import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.hook.CheckpointWriterHook;
-import io.kairo.code.core.hook.ContextCompactionHook;
 import io.kairo.code.service.agent.AgentRuntimeContext;
 import io.kairo.code.service.agent.AgentSessionPayload;
 import io.kairo.code.service.agent.MessageRequest;
@@ -167,10 +166,10 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     /** Team-mode primitives — null when the kairo-code-server beans aren't on the classpath. */
     @Autowired(required = false)
-    private io.kairo.code.core.team.TeamManager teamManager;
+    private io.kairo.api.team.TeamManager teamManager;
 
     @Autowired(required = false)
-    private io.kairo.code.core.team.MessageBus messageBus;
+    private io.kairo.api.team.MessageBus messageBus;
 
     @Autowired
     private WorktreeManager worktreeManager;
@@ -301,7 +300,7 @@ public class AgentService implements DisposableBean, InitializingBean {
                 sink, sessionId, approvalHandler.announcedToolCallIds(),
                 config.workingDir(), progressTracker, diagnosticsTrackerFor(sessionId));
 
-        ContextCompactionHook compactionHook = buildCompactionHook(sink, sessionId);
+        CompactionEventBridgeHook compactionBridge = new CompactionEventBridgeHook(sink, sessionId);
 
         // ── Build AgentRuntimeContext ───────────────────────────────────────────────
         AtomicBoolean running = new AtomicBoolean(false);
@@ -311,7 +310,15 @@ public class AgentService implements DisposableBean, InitializingBean {
         sessionPhases.put(sessionId, phaseRef);
 
         String finalWorkingDir = config.workingDir();
-        Consumer<SessionPhase> persistPhaseFn = p -> persistPhase(finalWorkingDir, p);
+        // Persist phase to session-specific directory
+        final String phaseSid = sessionId;
+        Consumer<SessionPhase> persistPhaseFn = p -> {
+            if (finalWorkingDir != null) {
+                Path phaseFile = Path.of(finalWorkingDir).resolve(".kairo-session")
+                        .resolve(phaseSid).resolve("phase.txt");
+                persistPhaseToFile(phaseFile, p);
+            }
+        };
 
         AgentRuntimeContext ctx = new AgentRuntimeContext(
                 sessionId, sink, running, phaseRef, persistPhaseFn, concurrencyController);
@@ -345,7 +352,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             // modes' hook lists are bit-for-bit identical to pre-change behavior.
             java.util.List<Object> hooks = new java.util.ArrayList<>();
             hooks.add(bridgeHook);
-            hooks.add(compactionHook);
+            hooks.add(compactionBridge);
             hooks.add(planHook);
             if (finalWorkingDir != null) {
                 final CodeAgentConfig effectiveCfg = config;
@@ -361,8 +368,12 @@ public class AgentService implements DisposableBean, InitializingBean {
             }
             CheckpointWriterHook checkpointHook = null;
             if (finalWorkingDir != null) {
+                io.kairo.code.core.SessionStorageLayout layout =
+                        new io.kairo.code.core.SessionStorageLayout(Path.of(finalWorkingDir));
+                layout.ensureSessionDir(sessionId);
+                layout.gc();
                 checkpointHook = new CheckpointWriterHook(
-                        Path.of(finalWorkingDir),
+                        Path.of(finalWorkingDir), sessionId,
                         new com.fasterxml.jackson.databind.ObjectMapper(),
                         null);
                 hooks.add(checkpointHook);
@@ -403,16 +414,39 @@ public class AgentService implements DisposableBean, InitializingBean {
                         new WorktreeWorkspaceProvider(Path.of(finalWorkingDir), lifecycle);
                 io.kairo.api.model.ModelProvider mp =
                         CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+                var subagentRegistry = new io.kairo.code.core.task.SubagentRegistry();
                 TaskToolDependencies taskDeps = new TaskToolDependencies(
                         workspaceProvider,
-                        new ServerChildSessionSpawner(config, mp, sink, sessionId),
-                        new AutoMergePrompter());
+                        new ServerChildSessionSpawner(config, mp, sink, sessionId,
+                                0, workspaceProvider),
+                        new AutoMergePrompter(),
+                        null,
+                        (taskId2, desc, result, error, durationMs) -> {
+                            String status = error == null ? "completed" : "failed";
+                            String notification = "<task-notification task_id=\"" + taskId2
+                                    + "\" description=\"" + desc + "\" status=\"" + status
+                                    + "\" duration_ms=\"" + durationMs + "\">\n"
+                                    + (result != null ? result : (error != null ? error.getMessage() : ""))
+                                    + "\n</task-notification>";
+                            sink.tryEmitNext(AgentEvent.textChunk(sessionId, notification));
+                        },
+                        subagentRegistry);
                 opts = opts.withTaskTool(taskDeps);
             }
 
             Map<String, Object> extraToolDeps = Map.of(
                     io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, chunkSink);
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts, extraToolDeps);
+
+            // Override the framework's IterationCheckpointManager to use session-specific path
+            if (finalWorkingDir != null && session.agent() instanceof io.kairo.core.agent.DefaultReActAgent dra) {
+                Path sessionIterDir = Path.of(finalWorkingDir)
+                        .resolve(".kairo-session").resolve(sessionId).resolve("iterations");
+                var sessionStore = new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
+                        sessionIterDir, new io.kairo.core.session.SessionSerializer());
+                dra.setCheckpointManager(
+                        new io.kairo.core.agent.checkpoint.IterationCheckpointManager(sessionStore));
+            }
 
             // ── Unified payload: always AgentSessionPayload + optional escalation ──
             AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
@@ -472,6 +506,39 @@ public class AgentService implements DisposableBean, InitializingBean {
      */
     public Flux<AgentEvent> sendMessage(String sessionId, String text) {
         return sendMessage(sessionId, MessageRequest.text(text));
+    }
+
+    /**
+     * Manually trigger context compaction for a session. Emits a {@code CONTEXT_COMPACTED}
+     * event and sends a compaction prompt to the agent so it summarizes the conversation.
+     */
+    public Flux<AgentEvent> compactSession(String sessionId) {
+        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
+        if (sink == null) {
+            return Flux.just(AgentEvent.error(sessionId,
+                    "Session not found: " + sessionId, "SESSION_NOT_FOUND"));
+        }
+        SessionEntry entry = sessions.get(sessionId);
+        int maxTokens = 100_000;
+        if (entry != null && entry.configOrNull() != null) {
+            maxTokens = io.kairo.core.model.ModelRegistry.getContextWindow(
+                    entry.configOrNull().modelName());
+        }
+        AgentRuntimeContext.emitSerialized(sink,
+                AgentEvent.contextCompacted(sessionId, maxTokens, maxTokens));
+        log.info("Manual compaction triggered for session {}", sessionId);
+        String compactPrompt = "The conversation context is getting large. "
+                + "Please summarize all work done so far — including what has been tried, "
+                + "what succeeded, what failed, and the current state of the task — in a "
+                + "concise summary (around 200 words). Then continue working.";
+        io.kairo.api.message.Msg compactionMsg = io.kairo.api.message.Msg.builder()
+                .role(io.kairo.api.message.MsgRole.USER)
+                .addContent(new io.kairo.api.message.Content.TextContent(compactPrompt))
+                .metadata("kairo.kind", "compaction")
+                .metadata("kairo.compaction.beforeTokens", maxTokens)
+                .metadata("kairo.compaction.maxTokens", maxTokens)
+                .build();
+        return sendMessage(sessionId, new MessageRequest(compactionMsg));
     }
 
     /**
@@ -912,7 +979,9 @@ public class AgentService implements DisposableBean, InitializingBean {
         }
 
         CodeAgentConfig cfg = entry.configOrNull();
-        String todosJson = cfg != null ? TodoStorage.readJson(cfg.workingDir()) : "[]";
+        // Only send todos if this session has history (avoid showing stale todos from other sessions)
+        String todosJson = (cfg != null && !messages.isEmpty())
+                ? TodoStorage.readJson(cfg.workingDir()) : "[]";
 
         SessionPhase phase = getSessionPhase(sessionId);
         boolean resumable =
@@ -925,118 +994,141 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     private List<Map<String, Object>> readCheckpointMessages(SessionEntry entry) {
         CodeAgentConfig cfg = entry.configOrNull();
-        if (cfg == null || cfg.workingDir() == null) {
-            return List.of();
+        if (cfg == null || cfg.workingDir() == null) return List.of();
+
+        // Session-isolated checkpoint: .kairo-session/{sessionId}/iterations/
+        io.kairo.code.core.SessionStorageLayout layout =
+                new io.kairo.code.core.SessionStorageLayout(Path.of(cfg.workingDir()));
+        Path iterDir = Path.of(cfg.workingDir()).resolve(".kairo-session")
+                .resolve(entry.sessionId()).resolve("iterations");
+        // Fallback to legacy path if session-specific dir doesn't exist
+        if (!java.nio.file.Files.isDirectory(iterDir)) {
+            iterDir = Path.of(cfg.workingDir()).resolve(".kairo-session").resolve("iterations");
         }
-        Path workingDir = Path.of(cfg.workingDir());
-        Path checkpointPath = workingDir.resolve(".kairo-session").resolve("checkpoint.json");
-        if (!Files.exists(checkpointPath)) {
-            return List.of();
+        var store = new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
+                iterDir, new io.kairo.core.session.SessionSerializer());
+        var opt = store.loadLast().block();
+        if (opt == null || opt.isEmpty()) return List.of();
+
+        var checkpoint = opt.get();
+        if (checkpoint.timestamp().toEpochMilli() < entry.createdAt()) return List.of();
+
+        List<io.kairo.api.message.Msg> msgs = checkpoint.messages();
+        List<Map<String, Object>> result = new java.util.ArrayList<>();
+        Map<String, Object> currentAssistant = null;
+        List<Map<String, Object>> currentToolCalls = null;
+
+        for (io.kairo.api.message.Msg msg : msgs) {
+            String role = msg.role().name().toLowerCase();
+            if ("system".equals(role)) continue;
+
+            if ("user".equals(role)) {
+                flushAssistant(result, currentAssistant, currentToolCalls);
+                currentAssistant = null;
+                currentToolCalls = null;
+
+                Map<String, Object> userMsg = new java.util.LinkedHashMap<>();
+                userMsg.put("id", msg.id());
+                userMsg.put("role", "user");
+                userMsg.put("content", extractText(msg));
+                userMsg.put("toolCalls", List.of());
+                userMsg.put("timestamp", msg.timestamp() != null
+                        ? msg.timestamp().toEpochMilli() : System.currentTimeMillis());
+                applyMetadata(userMsg, msg);
+                result.add(userMsg);
+
+            } else if ("assistant".equals(role)) {
+                flushAssistant(result, currentAssistant, currentToolCalls);
+
+                currentAssistant = new java.util.LinkedHashMap<>();
+                currentAssistant.put("id", msg.id());
+                currentAssistant.put("role", "assistant");
+                currentAssistant.put("content", extractText(msg));
+                currentAssistant.put("timestamp", msg.timestamp() != null
+                        ? msg.timestamp().toEpochMilli() : System.currentTimeMillis());
+                String thinking = extractThinking(msg);
+                if (!thinking.isEmpty()) currentAssistant.put("thinking", thinking);
+
+                currentToolCalls = new java.util.ArrayList<>();
+                for (io.kairo.api.message.Content c : msg.contents()) {
+                    if (c instanceof io.kairo.api.message.Content.ToolUseContent tu) {
+                        Map<String, Object> tc = new java.util.LinkedHashMap<>();
+                        tc.put("id", tu.toolId());
+                        tc.put("toolName", tu.toolName());
+                        tc.put("input", tu.input() != null ? tu.input() : Map.of());
+                        tc.put("status", "done");
+                        tc.put("requiresApproval", false);
+                        currentToolCalls.add(tc);
+                    }
+                }
+                applyMetadata(currentAssistant, msg);
+
+            } else if ("tool".equals(role)) {
+                if (currentToolCalls != null) {
+                    for (io.kairo.api.message.Content c : msg.contents()) {
+                        if (c instanceof io.kairo.api.message.Content.ToolResultContent tr) {
+                            for (Map<String, Object> tc : currentToolCalls) {
+                                if (tr.toolUseId() != null && tr.toolUseId().equals(tc.get("id"))) {
+                                    tc.put("result", tr.content());
+                                    if (tr.isError()) tc.put("isError", true);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+        flushAssistant(result, currentAssistant, currentToolCalls);
 
-        try {
-            String json = Files.readString(checkpointPath);
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode root = mapper.readTree(json);
+        int start = Math.max(0, result.size() - 50);
+        return result.subList(start, result.size());
+    }
 
-            // The checkpoint file is workingDir-scoped (one per workspace), shared by every
-            // session that runs there. Without this guard a freshly-created session ("New Chat")
-            // would adopt the PREVIOUS session's conversation on bind. Only restore a checkpoint
-            // written at/after this session was created; an older checkpoint belongs to a prior
-            // session in the same workspace.
-            JsonNode tsNode = root.get("timestamp");
-            if (tsNode != null && tsNode.isTextual()) {
-                try {
-                    long checkpointMs = java.time.Instant.parse(tsNode.asText()).toEpochMilli();
-                    if (checkpointMs < entry.createdAt()) {
-                        return List.of();
-                    }
-                } catch (java.time.format.DateTimeParseException ignored) {
-                    // Unparseable timestamp — fall through and restore (preserve prior behavior).
-                }
+    private static void flushAssistant(List<Map<String, Object>> result,
+                                        Map<String, Object> assistant,
+                                        List<Map<String, Object>> toolCalls) {
+        if (assistant == null) return;
+        if (toolCalls != null && !toolCalls.isEmpty()) assistant.put("toolCalls", toolCalls);
+        result.add(assistant);
+    }
+
+    private static String extractText(io.kairo.api.message.Msg msg) {
+        StringBuilder sb = new StringBuilder();
+        for (io.kairo.api.message.Content c : msg.contents()) {
+            if (c instanceof io.kairo.api.message.Content.TextContent t) {
+                if (!sb.isEmpty()) sb.append('\n');
+                sb.append(t.text());
             }
+        }
+        return sb.toString();
+    }
 
-            JsonNode messagesNode = root.get("messages");
-            if (messagesNode == null || !messagesNode.isArray()) {
-                return List.of();
+    private static String extractThinking(io.kairo.api.message.Msg msg) {
+        StringBuilder sb = new StringBuilder();
+        for (io.kairo.api.message.Content c : msg.contents()) {
+            if (c instanceof io.kairo.api.message.Content.ThinkingContent t) {
+                if (!sb.isEmpty()) sb.append('\n');
+                sb.append(t.thinking());
             }
+        }
+        return sb.toString();
+    }
 
-            // Convert checkpoint messages to frontend-friendly format.
-            // Skip tool-result messages (role=tool) — they're embedded in assistant toolCalls.
-            List<Map<String, Object>> result = new java.util.ArrayList<>();
-            String currentAssistantId = null;
-            Map<String, Object> currentAssistant = null;
-            List<Map<String, Object>> currentToolCalls = null;
+    private static void applyMetadata(Map<String, Object> frontendMsg,
+                                       io.kairo.api.message.Msg msg) {
+        Map<String, Object> meta = msg.metadata();
+        if (meta == null || meta.isEmpty()) return;
 
-            for (JsonNode msg : messagesNode) {
-                String role = msg.has("role") ? msg.get("role").asText() : "";
-                String content = msg.has("content") ? msg.get("content").asText("") : "";
-
-                if ("user".equals(role)) {
-                    // Flush any pending assistant message
-                    if (currentAssistant != null) {
-                        if (currentToolCalls != null && !currentToolCalls.isEmpty()) {
-                            currentAssistant.put("toolCalls", currentToolCalls);
-                        }
-                        result.add(currentAssistant);
-                    }
-                    currentAssistant = null;
-                    currentToolCalls = null;
-
-                    Map<String, Object> userMsg = new java.util.LinkedHashMap<>();
-                    userMsg.put("id", java.util.UUID.randomUUID().toString());
-                    userMsg.put("role", "user");
-                    userMsg.put("content", content);
-                    userMsg.put("toolCalls", List.of());
-                    userMsg.put("timestamp", System.currentTimeMillis());
-                    result.add(userMsg);
-                } else if ("assistant".equals(role)) {
-                    // Flush previous assistant message
-                    if (currentAssistant != null) {
-                        if (currentToolCalls != null && !currentToolCalls.isEmpty()) {
-                            currentAssistant.put("toolCalls", currentToolCalls);
-                        }
-                        result.add(currentAssistant);
-                    }
-
-                    currentAssistantId = java.util.UUID.randomUUID().toString();
-                    currentAssistant = new java.util.LinkedHashMap<>();
-                    currentAssistant.put("id", currentAssistantId);
-                    currentAssistant.put("role", "assistant");
-                    currentAssistant.put("content", content);
-                    currentToolCalls = new java.util.ArrayList<>();
-
-                    // Extract toolCalls from the message
-                    JsonNode tcNode = msg.get("toolCalls");
-                    if (tcNode != null && tcNode.isArray()) {
-                        for (JsonNode tc : tcNode) {
-                            Map<String, Object> toolCall = new java.util.LinkedHashMap<>();
-                            toolCall.put("id", tc.has("id") ? tc.get("id").asText() : "");
-                            toolCall.put("toolName", tc.has("name") ? tc.get("name").asText() : "");
-                            toolCall.put("input", tc.has("input") ? mapper.convertValue(tc.get("input"), Map.class) : Map.of());
-                            toolCall.put("status", "done");
-                            toolCall.put("requiresApproval", false);
-                            currentToolCalls.add(toolCall);
-                        }
-                    }
-                }
-                // Skip "tool" role messages — results are in toolCalls above
-            }
-
-            // Flush last assistant message
-            if (currentAssistant != null) {
-                if (currentToolCalls != null && !currentToolCalls.isEmpty()) {
-                    currentAssistant.put("toolCalls", currentToolCalls);
-                }
-                result.add(currentAssistant);
-            }
-
-            // Return last 50 messages to avoid overwhelming the client
-            int start = Math.max(0, result.size() - 50);
-            return result.subList(start, result.size());
-        } catch (IOException e) {
-            log.warn("Failed to read checkpoint for session {}: {}", entry.sessionId(), e.getMessage());
-            return List.of();
+        Object kind = meta.get("kairo.kind");
+        if ("compaction".equals(kind)) {
+            frontendMsg.put("kind", "compaction");
+            Map<String, Object> compactionMeta = new java.util.LinkedHashMap<>();
+            Object bt = meta.get("kairo.compaction.beforeTokens");
+            Object mt = meta.get("kairo.compaction.maxTokens");
+            compactionMeta.put("beforeTokens", bt instanceof Number n ? n.intValue() : 0);
+            compactionMeta.put("maxTokens", mt instanceof Number n ? n.intValue() : 0);
+            frontendMsg.put("compactionMeta", compactionMeta);
         }
     }
 
@@ -1179,7 +1271,7 @@ public class AgentService implements DisposableBean, InitializingBean {
         AgentEventBridgeHook bridgeHook = new AgentEventBridgeHook(
                 sink, sid, approvalHandler.announcedToolCallIds(), rebuilt.workingDir(),
                 progressTrackers.get(sid), diagnosticsTrackerFor(sid));
-        ContextCompactionHook compactionHook = buildCompactionHook(sink, sid);
+        CompactionEventBridgeHook compactionBridge = new CompactionEventBridgeHook(sink, sid);
         // Plan-pending intercept hook MUST be on the rebuilt session too. Without it,
         // exit_plan_mode tool calls don't transition the session into PLAN_PENDING —
         // the user loses the second-pass approval gate and the agent free-runs after
@@ -1192,7 +1284,7 @@ public class AgentService implements DisposableBean, InitializingBean {
         SessionOptions opts = SessionOptions.empty()
                 .asReplSession()
                 .withApprovalHandler(approvalHandler)
-                .withHooks(List.of(bridgeHook, compactionHook, planHook));
+                .withHooks(List.of(bridgeHook, compactionBridge, planHook));
         if (tracer != null) {
             // Same session-id stamping as createSession — see Langfuse rationale there.
             opts = opts.withTracer(
@@ -1246,27 +1338,6 @@ public class AgentService implements DisposableBean, InitializingBean {
         }
     }
 
-    /**
-     * Build a {@link ContextCompactionHook} configured with environment-driven defaults plus a
-     * listener that emits {@code CONTEXT_COMPACTED} events to the given sink whenever the hook
-     * decides to inject a compaction prompt.
-     */
-    private static ContextCompactionHook buildCompactionHook(
-            Sinks.Many<AgentEvent> sink, String sessionId) {
-        // Use the public constructor with environment defaults via a temporary throwaway
-        // instance to read the configured max-tokens; then replace with a listener-equipped
-        // instance that also captures maxTokens for inclusion in the event payload.
-        ContextCompactionHook probe = new ContextCompactionHook();
-        int maxTokens = probe.maxContextTokens();
-        return ContextCompactionHook.withListener(beforeTokens -> {
-            Sinks.EmitResult emit = AgentRuntimeContext.emitSerialized(sink, 
-                    AgentEvent.contextCompacted(sessionId, beforeTokens, maxTokens));
-            if (emit.isFailure()) {
-                log.warn("Failed to emit CONTEXT_COMPACTED for session {}: {}", sessionId, emit);
-            }
-        });
-    }
-
     // ── Plan persistence & crash recovery ───────────────────────────────────────
 
     private static final String SESSION_DIR = ".kairo-session";
@@ -1284,6 +1355,15 @@ public class AgentService implements DisposableBean, InitializingBean {
             Files.writeString(dir.resolve(PHASE_FILE), phase.name());
         } catch (IOException e) {
             log.debug("Failed to persist phase for workingDir {}: {}", workingDir, e.getMessage());
+        }
+    }
+
+    private static void persistPhaseToFile(Path phaseFile, SessionPhase phase) {
+        try {
+            Files.createDirectories(phaseFile.getParent());
+            Files.writeString(phaseFile, phase.name());
+        } catch (IOException e) {
+            // best-effort persistence
         }
     }
 

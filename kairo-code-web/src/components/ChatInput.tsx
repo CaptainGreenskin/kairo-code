@@ -47,6 +47,8 @@ interface ChatInputProps {
     tokenUsage?: { input: number; output: number };
     contextWindow?: number;
     isCompacting?: boolean;
+    /** Trigger manual context compaction. */
+    onCompact?: () => void;
     /** Above-strip: "+ New" button — open a new chat tab. */
     onNewChat?: () => void;
 }
@@ -89,6 +91,7 @@ export function ChatInput({
     tokenUsage,
     contextWindow,
     isCompacting = false,
+    onCompact,
     onNewChat,
 }: ChatInputProps) {
     const [text, setText] = useState(initialDraft ?? '');
@@ -560,6 +563,7 @@ export function ChatInput({
                                 tokenUsage={tokenUsage.input + tokenUsage.output}
                                 maxTokens={contextWindow}
                                 isCompacting={isCompacting}
+                                onCompact={onCompact}
                             />
                         )}
                         {onNewChat && (

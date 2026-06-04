@@ -2,7 +2,7 @@ package io.kairo.code.cli.commands;
 
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.cli.SlashCommand;
-import io.kairo.code.core.ConsoleApprovalHandler;
+import io.kairo.core.tool.ConsoleApprovalHandler;
 
 /**
  * Resets conversation context by recreating the agent.

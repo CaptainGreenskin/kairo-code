@@ -368,13 +368,13 @@ class NarratorDispatcherTest {
     }
 
     private static SwarmCoordinator noopCoordinator() {
-        var registry = new io.kairo.expertteam.role.ExpertRoleRegistry();
-        var planner = new io.kairo.expertteam.internal.DefaultPlanner(registry, null, null);
-        var coord = new io.kairo.expertteam.ExpertTeamCoordinator(
-                null, new io.kairo.expertteam.SimpleEvaluationStrategy(),
+        var registry = new io.kairo.multiagent.subagent.ExpertRoleRegistry();
+        var planner = new io.kairo.multiagent.orchestration.internal.DefaultPlanner(registry, null, null);
+        var coord = new io.kairo.multiagent.orchestration.ExpertTeamCoordinator(
+                null, new io.kairo.multiagent.orchestration.SimpleEvaluationStrategy(),
                 null, planner, registry);
         return new SwarmCoordinator(
-                coord, registry, new io.kairo.expertteam.tck.NoopMessageBus(), List.of()) {
+                coord, registry, new io.kairo.multiagent.orchestration.tck.NoopMessageBus(), List.of()) {
             @Override
             public Mono<TeamResult> startExpertTeam(String goal, TeamConfig cfg,
                                                     List<String> roleIds, boolean planOnly) {

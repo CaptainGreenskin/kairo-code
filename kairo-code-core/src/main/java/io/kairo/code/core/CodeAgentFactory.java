@@ -18,7 +18,6 @@ import io.kairo.code.core.evolution.ReflectionPipeline;
 import io.kairo.code.core.memory.AutoMemoryHook;
 import io.kairo.code.core.memory.KairoMdContextSource;
 import io.kairo.code.core.team.ExpertTeamFactory;
-import io.kairo.code.core.team.tools.ExpertTeamTool;
 import io.kairo.code.core.profile.UserProfile;
 import io.kairo.code.core.profile.UserProfileContextSource;
 import io.kairo.code.core.prompt.SessionContextEnricher;
@@ -27,7 +26,6 @@ import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
 import io.kairo.code.core.hook.CompileErrorFeedbackHook;
-import io.kairo.code.core.hook.ContextCompactionHook;
 import io.kairo.code.core.hook.ContextWindowGuardHook;
 import io.kairo.code.core.hook.ExecutionTraceHook;
 import io.kairo.code.core.hook.FullTestSuiteHook;
@@ -35,7 +33,6 @@ import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.MissingTestHintHook;
 import io.kairo.code.core.hook.NoWriteDetectedHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
-import io.kairo.code.core.hook.RichLoopDetectorHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
 import io.kairo.code.core.hook.RepetitiveToolHook;
@@ -43,7 +40,6 @@ import io.kairo.code.core.hook.SessionMetricsCollector;
 import io.kairo.code.core.hook.SessionMetricsHook;
 import io.kairo.code.core.hook.SessionResultWriterHook;
 import io.kairo.code.core.hook.StaleReadDetectorHook;
-import io.kairo.code.core.hook.CheckpointWriterHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
 import io.kairo.code.core.hook.TextOnlyStallHook;
 import io.kairo.code.core.hook.ToolBudgetHook;
@@ -59,9 +55,9 @@ import io.kairo.core.model.DefaultProviderRegistry;
 import io.kairo.core.model.openai.OpenAIProvider;
 import io.kairo.code.core.task.TaskTool;
 import io.kairo.code.core.task.TaskToolDependencies;
-import io.kairo.code.core.team.MessageBus;
+import io.kairo.api.team.MessageBus;
+import io.kairo.api.team.TeamManager;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.core.team.tools.SendMessageTool;
 import io.kairo.code.core.team.tools.TeamCreateTool;
 import io.kairo.code.core.team.tools.TeamDeleteTool;
@@ -265,27 +261,17 @@ public final class CodeAgentFactory {
             registry.registerInstance("skill_manage", skillManage);
         }
 
-        // Register the task tool only when dependencies are wired AND this is not a child session.
-        // Child sessions never get TaskTool — recursion is out of scope for M3.
+        // Register the task tool when dependencies are wired.
+        // Recursion depth is controlled by the spawner: child sessions get TaskTool with a
+        // depth-limited spawner (allows 1 level), grandchildren get no TaskToolDependencies.
         TaskToolDependencies taskDeps = options.taskToolDependencies();
-        if (taskDeps != null && !options.childSession()) {
+        if (taskDeps != null) {
             registry.registerTool(TaskTool.class);
         }
 
-        // Register expert_team as a model-callable tool in Agent mode. The coordinator is
-        // created lazily (via ExpertTeamFactory.create) on first tool invocation to avoid
-        // the cost of pre-building the worker agent pool for sessions that never use it.
-        // Child sessions are excluded (recursion guard).
-        if (!options.childSession()) {
-            SwarmCoordinator sc = options.swarmCoordinator();
-            if (sc == null) {
-                final CodeAgentConfig cfgCopy = config;
-                final ModelProvider mpCopy = modelProvider;
-                sc = ExpertTeamFactory.create(cfgCopy, mpCopy, 3);
-            }
-            registry.registerTool(ExpertTeamTool.class);
-            registry.registerInstance("expert_team", new ExpertTeamTool(sc));
-        }
+        // expert_team tool removed from Agent mode — it causes stalls and duplicates
+        // the subagent capability already provided by TaskTool. Expert Team is only
+        // available via the dedicated Experts mode (escalation path in AgentService).
 
         // M-Team (#60): register team-collaboration tools (team_create / send_message /
         // team_delete) only when team primitives are wired AND this is not a child session.
@@ -294,14 +280,20 @@ public final class CodeAgentFactory {
         // nested teams are out of scope and mirror Claude Code's Task/Team child-session guard.
         TeamManager teamManager = options.teamManager();
         MessageBus teamMessageBus = options.teamMessageBus();
+        io.kairo.code.core.task.SubagentRegistry subagentReg = options.taskToolDependencies() != null
+                ? options.taskToolDependencies().subagentRegistry() : null;
         if (teamManager != null && teamMessageBus != null && !options.childSession()) {
             registry.registerTool(TeamCreateTool.class);
             registry.registerInstance("team_create", new TeamCreateTool(teamManager));
             registry.registerTool(SendMessageTool.class);
             registry.registerInstance("send_message",
-                    new SendMessageTool(teamManager, teamMessageBus));
+                    new SendMessageTool(teamManager, teamMessageBus, subagentReg));
             registry.registerTool(TeamDeleteTool.class);
             registry.registerInstance("team_delete", new TeamDeleteTool(teamManager));
+        } else if (subagentReg != null && !options.childSession()) {
+            registry.registerTool(SendMessageTool.class);
+            registry.registerInstance("send_message",
+                    new SendMessageTool(null, null, subagentReg));
         }
 
         // Wire MCP tools from config if present.
@@ -480,15 +472,11 @@ public final class CodeAgentFactory {
         builder.hook(new io.kairo.code.core.profile.UserProfileUpdateHook(
                 io.kairo.code.core.profile.UserProfileStore.fromKairoDir(evolutionDir)));
 
-        // Auto-register ContextCompactionHook: when context approaches the limit, injects a
-        // compaction request so the model summarizes work and continues. Non-REPL only.
-        // Callers that need to observe compaction events (e.g. transport bridges that surface
-        // CONTEXT_COMPACTED to clients) may supply their own ContextCompactionHook via
-        // {@link SessionOptions#withHooks(List)} — in that case we skip the auto-registration so
-        // the user-supplied instance (with its listener) is the single source of truth.
-        if (!options.isRepl() && !hasHookOfType(hooks, ContextCompactionHook.class)) {
-            builder.hook(new ContextCompactionHook());
-        }
+        // Context compaction is handled by the framework's CompactionTrigger (wired via
+        // .compactionThresholds() above). Web sessions additionally register a
+        // CompactionEventBridgeHook (@PostCompact) to emit SSE events. No separate
+        // PRE_REASONING hook is needed — the framework's 6-stage pipeline handles
+        // snip → micro → collapse → auto → partial compaction automatically.
 
         // Auto-register StaleReadDetectorHook: warns when the agent re-reads the same file
         // multiple times, to improve token efficiency. Active in both REPL and one-shot mode.
@@ -546,12 +534,10 @@ public final class CodeAgentFactory {
             // and reminds the agent to run the full mvn test suite. Non-REPL only.
             builder.hook(new FullTestSuiteHook());
 
-            // Auto-register RichLoopDetectorHook: 5-pattern OpenHands-style detector
-            // (repeating-action / alternating / no-progress / context-explosion).
-            // Ported from kairo-code-eval after watching eval runs burn budgets on
-            // doom loops the existing RepetitiveToolHook didn't catch. Fires ONE
-            // coaching message per session; KAIRO_CODE_LOOP_DETECTOR=off disables.
-            builder.hook(new RichLoopDetectorHook(false));
+            // Loop detection is handled by the framework's LoopDetector (6-layer:
+            // hash + frequency + tool-repeat + alternating + no-progress + context-explosion).
+            // Previously RichLoopDetectorHook duplicated detection as a POST_REASONING hook;
+            // its coaching messages have been ported to the framework's DetectionResult strings.
 
             // Auto-register UnfulfilledInstructionHook: scans task for "Create ...Test.java"
             // requirements and injects a reminder if the files don't exist yet. Non-REPL only.
@@ -582,12 +568,9 @@ public final class CodeAgentFactory {
                 builder.hook(new SessionResultWriterHook(Path.of(wd), sessionMetrics));
             }
 
-            // Auto-register CheckpointWriterHook: persists conversation history to
-            // .kairo-session/checkpoint.json after each reasoning step for resume support.
-            if (wd != null && !wd.isBlank()) {
-                builder.hook(new CheckpointWriterHook(
-                        Path.of(wd), new ObjectMapper(), options.checkpointInitialMessage()));
-            }
+            // Wire framework IterationCheckpointStore: persists full Msg objects (including
+            // metadata) after each tool execution for session resume support.
+            // Replaces the custom CheckpointWriterHook which used a lossy serialization format.
         }
 
         if (options.textDeltaConsumer() != null) {
@@ -608,6 +591,19 @@ public final class CodeAgentFactory {
         }
 
         Agent agent = builder.build();
+
+        // Wire framework-level iteration checkpoints. The ToolPhase will automatically
+        // save a full Msg snapshot (including metadata) after each tool execution.
+        String wd = config.workingDir();
+        if (wd != null && !wd.isBlank()
+                && agent instanceof io.kairo.core.agent.DefaultReActAgent dra) {
+            Path checkpointDir = Path.of(wd).resolve(".kairo-session").resolve("iterations");
+            var store = new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
+                    checkpointDir, new io.kairo.core.session.SessionSerializer());
+            dra.setCheckpointManager(
+                    new io.kairo.core.agent.checkpoint.IterationCheckpointManager(store));
+        }
+
         ToolUsageTracker tracker = findToolUsageTracker(hooks);
         TurnMetricsCollector turnMetrics = findTurnMetricsCollector(hooks);
         return new CodeAgentSession(

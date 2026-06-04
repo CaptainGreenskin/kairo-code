@@ -10,9 +10,9 @@ import io.kairo.api.team.TeamConfig;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.hook.CheckpointWriterHook;
-import io.kairo.code.core.team.MessageBus;
+import io.kairo.api.team.MessageBus;
+import io.kairo.api.team.TeamManager;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.TeamManager;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.SessionPhase;
 import io.kairo.code.service.concurrency.AgentConcurrencyException;
@@ -477,6 +477,9 @@ public final class AgentSessionPayload implements SessionPayload {
      * Extracted here so AgentService.sendMessage can use it during the transition period.
      */
     public Msg buildUserMsg(MessageRequest request) {
+        if (request.hasPrebuiltMsg()) {
+            return request.prebuiltMsg();
+        }
         if (request.hasImage()) {
             byte[] bytes = Base64.getDecoder().decode(request.imageData());
             return Msg.builder()

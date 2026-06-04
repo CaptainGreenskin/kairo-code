@@ -37,19 +37,24 @@ export function ExpertTeamCanvas({ sendAction }: ExpertTeamCanvasProps) {
         }
     }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Plan-ready approval bar.
-    const planBar = buildPhase === 'PLAN_PENDING' && sessionId ? (
-        <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
-            <div className="text-[11px] text-[var(--text-secondary)] mb-1.5">
-                Plan ready — review the experts below, then approve to start execution.
-            </div>
+    // Plan-ready approval bar — shows team goal + approve button.
+    // Use both buildPhase AND team.status as triggers (team.status survives hot-reload).
+    const teamData = useExpertTeamStore((s) => teamId ? s.teams[teamId] : null);
+    const isPlanReady = (buildPhase === 'PLAN_PENDING' || teamData?.status === 'plan-ready') && sessionId;
+    const planBar = isPlanReady ? (
+        <div className="px-3 py-2.5 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
+            {teamData?.goal && (
+                <div className="text-[11px] text-[var(--text-primary)] mb-2 line-clamp-3 leading-relaxed font-medium">
+                    📋 {teamData.goal}
+                </div>
+            )}
             <button
                 onClick={() => {
                     if (!sessionId) return;
                     sendAction?.({ action: 'confirmBuild', sessionId });
                     useBuildPhaseStore.getState().setPhase('EXECUTING');
                 }}
-                className="px-2.5 py-1 text-[11px] font-medium rounded
+                className="px-3 py-1.5 text-[11px] font-medium rounded
                     bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity"
             >
                 Approve and Run

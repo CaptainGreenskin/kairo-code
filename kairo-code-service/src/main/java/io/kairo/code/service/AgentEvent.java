@@ -172,8 +172,8 @@ public record AgentEvent(
     }
 
     /**
-     * Create a CONTEXT_COMPACTED event signalling that {@link io.kairo.code.core.hook.ContextCompactionHook}
-     * has just injected a compaction request. The {@code content} field holds a JSON object
+     * Create a CONTEXT_COMPACTED event signalling that context compaction has occurred.
+     * The {@code content} field holds a JSON object
      * {@code {"beforeTokens":N,"maxTokens":N,"ratio":0.xx}} where {@code ratio = beforeTokens / maxTokens}.
      * The {@code tokenUsage} field also carries {@code beforeTokens} for downstream consumers.
      */
@@ -282,7 +282,7 @@ public record AgentEvent(
 
     /**
      * Create a PEER_MESSAGE event for a message delivered from another team member's session
-     * via {@code io.kairo.code.core.team.MessageBus}. {@code content} holds the message body;
+     * via {@link io.kairo.api.team.MessageBus}. {@code content} holds the message body;
      * {@code resultMetadata} carries {@code fromSessionId} and {@code messageId} so the UI can
      * render attribution and dedupe re-deliveries.
      */

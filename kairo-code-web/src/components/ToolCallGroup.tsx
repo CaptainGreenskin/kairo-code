@@ -75,7 +75,7 @@ export function ToolCallGroup({ toolCalls, onApprove, isStreaming }: ToolCallGro
                         setExpanded((prev) => !prev);
                     }
                 }}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] rounded-lg border border-[var(--border)] transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--accent)]/5 rounded-lg border border-[var(--border)] hover:border-[var(--accent)]/30 transition-all ${
                     !canCollapse ? 'cursor-default' : 'cursor-pointer'
                 }`}
             >
