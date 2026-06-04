@@ -53,7 +53,7 @@ public class SendMessageTool implements SyncTool {
     private final MessageBus messageBus;
     @Nullable private final SubagentRegistry subagentRegistry;
 
-    SendMessageTool() {
+    public SendMessageTool() {
         this.teamManager = null;
         this.messageBus = null;
         this.subagentRegistry = null;

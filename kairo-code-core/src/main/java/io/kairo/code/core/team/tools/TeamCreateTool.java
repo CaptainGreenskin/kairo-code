@@ -41,7 +41,7 @@ public class TeamCreateTool implements SyncTool {
 
     private final TeamManager teamManager;
 
-    TeamCreateTool() { this.teamManager = null; }
+    public TeamCreateTool() { this.teamManager = null; }
 
     public TeamCreateTool(TeamManager teamManager) {
         this.teamManager = teamManager;
