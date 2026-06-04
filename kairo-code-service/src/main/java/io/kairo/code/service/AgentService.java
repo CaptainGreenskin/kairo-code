@@ -379,6 +379,9 @@ public class AgentService implements DisposableBean, InitializingBean {
                     .withApprovalHandler(approvalHandler)
                     .withToolUsageTracker(usageTracker)
                     .withHooks(hooks);
+            if (teamManager != null && messageBus != null) {
+                opts = opts.withTeamPrimitives(teamManager, messageBus);
+            }
             if (tracer != null) {
                 // Wrap so every span carries session.id + langfuse.session.id +
                 // langfuse.user.id. Without this Langfuse can't group multi-turn
