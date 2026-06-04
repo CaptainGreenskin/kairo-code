@@ -102,7 +102,7 @@ class ExecutionDisciplineIT {
         WorktreeLifecycle lifecycle = new WorktreeLifecycle(tmp.resolve("worktrees"), "git");
         WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(repo, lifecycle);
         AtomicInteger childSpawns = new AtomicInteger();
-        ChildSessionSpawner spawner = (taskId, workDir) -> {
+        ChildSessionSpawner spawner = (taskId, workDir, agentType, modelOverride) -> {
             childSpawns.incrementAndGet();
             return CodeAgentFactory.createSession(
                     config,

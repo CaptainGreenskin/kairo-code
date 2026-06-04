@@ -65,7 +65,7 @@ class TaskToolTest {
 
         AtomicInteger spawnCount = new AtomicInteger();
         ChildSessionSpawner spawner =
-                (taskId, workDir) -> {
+                (taskId, workDir, agentType, modelOverride) -> {
                     spawnCount.incrementAndGet();
                     return newSession(new CommitFileAgent(workDir, "child.txt", "hi from child\n"));
                 };
@@ -116,7 +116,7 @@ class TaskToolTest {
         WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(repo, lifecycle);
 
         ChildSessionSpawner spawner =
-                (taskId, workDir) ->
+                (taskId, workDir, agentType, modelOverride) ->
                         newSession(new CommitFileAgent(workDir, "child.txt", "discard me\n"));
         WorktreeMergePrompter prompter =
                 (taskId, desc, stats, wt) -> Mono.just(WorktreeMergeChoice.DISCARD);
@@ -140,7 +140,7 @@ class TaskToolTest {
         WorktreeLifecycle lifecycle = new WorktreeLifecycle(tmp.resolve("worktrees"), "git");
         WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(repo, lifecycle);
 
-        ChildSessionSpawner spawner = (taskId, workDir) -> newSession(new NoOpAgent());
+        ChildSessionSpawner spawner = (taskId, workDir, agentType, modelOverride) -> newSession(new NoOpAgent());
 
         AtomicInteger promptCalls = new AtomicInteger();
         WorktreeMergePrompter prompter =
@@ -185,7 +185,7 @@ class TaskToolTest {
         TaskToolDependencies deps =
                 new TaskToolDependencies(
                         provider,
-                        (taskId, wd) -> newSession(new NoOpAgent()),
+                        (taskId, wd, at, mo) -> newSession(new NoOpAgent()),
                         (id, d, s, w) -> Mono.just(WorktreeMergeChoice.DISCARD));
 
         TaskTool tool = new TaskTool();
@@ -208,7 +208,7 @@ class TaskToolTest {
 
         AtomicReference<String> capturedPrompt = new AtomicReference<>();
         ChildSessionSpawner spawner =
-                (taskId, workDir) ->
+                (taskId, workDir, agentType, modelOverride) ->
                         newSession(new PromptCapturingAgent(capturedPrompt));
         WorktreeMergePrompter prompter =
                 (taskId, desc, stats, wt) -> Mono.just(WorktreeMergeChoice.DISCARD);
@@ -246,7 +246,7 @@ class TaskToolTest {
         TaskToolDependencies deps =
                 new TaskToolDependencies(
                         provider,
-                        (taskId, wd) -> newSession(new NoOpAgent()),
+                        (taskId, wd, at, mo) -> newSession(new NoOpAgent()),
                         (id, d, s, w) -> Mono.just(WorktreeMergeChoice.DISCARD));
 
         ExpertRoleRegistry registry = new ExpertRoleRegistry();
@@ -273,7 +273,7 @@ class TaskToolTest {
         TaskToolDependencies deps =
                 new TaskToolDependencies(
                         provider,
-                        (taskId, wd) -> newSession(new NoOpAgent()),
+                        (taskId, wd, at, mo) -> newSession(new NoOpAgent()),
                         (id, d, s, w) -> Mono.just(WorktreeMergeChoice.DISCARD));
 
         // No ExpertRoleRegistry in context
@@ -299,7 +299,7 @@ class TaskToolTest {
 
         AtomicReference<String> capturedPrompt = new AtomicReference<>();
         ChildSessionSpawner spawner =
-                (taskId, workDir) ->
+                (taskId, workDir, agentType, modelOverride) ->
                         newSession(new PromptCapturingAgent(capturedPrompt));
         WorktreeMergePrompter prompter =
                 (taskId, desc, stats, wt) -> Mono.just(WorktreeMergeChoice.DISCARD);

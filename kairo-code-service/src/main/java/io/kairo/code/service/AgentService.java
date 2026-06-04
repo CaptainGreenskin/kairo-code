@@ -370,6 +370,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             if (finalWorkingDir != null) {
                 io.kairo.code.core.SessionStorageLayout layout =
                         new io.kairo.code.core.SessionStorageLayout(Path.of(finalWorkingDir));
+                layout.detectAndMigrateLegacy();
                 layout.ensureSessionDir(sessionId);
                 layout.gc();
                 checkpointHook = new CheckpointWriterHook(

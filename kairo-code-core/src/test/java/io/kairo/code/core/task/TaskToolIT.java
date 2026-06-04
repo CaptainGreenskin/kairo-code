@@ -101,7 +101,7 @@ class TaskToolIT {
 
         AtomicInteger childSpawns = new AtomicInteger();
         ChildSessionSpawner spawner =
-                (taskId, workDir) -> {
+                (taskId, workDir, agentType, modelOverride) -> {
                     childSpawns.incrementAndGet();
                     // Child uses the real factory — proves child wiring works end-to-end.
                     SessionOptions childOpts =
@@ -161,7 +161,7 @@ class TaskToolIT {
         WorktreeWorkspaceProvider provider = new WorktreeWorkspaceProvider(repo, lifecycle);
         return new TaskToolDependencies(
                 provider,
-                (taskId, wd) ->
+                (taskId, wd, at2, mo2) ->
                         CodeAgentFactory.createSession(
                                 CONFIG,
                                 SessionOptions.empty()
