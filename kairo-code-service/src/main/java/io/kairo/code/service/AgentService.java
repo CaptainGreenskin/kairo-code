@@ -366,11 +366,12 @@ public class AgentService implements DisposableBean, InitializingBean {
                 hooks.add(failureTracker);
             }
             if (finalWorkingDir != null) {
-                io.kairo.code.core.SessionStorageLayout layout =
-                        new io.kairo.code.core.SessionStorageLayout(Path.of(finalWorkingDir));
-                layout.detectAndMigrateLegacy();
-                layout.ensureSessionDir(sessionId);
-                layout.gc();
+                // Session isolation: migrate legacy, ensure dir, GC via framework provider
+                var sessionStorage = new io.kairo.core.session.FileSessionStorageProvider(
+                        Path.of(finalWorkingDir).resolve(".kairo-session"));
+                sessionStorage.migrateLegacy();
+                sessionStorage.ensureSession(sessionId);
+                sessionStorage.gc();
             }
             ToolUsageTracker usageTracker = new ToolUsageTracker();
             SessionOptions opts = SessionOptions.empty()
@@ -983,15 +984,18 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         // Session-isolated checkpoint: .kairo-session/{sessionId}/iterations/
         io.kairo.code.core.SessionStorageLayout layout =
-                new io.kairo.code.core.SessionStorageLayout(Path.of(cfg.workingDir()));
-        Path iterDir = Path.of(cfg.workingDir()).resolve(".kairo-session")
-                .resolve(entry.sessionId()).resolve("iterations");
-        // Fallback to legacy path if session-specific dir doesn't exist
-        if (!java.nio.file.Files.isDirectory(iterDir)) {
-            iterDir = Path.of(cfg.workingDir()).resolve(".kairo-session").resolve("iterations");
+        var sessionStorage = new io.kairo.core.session.FileSessionStorageProvider(
+                Path.of(cfg.workingDir()).resolve(".kairo-session"));
+        // Use session-scoped checkpoint store; falls back to legacy if session dir doesn't exist
+        Path sessionIterDir = sessionStorage.sessionDir(entry.sessionId()).resolve("iterations");
+        io.kairo.api.agent.IterationCheckpointStore store;
+        if (java.nio.file.Files.isDirectory(sessionIterDir)) {
+            store = sessionStorage.checkpointStore(entry.sessionId());
+        } else {
+            store = new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
+                    Path.of(cfg.workingDir()).resolve(".kairo-session").resolve("iterations"),
+                    new io.kairo.core.session.SessionSerializer());
         }
-        var store = new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
-                iterDir, new io.kairo.core.session.SessionSerializer());
         var opt = store.loadLast().block();
         if (opt == null || opt.isEmpty()) return List.of();
 

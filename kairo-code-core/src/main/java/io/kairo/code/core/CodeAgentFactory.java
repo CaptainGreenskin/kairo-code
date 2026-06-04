@@ -412,6 +412,14 @@ public final class CodeAgentFactory {
             builder.workspace(new DirWorkspace(Path.of(config.workingDir()).toAbsolutePath().normalize()));
         }
 
+        // Wire session-scoped storage when sessionId is available. The AgentBuilder
+        // auto-creates an IterationCheckpointManager from the provider during build().
+        if (options.sessionId() != null && config.workingDir() != null) {
+            Path sessionRoot = Path.of(config.workingDir()).resolve(".kairo-session");
+            builder.sessionId(options.sessionId())
+                    .sessionStorage(new io.kairo.core.session.FileSessionStorageProvider(sessionRoot));
+        }
+
         if (taskDeps != null && !options.childSession()) {
             Map<String, Object> deps = new LinkedHashMap<>();
             deps.put(TaskToolDependencies.class.getName(), taskDeps);
@@ -592,20 +600,9 @@ public final class CodeAgentFactory {
 
         Agent agent = builder.build();
 
-        // Wire framework-level iteration checkpoints. When sessionId is provided, use
-        // session-isolated path (.kairo-session/{sessionId}/iterations/); otherwise fall
-        // back to the shared legacy path (.kairo-session/iterations/) for CLI mode.
-        String wd = config.workingDir();
-        if (wd != null && !wd.isBlank()
-                && agent instanceof io.kairo.core.agent.DefaultReActAgent dra) {
-            Path checkpointDir = options.sessionId() != null
-                    ? Path.of(wd).resolve(".kairo-session").resolve(options.sessionId()).resolve("iterations")
-                    : Path.of(wd).resolve(".kairo-session").resolve("iterations");
-            var store = new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
-                    checkpointDir, new io.kairo.core.session.SessionSerializer());
-            dra.setCheckpointManager(
-                    new io.kairo.core.agent.checkpoint.IterationCheckpointManager(store));
-        }
+        // Session-scoped checkpoint is now wired via AgentBuilder.sessionStorage()
+        // (set by the caller, e.g. AgentService). The builder auto-creates an
+        // IterationCheckpointManager from the provider during build().
 
         ToolUsageTracker tracker = findToolUsageTracker(hooks);
         TurnMetricsCollector turnMetrics = findTurnMetricsCollector(hooks);
