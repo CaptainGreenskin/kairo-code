@@ -554,11 +554,11 @@ function App() {
         });
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Snapshot messages to sessionStorage on change
+    // Snapshot messages to localStorage on change (debounced to avoid excessive writes)
     useEffect(() => {
-        if (sessionId && messages.length > 0) {
-            saveMessages(sessionId, messages);
-        }
+        if (!sessionId || messages.length === 0) return;
+        const timer = setTimeout(() => saveMessages(sessionId, messages), 2000);
+        return () => clearTimeout(timer);
     }, [sessionId, messages]);
 
     const handleSend = useCallback(

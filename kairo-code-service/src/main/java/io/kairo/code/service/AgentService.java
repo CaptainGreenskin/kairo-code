@@ -9,7 +9,6 @@ import io.kairo.code.core.CodeAgentFactory;
 import io.kairo.code.core.CodeAgentFactory.SessionOptions;
 import io.kairo.code.core.CodeAgentSession;
 import io.kairo.code.core.stats.ToolUsageTracker;
-import io.kairo.code.core.hook.CheckpointWriterHook;
 import io.kairo.code.service.agent.AgentRuntimeContext;
 import io.kairo.code.service.agent.AgentSessionPayload;
 import io.kairo.code.service.agent.MessageRequest;
@@ -366,18 +365,12 @@ public class AgentService implements DisposableBean, InitializingBean {
                 });
                 hooks.add(failureTracker);
             }
-            CheckpointWriterHook checkpointHook = null;
             if (finalWorkingDir != null) {
                 io.kairo.code.core.SessionStorageLayout layout =
                         new io.kairo.code.core.SessionStorageLayout(Path.of(finalWorkingDir));
                 layout.detectAndMigrateLegacy();
                 layout.ensureSessionDir(sessionId);
                 layout.gc();
-                checkpointHook = new CheckpointWriterHook(
-                        Path.of(finalWorkingDir), sessionId,
-                        new com.fasterxml.jackson.databind.ObjectMapper(),
-                        null);
-                hooks.add(checkpointHook);
             }
             ToolUsageTracker usageTracker = new ToolUsageTracker();
             SessionOptions opts = SessionOptions.empty()
@@ -442,9 +435,6 @@ public class AgentService implements DisposableBean, InitializingBean {
 
             // ── Unified payload: always AgentSessionPayload + optional escalation ──
             AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
-            if (checkpointHook != null) {
-                agentPayload.setCheckpointHook(checkpointHook);
-            }
 
             // Auto-escalation only when the user explicitly selects mode="experts".
             // The HeuristicTriageGate is too broad for automatic detection, but works

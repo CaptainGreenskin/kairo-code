@@ -25,7 +25,6 @@ public class HookConfigController {
 
     private static final List<HookMeta> KNOWN_HOOKS = List.of(
         new HookMeta("AutoCommitOnSuccessHook", "Auto-commit when all tests pass"),
-        new HookMeta("CheckpointWriterHook", "Write checkpoint after each successful turn"),
         new HookMeta("CompileErrorFeedbackHook", "Inject compile error context on failure"),
         new HookMeta("CompactionEventBridgeHook", "Emit SSE events when framework compaction fires"),
         new HookMeta("ContextWindowGuardHook", "Warn agent when context window is large"),
