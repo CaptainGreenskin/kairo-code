@@ -592,12 +592,15 @@ public final class CodeAgentFactory {
 
         Agent agent = builder.build();
 
-        // Wire framework-level iteration checkpoints. The ToolPhase will automatically
-        // save a full Msg snapshot (including metadata) after each tool execution.
+        // Wire framework-level iteration checkpoints. When sessionId is provided, use
+        // session-isolated path (.kairo-session/{sessionId}/iterations/); otherwise fall
+        // back to the shared legacy path (.kairo-session/iterations/) for CLI mode.
         String wd = config.workingDir();
         if (wd != null && !wd.isBlank()
                 && agent instanceof io.kairo.core.agent.DefaultReActAgent dra) {
-            Path checkpointDir = Path.of(wd).resolve(".kairo-session").resolve("iterations");
+            Path checkpointDir = options.sessionId() != null
+                    ? Path.of(wd).resolve(".kairo-session").resolve(options.sessionId()).resolve("iterations")
+                    : Path.of(wd).resolve(".kairo-session").resolve("iterations");
             var store = new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
                     checkpointDir, new io.kairo.core.session.SessionSerializer());
             dra.setCheckpointManager(
@@ -993,7 +996,8 @@ public final class CodeAgentFactory {
             Tracer tracer,
             SwarmCoordinator swarmCoordinator,
             TeamManager teamManager,
-            MessageBus teamMessageBus) {
+            MessageBus teamMessageBus,
+            String sessionId) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -1003,7 +1007,7 @@ public final class CodeAgentFactory {
         public static SessionOptions empty() {
             return new SessionOptions(
                     null, null, List.of(), null, Set.of(), null, null, false, null, null, null,
-                    false, null, null, null, null, null, null);
+                    false, null, null, null, null, null, null, null);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
@@ -1011,7 +1015,7 @@ public final class CodeAgentFactory {
                     provider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
@@ -1019,7 +1023,7 @@ public final class CodeAgentFactory {
                     modelProvider, handler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -1029,7 +1033,7 @@ public final class CodeAgentFactory {
                     skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
                     childSession, textDeltaConsumer, toolUsageTracker, turnMetricsCollector,
                     isRepl, checkpointInitialMessage, memoryStore, tracer, swarmCoordinator,
-                    teamManager, teamMessageBus);
+                    teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
@@ -1038,7 +1042,7 @@ public final class CodeAgentFactory {
                     active == null ? Set.of() : Set.copyOf(active),
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
@@ -1046,7 +1050,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     snapshot, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions withTaskTool(TaskToolDependencies deps) {
@@ -1054,7 +1058,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker,
                     turnMetricsCollector, isRepl, checkpointInitialMessage, memoryStore, tracer,
-                    swarmCoordinator, teamManager, teamMessageBus);
+                    swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions withTextDeltaConsumer(
@@ -1063,7 +1067,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, consumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions asChildSession() {
@@ -1071,7 +1075,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, true, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions withToolUsageTracker(ToolUsageTracker tracker) {
@@ -1079,7 +1083,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     tracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions withTurnMetricsCollector(TurnMetricsCollector collector) {
@@ -1087,7 +1091,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, collector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         public SessionOptions asReplSession() {
@@ -1095,7 +1099,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, true, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         /**
@@ -1108,7 +1112,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, msg,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         /**
@@ -1121,7 +1125,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    store, tracer, swarmCoordinator, teamManager, teamMessageBus);
+                    store, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         /**
@@ -1132,7 +1136,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, t, swarmCoordinator, teamManager, teamMessageBus);
+                    memoryStore, t, swarmCoordinator, teamManager, teamMessageBus, sessionId);
         }
 
         /**
@@ -1154,7 +1158,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, coord, teamManager, teamMessageBus);
+                    memoryStore, tracer, coord, teamManager, teamMessageBus, sessionId);
         }
 
         /**
@@ -1171,7 +1175,15 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, mgr, bus);
+                    memoryStore, tracer, swarmCoordinator, mgr, bus, sessionId);
+        }
+
+        public SessionOptions withSessionId(String sid) {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sid);
         }
     }
 

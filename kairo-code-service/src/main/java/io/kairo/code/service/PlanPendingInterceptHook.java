@@ -146,7 +146,7 @@ public class PlanPendingInterceptHook {
             return;
         }
         try {
-            Path planDir = Path.of(workingDir, PLAN_DIR);
+            Path planDir = Path.of(workingDir, PLAN_DIR, sessionId);
             Files.createDirectories(planDir);
             Path planFile = planDir.resolve(PLAN_FILE);
             Files.writeString(planFile, planContent);

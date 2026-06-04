@@ -381,6 +381,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             ToolUsageTracker usageTracker = new ToolUsageTracker();
             SessionOptions opts = SessionOptions.empty()
                     .asReplSession()
+                    .withSessionId(sessionId)
                     .withApprovalHandler(approvalHandler)
                     .withToolUsageTracker(usageTracker)
                     .withHooks(hooks);
@@ -437,16 +438,6 @@ public class AgentService implements DisposableBean, InitializingBean {
             Map<String, Object> extraToolDeps = Map.of(
                     io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, chunkSink);
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts, extraToolDeps);
-
-            // Override the framework's IterationCheckpointManager to use session-specific path
-            if (finalWorkingDir != null && session.agent() instanceof io.kairo.core.agent.DefaultReActAgent dra) {
-                Path sessionIterDir = Path.of(finalWorkingDir)
-                        .resolve(".kairo-session").resolve(sessionId).resolve("iterations");
-                var sessionStore = new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
-                        sessionIterDir, new io.kairo.core.session.SessionSerializer());
-                dra.setCheckpointManager(
-                        new io.kairo.core.agent.checkpoint.IterationCheckpointManager(sessionStore));
-            }
 
             // ── Unified payload: always AgentSessionPayload + optional escalation ──
             AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
