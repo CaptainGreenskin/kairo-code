@@ -57,6 +57,8 @@ public record AgentEvent(
         PEER_MESSAGE,
         /** Emitted when a stopped session is resumed (phase reset from FAILED_* to IDLE). */
         SESSION_RESUMED,
+        /** Keepalive signal during long model calls. Frontend updates lastEventAt but renders nothing. */
+        HEARTBEAT,
         /**
          * Emitted by a child agent (spawned via the task tool) to report its internal progress
          * to the parent session's event stream. Carries the child's tool calls and results so
@@ -73,6 +75,11 @@ public record AgentEvent(
 
     public static AgentEvent thinking(String sessionId) {
         return new AgentEvent(EventType.AGENT_THINKING, sessionId, null, null, null,
+                false, null, null, null, null, null, null, null, System.currentTimeMillis());
+    }
+
+    public static AgentEvent heartbeat(String sessionId) {
+        return new AgentEvent(EventType.HEARTBEAT, sessionId, null, null, null,
                 false, null, null, null, null, null, null, null, System.currentTimeMillis());
     }
 

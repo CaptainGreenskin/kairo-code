@@ -10,7 +10,7 @@ import io.kairo.api.tool.ToolCallRequest;
 import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentFactory;
-import io.kairo.code.core.ConsoleApprovalHandler;
+import io.kairo.core.tool.ConsoleApprovalHandler;
 import java.io.BufferedReader;
 import java.io.PrintWriter;
 import java.io.StringReader;

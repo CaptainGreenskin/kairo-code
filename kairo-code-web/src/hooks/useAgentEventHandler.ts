@@ -12,6 +12,7 @@ import type { ToastMessage } from '@components/Toast';
 import { deleteSnapshot, saveSnapshot, setLastSessionId } from '@utils/sessionSnapshot';
 import { getSessionName } from '@utils/sessionNames';
 import { clearMessages as clearCachedMessages } from '@utils/messageCache';
+import { useEvolutionStore } from '@store/evolutionStore';
 
 function generateId(): string {
     return crypto.randomUUID();
@@ -80,7 +81,8 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
             // Powers the dev diagnostics panel + stall indicator without coupling to isThinking.
             if (sid) {
                 recordEventFor(sid, event.timestamp ?? Date.now());
-                if (event.type !== 'AGENT_DONE' && event.type !== 'AGENT_ERROR') {
+                if (event.type !== 'AGENT_DONE' && event.type !== 'AGENT_ERROR'
+                    && event.type !== 'HEARTBEAT') {
                     setRunningFor(sid, true);
                 }
             }
@@ -98,8 +100,76 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
             switch (event.type) {
                 case 'TEXT_CHUNK': {
                     const text = (event.payload as { text: string }).text;
+
+                    // Intercept <evolution-event> — toast + evolution store update
+                    if (text.includes('<evolution-event')) {
+                        const evoStore = useEvolutionStore.getState();
+                        if (text.includes('type="review_starting"')) {
+                            evoStore.setReviewing(true);
+                            addToast('info', '🧬 Self-evolution review starting...', 5000);
+                        } else if (text.includes('type="review_complete"')) {
+                            evoStore.setReviewing(false);
+                        } else if (text.includes('type="skill_created"')) {
+                            evoStore.setReviewing(false);
+                            evoStore.incrementSkillCount();
+                            const nameMatch = text.match(/name="([^"]+)"/);
+                            addToast('info',
+                                `✨ New skill learned: ${nameMatch?.[1] ?? 'unknown'}`, 8000);
+                        }
+                        break;
+                    }
+
+                    // Intercept <task-notification> XML — render as a card, not raw text
+                    const tnMatch = text.match(
+                        /<task-notification\s+task_id="([^"]*?)"\s+description="([^"]*?)"\s+status="([^"]*?)"\s+duration_ms="([^"]*?)">\s*([\s\S]*?)\s*<\/task-notification>/
+                    );
+                    if (tnMatch) {
+                        const [, taskId, desc, tnStatus, durationStr, result] = tnMatch;
+                        const durationMs = parseInt(durationStr, 10) || 0;
+
+                        // Update the corresponding SubagentCard from 'running' to 'done'
+                        const allMsgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
+                        for (const msg of allMsgs) {
+                            for (const tc of msg.toolCalls ?? []) {
+                                if (tc.toolName === 'task' && tc.status === 'approved') {
+                                    const tcTaskId = tc.resultMetadata?.['task.id'] as string
+                                        ?? (typeof tc.result === 'string' && tc.result.match(/task_id="([^"]+)"/)?.[1]);
+                                    if (tcTaskId === taskId) {
+                                        updateToolCallIn(sid, msg.id, tc.id, {
+                                            status: 'done',
+                                            durationMs,
+                                            isError: tnStatus === 'failed',
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        addMessageTo(sid, {
+                            id: generateId(),
+                            role: 'assistant',
+                            content: '',
+                            toolCalls: [],
+                            timestamp: Date.now(),
+                            kind: 'taskNotification',
+                            taskNotificationMeta: {
+                                taskId,
+                                description: desc,
+                                status: tnStatus as 'completed' | 'failed',
+                                durationMs,
+                                result: result.trim(),
+                            },
+                        });
+                        break;
+                    }
+
                     if (isActive) {
-                        setAgentPhase('writing');
+                        // Don't override 'waiting' phase when agent emits text while
+                        // background workers are still running — keeps the indicator visible.
+                        const allSessionMsgs = useSessionStore.getState().sessions[sid]?.messages ?? [];
+                        const hasRunningTasks = allSessionMsgs.some(m =>
+                            (m.toolCalls ?? []).some(tc => tc.toolName === 'task' && tc.status === 'approved'));
+                        setAgentPhase(hasRunningTasks ? 'waiting' : 'writing');
                         setCurrentToolName(undefined);
                     }
                     // Capture reasoning buffer BEFORE clearing so it can be pinned onto
@@ -258,9 +328,16 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         if ((!resolvedDuration || resolvedDuration <= 0) && tc?.createdAt) {
                             resolvedDuration = Date.now() - tc.createdAt;
                         }
+                        // Async task tool: keep status as 'approved' (renders as running
+                        // in SubagentCard) until the real task-notification arrives.
+                        const isAsyncTaskLaunch =
+                            tc?.toolName === 'task' &&
+                            (payload.resultMetadata?.['task.status'] === 'async_launched' ||
+                             (typeof payload.result === 'string' &&
+                              payload.result.includes('status="running"')));
                         updateToolCallIn(sid, targetMsg.id, payload.toolCallId, {
                             result: payload.result,
-                            status: 'done',
+                            status: isAsyncTaskLaunch ? 'approved' : 'done',
                             durationMs: resolvedDuration,
                             isError: payload.isError,
                             failureReason,
@@ -268,6 +345,10 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                             progressElapsedMs: undefined,
                             resultMetadata: payload.resultMetadata,
                         });
+                        // Show "waiting for workers" indicator when async tasks are running
+                        if (isAsyncTaskLaunch && isActive) {
+                            setAgentPhase('waiting');
+                        }
                         // Auto-refresh file tree when a write/edit tool completes successfully.
                         if (tc && !payload.isError) {
                             const name = tc.toolName.toLowerCase();
@@ -437,6 +518,18 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                                     refreshPersistedSessions();
                                 }
                             });
+                        }
+                        // Evolution toast: if session had enough iterations, the backend
+                        // EvolutionHook fires an async review. Show a toast so the user
+                        // knows self-evolution is active.
+                        const toolCallCount = msgs.reduce(
+                            (acc, m) => acc + (m.toolCalls?.length ?? 0), 0);
+                        if (toolCallCount >= 3) {
+                            useEvolutionStore.getState().setReviewing(true);
+                            addToast('info', '🧬 Self-evolution review in progress...', 6000);
+                            setTimeout(() => {
+                                useEvolutionStore.getState().setReviewing(false);
+                            }, 120_000);
                         }
                     }
                     break;

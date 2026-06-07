@@ -3,10 +3,15 @@ package io.kairo.code.server.config;
 import io.kairo.code.server.config.ServerConfig.ServerProperties;
 import io.kairo.code.server.websocket.AgentWebSocketHandler;
 import io.kairo.code.server.websocket.ShellWebSocketHandler;
+import jakarta.websocket.server.ServerContainer;
+import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
+import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
 @Configuration
 @EnableWebSocket
@@ -33,6 +38,14 @@ public class WebSocketConfig implements WebSocketConfigurer {
      * tighten the origin policy: cross-origin is allowed strictly for whitelisted origins,
      * defaulting to same-origin only -- never the previous wide-open {@code "*"}.
      */
+    @Bean
+    public ServletServerContainerFactoryBean createWebSocketContainer() {
+        ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
+        container.setMaxSessionIdleTimeout(0L);
+        container.setMaxTextMessageBufferSize(512 * 1024);
+        return container;
+    }
+
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         applyOrigins(registry.addHandler(agentHandler, "/ws/agent"));

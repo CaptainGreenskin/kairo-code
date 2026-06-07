@@ -199,6 +199,10 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
             };
         }
         default:
+            // Silently ignore known keepalive/internal event types
+            if (type === 'HEARTBEAT') {
+                return { type: 'HEARTBEAT' as any, sessionId, timestamp: ts, payload: {} };
+            }
             return {
                 type: 'AGENT_ERROR', sessionId, timestamp: ts,
                 payload: { message: `Unknown event type: ${type}` },
@@ -246,6 +250,7 @@ export function useAgentWebSocket(
     const reconnectAttemptsRef = useRef(0);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const stalledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const keepaliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const onEventRef = useRef(onEvent);
     const sessionIdRef = useRef<string | null>(null);
     const createPendingRef = useRef<{
@@ -400,10 +405,13 @@ export function useAgentWebSocket(
     }, [clearStalledTimer, startStalledProbe]);
 
     const cleanupSocket = useCallback(() => {
+        if (keepaliveRef.current) {
+            clearInterval(keepaliveRef.current);
+            keepaliveRef.current = null;
+        }
         const ws = wsRef.current;
         if (!ws) return;
         wsRef.current = null;
-        // Detach handlers so close events don't trigger reconnect
         ws.onopen = null;
         ws.onmessage = null;
         ws.onerror = null;
@@ -440,6 +448,15 @@ export function useAgentWebSocket(
                 sessionStorage.setItem(SESSION_STORAGE_KEY, sid);
                 send({ action: 'bind', sessionId: sid });
             }
+
+            // Keepalive ping every 25s to prevent proxy/server idle timeout.
+            // The backend AgentWebSocketHandler silently ignores unknown actions.
+            if (keepaliveRef.current) clearInterval(keepaliveRef.current);
+            keepaliveRef.current = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ action: 'ping' }));
+                }
+            }, 25_000);
         };
 
         ws.onmessage = (e) => {
@@ -455,6 +472,10 @@ export function useAgentWebSocket(
             setIsConnected(false);
             setConnectionStatus('disconnected');
             wsRef.current = null;
+            if (keepaliveRef.current) {
+                clearInterval(keepaliveRef.current);
+                keepaliveRef.current = null;
+            }
             // Always reconnect with exponential backoff. Earlier this only fired when
             // sessionIdRef.current was set, which left the UI stuck at "Disconnected"
             // after a server restart wiped the session — the frontend would clear sid

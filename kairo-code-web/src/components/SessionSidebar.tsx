@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import React from 'react';
 import { MessageSquare, Trash2, Plus, Loader, Pencil, Pin, PinOff, Tag, Search, X, Archive, Sparkles } from 'lucide-react';
-import { listSessions, deleteSession as apiDeleteSession, renameSession as apiRenameSession } from '@api/config';
+import { fetchSessionIndex, deleteSession as apiDeleteSession, renameSession as apiRenameSession } from '@api/config';
 import { useSessionStore } from '@store/sessionStore';
-import type { SessionInfo } from '@/types/agent';
+import type { SessionInfo, SessionIndexEntry } from '@/types/agent';
 import { formatRelativeTime } from '@utils/formatTime';
 import { getSessionName, setSessionName, removeSessionName } from '@utils/sessionNames';
 import { pinSession, unpinSession, isSessionPinned, getPinnedSessions } from '@utils/sessionPins';
@@ -21,10 +21,7 @@ interface SessionSidebarProps {
     onSessionsChange?: (sessions: SessionInfo[]) => void;
     sortOrder?: SessionSortOrder;
     onSortChange?: (order: SessionSortOrder) => void;
-    /**
-     * Persisted snapshots (server-side, on-disk). Entries that are NOT also
-     * present in the live `sessions` list are rendered as a "History" section.
-     */
+    /** @deprecated Unified index now provides archived sessions directly. */
     persistedSessions?: SnapshotMeta[];
     /** Called when a History entry is clicked. Restores the snapshot. */
     onLoadSnapshot?: (sessionId: string) => void;
@@ -345,7 +342,7 @@ export const SessionSidebar = React.memo(function SessionSidebar({
     onSessionsChange,
     sortOrder = 'date-desc',
     onSortChange,
-    persistedSessions,
+    persistedSessions: _persistedSessions,
     onLoadSnapshot,
     onRenameSuccess,
     defaultWorkingDir: _defaultWorkingDir,
@@ -353,7 +350,20 @@ export const SessionSidebar = React.memo(function SessionSidebar({
     onCreateWorkspace,
     embedded = false,
 }: SessionSidebarProps) {
-    const [sessions, setSessions] = useState<SessionInfo[]>([]);
+    const [indexEntries, setIndexEntries] = useState<SessionIndexEntry[]>([]);
+    const sessions: SessionInfo[] = useMemo(() =>
+        indexEntries
+            .filter(e => e.status === 'active' || e.status === 'idle')
+            .map(e => ({
+                sessionId: e.sessionId,
+                model: e.model ?? '',
+                createdAt: e.createdAt,
+                workingDir: e.workingDir ?? undefined,
+                running: e.running,
+                workspaceId: e.workspaceId ?? undefined,
+            })),
+        [indexEntries],
+    );
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [creatingSession, setCreatingSession] = useState(false);
@@ -420,19 +430,24 @@ export const SessionSidebar = React.memo(function SessionSidebar({
         });
     }, [displayedSessions, sessionFilter]);
 
-    // History = snapshots that exist on disk but are NOT in the live session
-    // list (e.g., session was unloaded/expired server-side).
-    const historySnapshots = useMemo(() => {
-        if (!persistedSessions || persistedSessions.length === 0) return [];
-        const liveIds = new Set(sessions.map(s => s.sessionId));
-        const entries = persistedSessions.filter(p => !liveIds.has(p.sessionId));
-        if (!sessionFilter.trim()) return entries;
+    // History = archived entries from the unified index (sessions with snapshots
+    // that are no longer active or idle).
+    const historySnapshots: SnapshotMeta[] = useMemo(() => {
+        const archived = indexEntries
+            .filter(e => e.status === 'archived' && e.hasSnapshot)
+            .map(e => ({
+                sessionId: e.sessionId,
+                name: e.name ?? '',
+                savedAt: e.updatedAt,
+                messageCount: e.messageCount,
+            }));
+        if (!sessionFilter.trim()) return archived;
         const q = sessionFilter.toLowerCase();
-        return entries.filter(p => {
+        return archived.filter(p => {
             const name = (getSessionName(p.sessionId) ?? p.name ?? '').toLowerCase();
             return name.includes(q) || p.sessionId.toLowerCase().startsWith(q);
         });
-    }, [persistedSessions, sessions, sessionFilter]);
+    }, [indexEntries, sessionFilter]);
 
     const handlePinChange = useCallback(() => {
         setPins(getPinnedSessions());
@@ -442,23 +457,33 @@ export const SessionSidebar = React.memo(function SessionSidebar({
         setAllTags(getAllTags());
     }, []);
 
-    const updateSessions = useCallback((newSessions: SessionInfo[]) => {
-        setSessions(newSessions);
-        onSessionsChange?.(newSessions);
+    const updateIndex = useCallback((entries: SessionIndexEntry[]) => {
+        setIndexEntries(entries);
+        const live = entries
+            .filter(e => e.status === 'active' || e.status === 'idle')
+            .map(e => ({
+                sessionId: e.sessionId,
+                model: e.model ?? '',
+                createdAt: e.createdAt,
+                workingDir: e.workingDir ?? undefined,
+                running: e.running,
+                workspaceId: e.workspaceId ?? undefined,
+            }));
+        onSessionsChange?.(live);
     }, [onSessionsChange]);
 
     const fetchSessions = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
-            const data = await listSessions();
-            updateSessions(data);
+            const data = await fetchSessionIndex();
+            updateIndex(data);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load sessions');
         } finally {
             setLoading(false);
         }
-    }, [updateSessions]);
+    }, [updateIndex]);
 
     const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -504,8 +529,8 @@ export const SessionSidebar = React.memo(function SessionSidebar({
         if (!confirm('Delete this session?')) return;
         try {
             await apiDeleteSession(id);
-            const remaining = sessions.filter((s) => s.sessionId !== id);
-            updateSessions(remaining);
+            const remaining = indexEntries.filter((e) => e.sessionId !== id);
+            updateIndex(remaining);
             removeSessionName(id);
             unpinSession(id);
             setPins(getPinnedSessions());

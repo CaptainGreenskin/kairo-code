@@ -5,13 +5,18 @@ import io.kairo.code.server.controller.SessionController;
 import io.kairo.code.service.AgentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.ResponseEntity;
 
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SessionControllerTest {
+
+    @TempDir
+    Path tempDir;
 
     private AgentService agentService;
     private SessionController sessionController;
@@ -22,10 +27,10 @@ class SessionControllerTest {
         sessionController = new SessionController(agentService);
     }
 
-    private CodeAgentConfig newConfig(String workingDir) {
+    private CodeAgentConfig newConfig(String tag) {
         return new CodeAgentConfig(
                 "sk-test", "https://api.openai.com", "gpt-4o",
-                50, workingDir, null, 0, 0, 0);
+                50, tempDir.resolve(tag).toString(), null, 0, 0, 0);
     }
 
     @Test
@@ -38,8 +43,8 @@ class SessionControllerTest {
 
     @Test
     void count_reflectsCreatedSessions() {
-        agentService.createSession(newConfig("/ws"));
-        agentService.createSession(newConfig("/ws2"));
+        agentService.createSession(newConfig("ws"));
+        agentService.createSession(newConfig("ws2"));
 
         ResponseEntity<Map<String, Integer>> response = sessionController.count();
         assertThat(response.getBody()).isNotNull();
@@ -48,7 +53,7 @@ class SessionControllerTest {
 
     @Test
     void count_decreasesAfterDestroy() {
-        agentService.createSession(newConfig("/ws"));
+        agentService.createSession(newConfig("ws"));
         String sessionId = agentService.listSessions().get(0).sessionId();
         agentService.destroySession(sessionId);
 
@@ -59,7 +64,7 @@ class SessionControllerTest {
 
     @Test
     void cancel_returnsNoContentAndStopsAgent() {
-        agentService.createSession(newConfig("/ws"));
+        agentService.createSession(newConfig("ws"));
         String sessionId = agentService.listSessions().get(0).sessionId();
 
         ResponseEntity<Void> response = sessionController.cancel(sessionId);

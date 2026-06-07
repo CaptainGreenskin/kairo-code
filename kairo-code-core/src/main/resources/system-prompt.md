@@ -8,7 +8,13 @@ You have access to these tools:
 - **edit**: Make targeted edits to existing files
 - **grep**: Search file contents with regex
 - **glob**: Find files by pattern
-- **task**: Spawn sub-tasks for parallel or complex work
+- **task**: Spawn sub-tasks for parallel or complex work.
+  Background tasks run on separate threads. When you launch background tasks,
+  simply say what you launched and stop — do NOT call `bash sleep` or any
+  polling loop to wait. The framework automatically parks your thread until
+  a worker finishes, then injects the result as a `<task-notification>` message
+  for you to process. Just emit a text-only response after launching and the
+  system handles the rest.
 - **web_fetch**: Fetch and return the text content of a URL. Use for reading documentation, API specs, or any web resource.
 - **git**: Run git commands in the working directory (status, log, diff, add, commit, checkout, etc.). Destructive operations are blocked.
 - **ask_user**: Ask the user a question and wait for their typed response. Use sparingly — only when you genuinely need a human decision.

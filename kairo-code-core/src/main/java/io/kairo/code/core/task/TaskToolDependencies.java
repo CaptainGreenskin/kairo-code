@@ -15,6 +15,7 @@
  */
 package io.kairo.code.core.task;
 
+import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
 import java.util.List;
 import java.util.Objects;
@@ -40,7 +41,10 @@ public record TaskToolDependencies(
         WorktreeMergePrompter mergePrompter,
         @Nullable Supplier<String> parentContextProvider,
         @Nullable AsyncCompletionCallback asyncCompletionCallback,
-        @Nullable SubagentRegistry subagentRegistry) {
+        @Nullable SubagentRegistry subagentRegistry,
+        @Nullable CodeAgentConfig parentConfig,
+        @Nullable io.kairo.code.core.team.SharedTaskList sharedTaskList,
+        @Nullable BackgroundTaskNotificationQueue notificationQueue) {
 
     @FunctionalInterface
     public interface AsyncCompletionCallback {
@@ -51,7 +55,7 @@ public record TaskToolDependencies(
     public TaskToolDependencies(WorktreeWorkspaceProvider workspaceProvider,
                                 ChildSessionSpawner spawner,
                                 WorktreeMergePrompter mergePrompter) {
-        this(workspaceProvider, spawner, mergePrompter, null, null, null);
+        this(workspaceProvider, spawner, mergePrompter, null, null, null, null, null, null);
     }
 
     public TaskToolDependencies(WorktreeWorkspaceProvider workspaceProvider,
@@ -60,7 +64,30 @@ public record TaskToolDependencies(
                                 @Nullable Supplier<String> parentContextProvider,
                                 @Nullable AsyncCompletionCallback asyncCompletionCallback) {
         this(workspaceProvider, spawner, mergePrompter, parentContextProvider,
-                asyncCompletionCallback, null);
+                asyncCompletionCallback, null, null, null, null);
+    }
+
+    public TaskToolDependencies(WorktreeWorkspaceProvider workspaceProvider,
+                                ChildSessionSpawner spawner,
+                                WorktreeMergePrompter mergePrompter,
+                                @Nullable Supplier<String> parentContextProvider,
+                                @Nullable AsyncCompletionCallback asyncCompletionCallback,
+                                @Nullable SubagentRegistry subagentRegistry) {
+        this(workspaceProvider, spawner, mergePrompter, parentContextProvider,
+                asyncCompletionCallback, subagentRegistry, null, null, null);
+    }
+
+    /** 8-arg backward compat (pre-notificationQueue). */
+    public TaskToolDependencies(WorktreeWorkspaceProvider workspaceProvider,
+                                ChildSessionSpawner spawner,
+                                WorktreeMergePrompter mergePrompter,
+                                @Nullable Supplier<String> parentContextProvider,
+                                @Nullable AsyncCompletionCallback asyncCompletionCallback,
+                                @Nullable SubagentRegistry subagentRegistry,
+                                @Nullable CodeAgentConfig parentConfig,
+                                @Nullable io.kairo.code.core.team.SharedTaskList sharedTaskList) {
+        this(workspaceProvider, spawner, mergePrompter, parentContextProvider,
+                asyncCompletionCallback, subagentRegistry, parentConfig, sharedTaskList, null);
     }
 
     public TaskToolDependencies {

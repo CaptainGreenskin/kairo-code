@@ -40,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "kairo.code.api-key=sk-test-key",
     "kairo.code.model=gpt-4o",
     "kairo.code.provider=openai",
+    "kairo.code.working-dir=${java.io.tmpdir}",
     "kairo.model.api-key=sk-test-key",
     "anthropic.api-key=sk-test-key",
     "openai.api-key=sk-test-key",

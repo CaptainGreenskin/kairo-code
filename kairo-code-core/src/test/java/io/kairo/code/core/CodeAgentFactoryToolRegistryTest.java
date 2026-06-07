@@ -153,20 +153,8 @@ class CodeAgentFactoryToolRegistryTest {
     }
 
     @Test
-    void expertTeamToolRegisteredByDefault() {
-        assertThat(toolNames()).contains("expert_team");
-    }
-
-    @Test
-    void expertTeamToolRegisteredWhenSwarmCoordinatorWired() {
-        var session = CodeAgentFactory.createSession(minimalConfig(),
-                CodeAgentFactory.SessionOptions.empty()
-                        .withModelProvider(new StubModelProvider())
-                        .withSwarmCoordinator(newSwarmCoordinator()));
-        List<String> names = session.toolRegistry().getAll().stream()
-                .map(io.kairo.api.tool.ToolDefinition::name)
-                .toList();
-        assertThat(names).contains("expert_team");
+    void expertTeamToolNotRegisteredInAgentMode() {
+        assertThat(toolNames()).doesNotContain("expert_team");
     }
 
     @Test

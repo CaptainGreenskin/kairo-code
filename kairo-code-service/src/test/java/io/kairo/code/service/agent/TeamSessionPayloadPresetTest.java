@@ -12,9 +12,9 @@ import io.kairo.api.team.TeamResult;
 import io.kairo.api.team.TeamStatus;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
-import io.kairo.code.core.team.MessageBus;
+import io.kairo.api.team.MessageBus;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.TeamManager;
+import io.kairo.api.team.TeamManager;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.SessionPhase;
 import io.kairo.code.service.concurrency.AgentConcurrencyController;
@@ -222,7 +222,8 @@ class TeamSessionPayloadPresetTest {
         Thread.sleep(150);
 
         // Post-stop: neither the peer-poller nor the bridge should project anything.
-        f.messageBus.send(SESSION_ID, "peer-X", "post-stop");
+        f.messageBus.send(SESSION_ID, "peer-X",
+                io.kairo.api.message.Msg.of(io.kairo.api.message.MsgRole.USER, "post-stop"));
         TeamEvent te = new TeamEvent(
                 TeamEventType.STEP_COMPLETED,
                 "team-stop",
@@ -322,8 +323,8 @@ class TeamSessionPayloadPresetTest {
     void defaultMode_unchanged() {
         TestFixture f = TestFixture.create();
         Agent stub = stubAgent();
-        TeamManager teamManager = new TeamManager();
-        MessageBus messageBus = new MessageBus();
+        TeamManager teamManager = io.kairo.code.service.testutil.StubTeamPrimitives.teamManager();
+        MessageBus messageBus = io.kairo.code.service.testutil.StubTeamPrimitives.messageBus();
         CodeAgentSession session = newSession(stub);
 
         // 5-arg constructor — preset == null — same call site Team mode uses.
@@ -357,13 +358,16 @@ class TeamSessionPayloadPresetTest {
                                                        TriageGate triage,
                                                        AgentSessionPayload fallback,
                                                        boolean withNarrator) {
+        if (coord instanceof RecordingSwarmCoordinator rec) {
+            rec.eventBus = f.bus;
+        }
         TeamSessionPayload.NarratorSettings narratorSettings = withNarrator
                 ? TeamSessionPayload.NarratorSettings.defaults()
                 : TeamSessionPayload.NarratorSettings.disabled();
         TeamSessionPayload.ExpertsPresetConfig preset = new TeamSessionPayload.ExpertsPresetConfig(
                 coord, TeamConfig.defaults(), triage, fallback, narratorSettings, f.bus);
         CodeAgentSession session = newSession(stubAgent());
-        TeamManager teamManager = new TeamManager();
+        TeamManager teamManager = io.kairo.code.service.testutil.StubTeamPrimitives.teamManager();
         return new TeamSessionPayload(newConfig(), session, f.ctx,
                 teamManager, f.messageBus, preset);
     }
@@ -421,7 +425,7 @@ class TeamSessionPayloadPresetTest {
         final AtomicBoolean runningState = new AtomicBoolean(false);
         final AtomicReference<SessionPhase> phaseRef = new AtomicReference<>(SessionPhase.IDLE);
         final AgentConcurrencyController concurrency = new AgentConcurrencyController();
-        final MessageBus messageBus = new MessageBus();
+        final MessageBus messageBus = io.kairo.code.service.testutil.StubTeamPrimitives.messageBus();
         final KairoEventBus bus = new DefaultKairoEventBus();
         final AgentRuntimeContext ctx;
 
@@ -451,6 +455,7 @@ class TeamSessionPayloadPresetTest {
                         "stub-req", TeamStatus.COMPLETED, List.of(),
                         Duration.ZERO, List.of()));
         volatile String lastTeamIdToReturn = "stub-team";
+        volatile KairoEventBus eventBus;
 
         private RecordingSwarmCoordinator(io.kairo.multiagent.orchestration.ExpertTeamCoordinator coord,
                                           io.kairo.multiagent.subagent.ExpertRoleRegistry registry,
@@ -460,16 +465,13 @@ class TeamSessionPayloadPresetTest {
         }
 
         static RecordingSwarmCoordinator create() {
-            // The superclass needs non-null collaborators. We pass the lightest possible real
-            // instances; we never actually delegate to them because the overrides below
-            // intercept every call TeamSessionPayload makes.
             var registry = new io.kairo.multiagent.subagent.ExpertRoleRegistry();
             var planner = new io.kairo.multiagent.orchestration.internal.DefaultPlanner(registry, null, null);
             var coord = new io.kairo.multiagent.orchestration.ExpertTeamCoordinator(
                     null, new io.kairo.multiagent.orchestration.SimpleEvaluationStrategy(),
                     null, planner, registry);
             return new RecordingSwarmCoordinator(
-                    coord, registry, new io.kairo.multiagent.orchestration.tck.NoopMessageBus(), List.of());
+                    coord, registry, new io.kairo.code.service.testutil.NoopMessageBus(), List.of());
         }
 
         @Override
@@ -477,6 +479,12 @@ class TeamSessionPayloadPresetTest {
                                                 List<String> roleIds, boolean planOnly) {
             planCalls.incrementAndGet();
             planOnlyFlag.set(planOnly);
+            if (planOnly && eventBus != null) {
+                TeamEvent planReadyEvent = new TeamEvent(
+                        TeamEventType.PLAN_READY, lastTeamIdToReturn, "req-1",
+                        java.time.Instant.now(), Map.of());
+                eventBus.publish(planReadyEvent.toKairoEvent());
+            }
             return planResult;
         }
 

@@ -16,9 +16,9 @@ import io.kairo.api.team.TeamResult;
 import io.kairo.api.team.TeamStatus;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
-import io.kairo.code.core.team.MessageBus;
+import io.kairo.api.team.MessageBus;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.TeamManager;
+import io.kairo.api.team.TeamManager;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.SessionPhase;
 import io.kairo.code.service.agent.tools.NoNarrationTool;
@@ -321,7 +321,7 @@ class NarratorDispatcherTest {
 
                 CodeAgentSession session = newSession(stubAgent);
                 TeamSessionPayload payload = new TeamSessionPayload(
-                        newConfig(), session, ctx, new TeamManager(), new MessageBus(), preset);
+                        newConfig(), session, ctx, io.kairo.code.service.testutil.StubTeamPrimitives.teamManager(), io.kairo.code.service.testutil.StubTeamPrimitives.messageBus(), preset);
 
                 sink.asFlux().subscribe(events::add);
 
@@ -374,7 +374,7 @@ class NarratorDispatcherTest {
                 null, new io.kairo.multiagent.orchestration.SimpleEvaluationStrategy(),
                 null, planner, registry);
         return new SwarmCoordinator(
-                coord, registry, new io.kairo.multiagent.orchestration.tck.NoopMessageBus(), List.of()) {
+                coord, registry, new io.kairo.code.service.testutil.NoopMessageBus(), List.of()) {
             @Override
             public Mono<TeamResult> startExpertTeam(String goal, TeamConfig cfg,
                                                     List<String> roleIds, boolean planOnly) {

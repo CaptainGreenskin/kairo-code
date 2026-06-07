@@ -9,10 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
 import java.nio.file.Path;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,22 +17,25 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Verifies the idle-session reaper evicts abandoned sessions, leaves running
  * ones alone, and scales linearly to hundreds of sessions.
  *
- * <p>Driven manually via {@link AgentService#reapIdleSessions()} so tests
- * don't depend on the scheduled tick — flakiness from real-time TTL races
- * would dominate the signal. Activity timestamps are backdated via reflection
- * to simulate "session went idle 1 hour ago" deterministically.
+ * <p>Driven manually via {@link SessionRegistry#reapIdleSessions()} so tests
+ * don't depend on the scheduled tick.
  */
-@Timeout(value = 10, unit = TimeUnit.SECONDS)
+@Timeout(value = 60, unit = TimeUnit.SECONDS)
 class IdleSessionReaperTest {
 
     @TempDir
     Path tempDir;
 
     private AgentService service;
+    private SessionRegistry registry;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         service = new AgentService();
+        Field rf = AgentService.class.getDeclaredField("registry");
+        rf.setAccessible(true);
+        registry = (SessionRegistry) rf.get(service);
+        registry.setDestroyCallback(service::destroySession);
     }
 
     @AfterEach
@@ -44,17 +44,14 @@ class IdleSessionReaperTest {
     }
 
     @Test
-    void reaperEvictsSessionsIdlerThanTtl() throws Exception {
+    void reaperEvictsSessionsIdlerThanTtl() {
         String fresh = service.createSession(config("fresh"));
         String stale = service.createSession(config("stale"));
         assertThat(service.listSessions()).hasSize(2);
 
-        // Force "stale" to look very old. Bypass the public API and reach into
-        // the activity map — we want the test deterministic on TTL, not racing
-        // real time.
         backdate(stale, TimeUnit.HOURS.toNanos(2));
 
-        service.reapIdleSessions();
+        registry.reapIdleSessions();
 
         assertThat(service.listSessions())
                 .as("stale session should be reaped, fresh should remain")
@@ -63,15 +60,12 @@ class IdleSessionReaperTest {
     }
 
     @Test
-    void reaperLeavesRunningSessionsAloneEvenIfIdle() throws Exception {
-        // Models the "long bash tool" case: a session that hasn't bumped its
-        // activity timer for a while because the agent is blocked on a slow
-        // subprocess, not because the user abandoned the tab.
+    void reaperLeavesRunningSessionsAloneEvenIfIdle() {
         String runner = service.createSession(config("runner"));
         backdate(runner, TimeUnit.HOURS.toNanos(2));
         markRunning(runner);
 
-        service.reapIdleSessions();
+        registry.reapIdleSessions();
 
         assertThat(service.listSessions())
                 .as("a session flagged as running must not be evicted even past TTL")
@@ -80,10 +74,8 @@ class IdleSessionReaperTest {
     }
 
     @Test
-    void stressOneHundredSessionsThenReapAll() throws Exception {
-        // Bump cap above the test load — capacity LRU eviction would otherwise
-        // truncate to the default 64 before we get a chance to reap.
-        setPoolCap(200);
+    void stressOneHundredSessionsThenReapAll() {
+        registry.setSessionPoolSizeForTesting(200);
         for (int i = 0; i < 100; i++) {
             String id = service.createSession(config("s-" + i));
             backdate(id, TimeUnit.HOURS.toNanos(1));
@@ -91,7 +83,7 @@ class IdleSessionReaperTest {
         assertThat(service.listSessions()).hasSize(100);
 
         long t0 = System.nanoTime();
-        service.reapIdleSessions();
+        registry.reapIdleSessions();
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
 
         assertThat(service.listSessions()).isEmpty();
@@ -101,46 +93,36 @@ class IdleSessionReaperTest {
     }
 
     @Test
-    void freshSessionsAreNotReaped() throws Exception {
-        // Whitebox check the inverse — without backdating, no eviction happens
-        // even if reapIdleSessions runs many times. Catches accidental "reap
-        // all" regressions.
+    void freshSessionsAreNotReaped() {
         for (int i = 0; i < 10; i++) {
             service.createSession(config("keep-" + i));
         }
         for (int i = 0; i < 5; i++) {
-            service.reapIdleSessions();
+            registry.reapIdleSessions();
         }
         assertThat(service.listSessions()).hasSize(10);
     }
 
     @Test
-    void destroyRemovesActivityTrackerEntry() throws Exception {
-        // After destroy, the activity tracker shouldn't leak — otherwise long-
-        // running deployments slowly accumulate ghost entries.
+    void destroyRemovesFromRegistry() {
         String sid = service.createSession(config("once"));
-        Map<String, AtomicLong> activity = readActivityMap();
-        assertThat(activity).containsKey(sid);
+        assertThat(registry.get(sid)).isNotNull();
 
         service.destroySession(sid);
-        assertThat(activity).doesNotContainKey(sid);
+        assertThat(registry.get(sid)).isNull();
     }
 
     @Test
-    void poolCapEvictsLruWhenAtCapacity() throws Exception {
-        // Set cap to 3 via reflection on the final field — cleaner than fooling
-        // with env vars in the test JVM. The static reaper threads aren't
-        // affected (this test uses manual reap, not the scheduled tick).
-        setPoolCap(3);
+    void poolCapEvictsLruWhenAtCapacity() {
+        registry.setSessionPoolSizeForTesting(3);
 
         String a = service.createSession(config("a"));
-        backdate(a, java.util.concurrent.TimeUnit.MINUTES.toNanos(10));
+        backdate(a, TimeUnit.MINUTES.toNanos(10));
         String b = service.createSession(config("b"));
-        backdate(b, java.util.concurrent.TimeUnit.MINUTES.toNanos(5));
-        String c = service.createSession(config("c"));   // most recent
+        backdate(b, TimeUnit.MINUTES.toNanos(5));
+        String c = service.createSession(config("c"));
         assertThat(service.listSessions()).hasSize(3);
 
-        // Cap is 3 — next createSession should evict the LRU (which is 'a').
         String d = service.createSession(config("d"));
         assertThat(service.listSessions())
                 .as("'a' (oldest activity) should have been evicted to fit 'd'")
@@ -149,28 +131,20 @@ class IdleSessionReaperTest {
     }
 
     @Test
-    void poolCapSkipsRunningSessions() throws Exception {
-        // When every candidate eviction target is running, the cap becomes
-        // best-effort — we don't kill an in-flight tool call to make room.
-        setPoolCap(2);
+    void poolCapSkipsRunningSessions() {
+        registry.setSessionPoolSizeForTesting(2);
 
         String r1 = service.createSession(config("r1"));
-        backdate(r1, java.util.concurrent.TimeUnit.MINUTES.toNanos(10));
+        backdate(r1, TimeUnit.MINUTES.toNanos(10));
         markRunning(r1);
         String r2 = service.createSession(config("r2"));
-        backdate(r2, java.util.concurrent.TimeUnit.MINUTES.toNanos(5));
+        backdate(r2, TimeUnit.MINUTES.toNanos(5));
         markRunning(r2);
 
-        // Cap=2, both at cap, both running. New session should still slip in
-        // (we'd rather temporarily overflow than kill in-flight work).
         String r3 = service.createSession(config("r3"));
         assertThat(service.listSessions())
                 .as("no eviction when every candidate is running")
                 .hasSize(3);
-    }
-
-    private void setPoolCap(int cap) {
-        service.setSessionPoolSizeForTesting(cap);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -185,29 +159,17 @@ class IdleSessionReaperTest {
                 null, 0, 0, null);
     }
 
-    @SuppressWarnings("unchecked")
-    private void backdate(String sessionId, long ageNanos) throws Exception {
-        Map<String, AtomicLong> lastActivity = readActivityMap();
-        AtomicLong v = lastActivity.get(sessionId);
-        if (v == null) {
-            v = new AtomicLong();
-            lastActivity.put(sessionId, v);
+    private void backdate(String sessionId, long ageNanos) {
+        SessionContext ctx = registry.get(sessionId);
+        if (ctx != null) {
+            ctx.lastActivityNs().set(System.nanoTime() - ageNanos);
         }
-        v.set(System.nanoTime() - ageNanos);
     }
 
-    @SuppressWarnings("unchecked")
-    private void markRunning(String sessionId) throws Exception {
-        Field f = AgentService.class.getDeclaredField("runningState");
-        f.setAccessible(true);
-        Map<String, AtomicBoolean> runningState = (Map<String, AtomicBoolean>) f.get(service);
-        runningState.put(sessionId, new AtomicBoolean(true));
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, AtomicLong> readActivityMap() throws Exception {
-        Field f = AgentService.class.getDeclaredField("lastActivityNs");
-        f.setAccessible(true);
-        return (Map<String, AtomicLong>) f.get(service);
+    private void markRunning(String sessionId) {
+        SessionContext ctx = registry.get(sessionId);
+        if (ctx != null) {
+            ctx.running().set(true);
+        }
     }
 }

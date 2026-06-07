@@ -112,6 +112,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                 case "unsubscribeTeam" -> handleUnsubscribeTeam(session, root);
                 case "rejectStep"      -> handleRejectStep(session, root);
                 case "compact"         -> handleCompact(session, root);
+                case "ping"            -> {} // keepalive — silently ignore
                 default -> sendErr(session, action, "unknown action: " + action);
             }
         } catch (Exception e) {

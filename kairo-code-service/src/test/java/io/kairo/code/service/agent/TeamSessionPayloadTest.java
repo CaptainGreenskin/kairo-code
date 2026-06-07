@@ -6,8 +6,8 @@ import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.code.core.CodeAgentConfig;
 import io.kairo.code.core.CodeAgentSession;
-import io.kairo.code.core.team.MessageBus;
-import io.kairo.code.core.team.TeamManager;
+import io.kairo.api.team.MessageBus;
+import io.kairo.api.team.TeamManager;
 import io.kairo.code.service.AgentEvent;
 import io.kairo.code.service.SessionPhase;
 import io.kairo.code.service.concurrency.AgentConcurrencyController;
@@ -49,8 +49,8 @@ class TeamSessionPayloadTest {
     void peerMessage_pollerEmitsPeerMessageEvent() {
         Sinks.Many<AgentEvent> sink = Sinks.many().replay().all();
         AgentRuntimeContext ctx = newCtx(sink);
-        TeamManager teamManager = new TeamManager();
-        MessageBus messageBus = new MessageBus();
+        TeamManager teamManager = io.kairo.code.service.testutil.StubTeamPrimitives.teamManager();
+        MessageBus messageBus = new io.kairo.code.service.testutil.InMemoryMessageBus();
 
         TeamSessionPayload payload = newPayload(ctx, teamManager, messageBus);
 
@@ -59,8 +59,13 @@ class TeamSessionPayloadTest {
             List<AgentEvent> events = new ArrayList<>();
             sink.asFlux().subscribe(events::add);
 
-            // Seed a peer message addressed to this session.
-            String msgId = messageBus.send(SESSION_ID, "peer-session-2", "hello from peer");
+            // Seed a peer message addressed to this session (from peer-session-2 → SESSION_ID).
+            Msg peerMsg = Msg.builder()
+                    .role(MsgRole.USER)
+                    .addContent(new io.kairo.api.message.Content.TextContent("hello from peer"))
+                    .metadata("from", "peer-session-2")
+                    .build();
+            messageBus.send("peer-session-2", SESSION_ID, peerMsg).block();
 
             // Wait for the poller to fire (max 2s, well past the 500ms interval).
             await(() -> events.stream()
@@ -74,8 +79,7 @@ class TeamSessionPayloadTest {
             assertThat(peer.sessionId()).isEqualTo(SESSION_ID);
             assertThat(peer.content()).isEqualTo("hello from peer");
             assertThat(peer.resultMetadata())
-                    .containsEntry("fromSessionId", "peer-session-2")
-                    .containsEntry("messageId", msgId);
+                    .containsEntry("fromSessionId", "peer-session-2");
         } finally {
             payload.stop();
         }
@@ -85,8 +89,8 @@ class TeamSessionPayloadTest {
     void stop_disposesPoller() throws InterruptedException {
         Sinks.Many<AgentEvent> sink = Sinks.many().replay().all();
         AgentRuntimeContext ctx = newCtx(sink);
-        TeamManager teamManager = new TeamManager();
-        MessageBus messageBus = new MessageBus();
+        TeamManager teamManager = io.kairo.code.service.testutil.StubTeamPrimitives.teamManager();
+        MessageBus messageBus = io.kairo.code.service.testutil.StubTeamPrimitives.messageBus();
 
         TeamSessionPayload payload = newPayload(ctx, teamManager, messageBus);
 
@@ -96,7 +100,8 @@ class TeamSessionPayloadTest {
         // Stop immediately, then seed; a disposed poller must not project anything.
         payload.stop();
         Thread.sleep(100); // let dispose propagate
-        messageBus.send(SESSION_ID, "peer-X", "post-stop message");
+        messageBus.send(SESSION_ID, "peer-X",
+                io.kairo.api.message.Msg.of(io.kairo.api.message.MsgRole.USER, "post-stop message")).block();
 
         // Wait two full poll intervals + buffer to give a non-disposed poller a chance to fire.
         Thread.sleep(1_200);
@@ -111,8 +116,8 @@ class TeamSessionPayloadTest {
     void handleMessage_passesThroughToAgent() {
         Sinks.Many<AgentEvent> sink = Sinks.many().replay().all();
         AgentRuntimeContext ctx = newCtx(sink);
-        TeamManager teamManager = new TeamManager();
-        MessageBus messageBus = new MessageBus();
+        TeamManager teamManager = io.kairo.code.service.testutil.StubTeamPrimitives.teamManager();
+        MessageBus messageBus = io.kairo.code.service.testutil.StubTeamPrimitives.messageBus();
 
         List<String> agentCalls = new ArrayList<>();
         Agent agent = new Agent() {

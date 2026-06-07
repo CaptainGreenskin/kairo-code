@@ -24,6 +24,7 @@ import { ActivityBar } from '@components/ActivityBar';
 import { PrimarySidebar } from '@components/PrimarySidebar';
 import { BottomPanel } from '@components/BottomPanel';
 import { StatusBar } from '@components/StatusBar';
+import { useEvolutionStore } from '@store/evolutionStore';
 import { WorkspacesView } from '@components/WorkspacesView';
 import { FilesView } from '@components/FilesView';
 import { EditorArea } from '@components/EditorArea';
@@ -55,7 +56,7 @@ import { ExecutionTimeline } from '@components/ExecutionTimeline';
 import { BookmarkPanel } from '@components/BookmarkPanel';
 import { getBookmarks, toggleBookmark } from '@utils/bookmarkMessages';
 import type { Message, ServerConfig } from '@/types/agent';
-import { getConfig } from '@api/config';
+import { getConfig, fetchSessionIndex } from '@api/config';
 import { exportAndDownload, copySessionToClipboard } from '@utils/exportSession';
 import { estimateMessagesTokens } from '@utils/tokenCount';
 import { getContextWindow } from '@utils/tokenBudget';
@@ -65,7 +66,6 @@ import { Virtuoso } from 'react-virtuoso';
 import { saveMessages, loadMessages, clearMessages as clearCachedMessages } from '@utils/messageCache';
 import {
     loadSnapshot,
-    listSnapshots,
     deleteSnapshot,
     setLastSessionId,
     getLastSessionId,
@@ -215,13 +215,11 @@ function App() {
     const [showCommandPalette, setShowCommandPalette] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [sidebarSessions, setSidebarSessions] = useState<Array<{ sessionId: string }>>([]);
-    const [persistedSessions, setPersistedSessions] = useState<SnapshotMeta[]>([]);
     const [sessionSortOrder, setSessionSortOrder] = useState<SessionSortOrder>('date-desc');
-
-    const refreshPersistedSessions = useCallback(async () => {
-        const metas = await listSnapshots();
-        setPersistedSessions(metas);
-    }, []);
+    // Unified index is loaded by SessionSidebar; this no-op keeps call sites that
+    // used to refresh the persisted-sessions prop from breaking during the migration.
+    const persistedSessions: SnapshotMeta[] = [];
+    const refreshPersistedSessions = useCallback(async () => {}, []);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
     const [atBottom, setAtBottom] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -483,8 +481,7 @@ function App() {
         return unsub;
     }, []);
 
-    // Load the list of on-disk session snapshots once on mount.
-    useEffect(() => { refreshPersistedSessions(); }, [refreshPersistedSessions]);
+    // Session snapshots are now loaded by the SessionSidebar via the unified index.
 
 
 
@@ -518,15 +515,7 @@ function App() {
     // Cross-tab sync: when another tab creates or switches a session,
     // refresh the sidebar's persisted session list. Do not switch the
     // current tab's active session to avoid interrupting the user.
-    useEffect(() => {
-        const handler = (e: StorageEvent) => {
-            if (e.key === 'kairo-last-session') {
-                refreshPersistedSessions();
-            }
-        };
-        window.addEventListener('storage', handler);
-        return () => window.removeEventListener('storage', handler);
-    }, [refreshPersistedSessions]);
+    // Cross-tab session name sync is now handled by the SessionSidebar's unified index.
 
     // Cross-tab restore: when the in-memory store is empty (e.g., new tab),
     // fall back to the last-active session id stored in localStorage and
@@ -537,8 +526,8 @@ function App() {
         if (useSessionStore.getState().messages.length > 0) return;
         const lastId = getLastSessionId();
         if (!lastId) return;
-        listSnapshots().then(metas => {
-            if (!metas.some(m => m.sessionId === lastId)) {
+        fetchSessionIndex().then(entries => {
+            if (!entries.some(e => e.sessionId === lastId)) {
                 clearLastSessionId();
                 return;
             }
@@ -608,7 +597,6 @@ function App() {
                     autoNameSession(sessionId, text).then((name) => {
                         if (name) {
                             window.dispatchEvent(new Event('storage'));
-                            refreshPersistedSessions();
                         }
                     });
                 }
@@ -1810,6 +1798,8 @@ ${content}
                 onOpenTimeline={() => setShowTimeline(true)}
                 onExport={() => handleExport('markdown')}
                 onOpenMcp={handleOpenMcpServers}
+                evolvedSkillCount={useEvolutionStore((s) => s.skillCount)}
+                evolutionReviewing={useEvolutionStore((s) => s.reviewing)}
             />
 
             {showSettings && serverConfig && (

@@ -1,7 +1,6 @@
 package io.kairo.code.service;
 
 import io.kairo.api.agent.Agent;
-import io.kairo.api.agent.AgentDiagnostics;
 import io.kairo.api.tool.ApprovalResult;
 import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.CodeAgentConfig;
@@ -14,7 +13,6 @@ import io.kairo.code.service.agent.AgentSessionPayload;
 import io.kairo.code.service.agent.MessageRequest;
 import io.kairo.code.service.agent.SessionPayload;
 import io.kairo.code.service.agent.TeamSessionPayload;
-import io.kairo.code.service.agent.tools.NoNarrationTool;
 import io.kairo.code.service.concurrency.AgentConcurrencyController;
 import io.kairo.code.service.team.TriageGate;
 import io.kairo.code.core.evolution.FailurePatternTracker;
@@ -39,12 +37,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import io.kairo.code.core.task.TaskToolDependencies;
@@ -52,7 +46,6 @@ import io.kairo.code.core.workspace.WorktreeWorkspaceProvider;
 import io.kairo.code.core.workspace.WorktreeLifecycle;
 import io.kairo.code.service.agent.ServerChildSessionSpawner;
 import io.kairo.code.service.agent.AutoMergePrompter;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
@@ -66,81 +59,19 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
 
-    private final Map<String, Sinks.Many<AgentEvent>> eventSinks = new ConcurrentHashMap<>();
-    private final Map<String, SessionEntry> sessions = new ConcurrentHashMap<>();
-    private final Map<String, AtomicBoolean> runningState = new ConcurrentHashMap<>();
-    private final Map<String, ToolProgressTracker> progressTrackers = new ConcurrentHashMap<>();
-    /**
-     * Last-activity timestamp per session (monotonic ns). Touched on
-     * createSession + sendMessage so the idle reaper can tell live work
-     * apart from abandoned tabs. Was added in M-IdleReaper after auditing
-     * surfaced that sessions accumulated indefinitely (only destroySession
-     * removed them) and the documented {@code KAIRO_SESSION_POOL_*} env
-     * vars were read by upstream code paths kairo-code never invoked.
-     */
-    private final Map<String, AtomicLong> lastActivityNs = new ConcurrentHashMap<>();
+    private final SessionRegistry registry;
+    private final SessionDiagnosticsService diagnosticsService;
 
-    /** Background reaper that evicts sessions idle longer than {@link #idleTtlMillis}. */
-    private volatile ScheduledExecutorService idleReaper;
-    /** Idle TTL in millis. Read from {@code KAIRO_CODE_SESSION_IDLE_TTL_MINUTES} env (default 60). */
-    private final long idleTtlMillis = resolveIdleTtlMillis();
-    /** How often the reaper wakes up. 1/10 of TTL, bounded to keep tests reasonable. */
-    private final long reaperPeriodMillis = Math.max(1_000L, Math.min(idleTtlMillis / 10, 60_000L));
-    /**
-     * Max concurrent sessions. Reads {@code KAIRO_CODE_SESSION_POOL_SIZE} (default 64).
-     * Past this cap, createSession evicts the least-recently-active session before
-     * accepting the new one — mirrors the LRU policy the upstream AgentSessionPool
-     * uses. The active session itself is always safe (touched on the same call).
-     *
-     * <p>Non-final so tests can override via {@link #setSessionPoolSizeForTesting(int)}.
-     * Production code never mutates it after construction.
-     */
-    private volatile int sessionPoolSize = resolveSessionPoolSize();
-
-    /** Test-only — production should not call this. */
-    void setSessionPoolSizeForTesting(int cap) {
-        this.sessionPoolSize = cap;
+    @Autowired
+    public AgentService(SessionRegistry registry, SessionDiagnosticsService diagnosticsService) {
+        this.registry = registry;
+        this.diagnosticsService = diagnosticsService;
     }
 
-    private static long resolveIdleTtlMillis() {
-        String env = System.getenv("KAIRO_CODE_SESSION_IDLE_TTL_MINUTES");
-        if (env == null || env.isBlank()) return TimeUnit.MINUTES.toMillis(60);
-        try {
-            long mins = Long.parseLong(env.trim());
-            if (mins <= 0) return TimeUnit.MINUTES.toMillis(60);
-            return TimeUnit.MINUTES.toMillis(mins);
-        } catch (NumberFormatException ignored) {
-            return TimeUnit.MINUTES.toMillis(60);
-        }
+    public AgentService() {
+        this.registry = new SessionRegistry();
+        this.diagnosticsService = new SessionDiagnosticsService(this.registry);
     }
-
-    private static int resolveSessionPoolSize() {
-        String env = System.getenv("KAIRO_CODE_SESSION_POOL_SIZE");
-        if (env == null || env.isBlank()) return 64;
-        try {
-            int v = Integer.parseInt(env.trim());
-            return v > 0 ? v : 64;
-        } catch (NumberFormatException ignored) {
-            return 64;
-        }
-    }
-
-    // ── Plan-pending state machine ──────────────────────────────────────────────
-    /** Per-session lifecycle phase. */
-    private final Map<String, AtomicReference<SessionPhase>> sessionPhases = new ConcurrentHashMap<>();
-    /** Per-session plan overview captured by the intercept hook. */
-    private final Map<String, String> planOverviews = new ConcurrentHashMap<>();
-    /** Per-session telemetry counters, updated by {@link AgentEventBridgeHook} on each emit
-     *  and read by {@code SessionDiagnosticsController}. Lazily created on first read/write. */
-    private final Map<String, SessionDiagnosticsTracker> diagnosticsTrackers = new ConcurrentHashMap<>();
-    /** Heartbeat tick subscription, started lazily on first session and cancelled on shutdown. */
-    private volatile reactor.core.Disposable progressTickSubscription;
-    /** Tools older than this emit a heartbeat on every tick; set on the conservative side so
-     *  short tools never produce visual noise. */
-    private static final long PROGRESS_THRESHOLD_MS = 30_000L;
-    /** Heartbeat interval — picked to be cheap on the wire but responsive enough that the user
-     *  sees the elapsed counter advance in seconds, not minutes. */
-    private static final java.time.Duration PROGRESS_TICK = java.time.Duration.ofSeconds(5);
 
     @Autowired
     private AgentConcurrencyController concurrencyController;
@@ -173,10 +104,17 @@ public class AgentService implements DisposableBean, InitializingBean {
     @Autowired
     private WorktreeManager worktreeManager;
 
+    @Autowired(required = false)
+    private io.kairo.code.core.evolution.KairoEvolutionHook evolutionHook;
+
+    @Autowired(required = false)
+    private io.kairo.skill.SkillContentInjector skillContentInjector;
+
     @Autowired
     private WorkspaceSnapshotService workspaceSnapshotService;
 
     private final SessionMetaPersistence sessionMetaPersistence = new SessionMetaPersistence();
+    private final SessionIndexService sessionIndexService = new SessionIndexService();
 
     private volatile CodeAgentConfig defaultConfig;
 
@@ -249,10 +187,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             log.info("Legacy mode '{}' normalized to 'agent' (unified mode)", sessionMode);
         }
 
-        // Enforce the LRU cap BEFORE we allocate a new sessionId — bursty
-        // traffic (50 users hitting the server at once) used to grow the map
-        // unboundedly because TTL eviction is asynchronous.
-        evictLruIfFull();
+        registry.evictLruIfFull();
 
         String sessionId = UUID.randomUUID().toString();
 
@@ -280,11 +215,9 @@ public class AgentService implements DisposableBean, InitializingBean {
         log.info("Creating session {} (workspace={}, model={}, workingDir={}, worktree={}, mode={})",
                 sessionId, workspaceId, config.modelName(), config.workingDir(), useWorktree, normalizedMode);
 
-        // autoCancel=false: the sink must survive WS subscriber disconnect.
         Sinks.Many<AgentEvent> sink = Sinks.many()
                 .multicast()
                 .onBackpressureBuffer(Queues.SMALL_BUFFER_SIZE, false);
-        eventSinks.put(sessionId, sink);
 
         WebSocketApprovalHandler approvalHandler = new WebSocketApprovalHandler(sink, sessionId);
         if ("bypass".equalsIgnoreCase(permissionMode)) {
@@ -293,20 +226,17 @@ public class AgentService implements DisposableBean, InitializingBean {
         }
         ToolProgressTracker progressTracker = new ToolProgressTracker();
         approvalHandler.setProgressTracker(progressTracker);
-        progressTrackers.put(sessionId, progressTracker);
-        startProgressTickerIfNeeded();
+        SessionDiagnosticsTracker diagTracker = new SessionDiagnosticsTracker();
+        diagnosticsService.startProgressTickerIfNeeded();
         AgentEventBridgeHook bridgeHook = new AgentEventBridgeHook(
                 sink, sessionId, approvalHandler.announcedToolCallIds(),
-                config.workingDir(), progressTracker, diagnosticsTrackerFor(sessionId));
+                config.workingDir(), progressTracker, diagTracker);
 
         CompactionEventBridgeHook compactionBridge = new CompactionEventBridgeHook(sink, sessionId);
 
         // ── Build AgentRuntimeContext ───────────────────────────────────────────────
         AtomicBoolean running = new AtomicBoolean(false);
-        runningState.put(sessionId, running);
-
         AtomicReference<SessionPhase> phaseRef = new AtomicReference<>(SessionPhase.IDLE);
-        sessionPhases.put(sessionId, phaseRef);
 
         String finalWorkingDir = config.workingDir();
         // Persist phase to session-specific directory
@@ -323,9 +253,13 @@ public class AgentService implements DisposableBean, InitializingBean {
                 sessionId, sink, running, phaseRef, persistPhaseFn, concurrencyController);
 
         // ── Plan-pending intercept hook ────────────────────────────────────────────
+        final String planSid = sessionId;
         PlanPendingInterceptHook planHook = new PlanPendingInterceptHook(
                 sink, sessionId, finalWorkingDir, ctx.phaseRef(),
-                overview -> planOverviews.put(sessionId, overview),
+                overview -> {
+                    SessionContext sctx = registry.get(planSid);
+                    if (sctx != null) sctx.setPlanOverview(overview);
+                },
                 () -> persistPhase(finalWorkingDir, SessionPhase.PLAN_PENDING));
 
         // Crash recovery: if a previous session left behind a persisted phase
@@ -364,6 +298,27 @@ public class AgentService implements DisposableBean, InitializingBean {
                     ReflectionPipeline.generateAndSave(strike, effectiveCfg, lessonStore);
                 });
                 hooks.add(failureTracker);
+                if (evolutionHook != null) {
+                    final int evoThreshold = 8;
+                    hooks.add(new Object() {
+                        @io.kairo.api.hook.HookHandler(io.kairo.api.hook.HookPhase.PRE_COMPLETE)
+                        public io.kairo.api.hook.HookResult<io.kairo.api.hook.PreCompleteEvent>
+                                onPreComplete(io.kairo.api.hook.PreCompleteEvent event) {
+                            int msgCount = event.conversationHistory() != null
+                                    ? event.conversationHistory().size() : 0;
+                            if (msgCount >= evoThreshold * 2) {
+                                AgentRuntimeContext.emitSerialized(sink,
+                                        AgentEvent.textChunk(sessionId,
+                                                "<evolution-event type=\"review_starting\" />"));
+                            }
+                            return io.kairo.api.hook.HookResult.proceed(event);
+                        }
+                    });
+                    hooks.add(evolutionHook);
+                }
+                if (skillContentInjector != null) {
+                    hooks.add(skillContentInjector);
+                }
             }
             if (finalWorkingDir != null) {
                 // Session isolation: migrate legacy, ensure dir, GC via framework provider
@@ -414,6 +369,7 @@ public class AgentService implements DisposableBean, InitializingBean {
                 io.kairo.api.model.ModelProvider mp =
                         CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
                 var subagentRegistry = new io.kairo.code.core.task.SubagentRegistry();
+                var notificationQueue = new io.kairo.code.core.task.BackgroundTaskNotificationQueue();
                 TaskToolDependencies taskDeps = new TaskToolDependencies(
                         workspaceProvider,
                         new ServerChildSessionSpawner(config, mp, sink, sessionId,
@@ -424,12 +380,16 @@ public class AgentService implements DisposableBean, InitializingBean {
                             String status = error == null ? "completed" : "failed";
                             String notification = "<task-notification task_id=\"" + taskId2
                                     + "\" description=\"" + desc + "\" status=\"" + status
-                                    + "\" duration_ms=\"" + durationMs + "\">\n"
+                                    + "\" duration_ms=\"" + durationMs + "\"> "
                                     + (result != null ? result : (error != null ? error.getMessage() : ""))
-                                    + "\n</task-notification>";
+                                    + " </task-notification>";
+                            notificationQueue.offer(notification);
                             sink.tryEmitNext(AgentEvent.textChunk(sessionId, notification));
                         },
-                        subagentRegistry);
+                        subagentRegistry,
+                        config,
+                        io.kairo.code.core.GlobalSharedTaskList.INSTANCE,
+                        notificationQueue);
                 opts = opts.withTaskTool(taskDeps);
             }
 
@@ -463,20 +423,29 @@ public class AgentService implements DisposableBean, InitializingBean {
             SessionEntry entry = new SessionEntry(
                     sessionId, workspaceId, normalizedMode, payload,
                     approvalHandler, System.currentTimeMillis());
-            sessions.put(sessionId, entry);
-            lastActivityNs.put(sessionId, new AtomicLong(System.nanoTime()));
+
+            SessionContext sessionContext = new SessionContext(
+                    sessionId, entry, sink, running, progressTracker, phaseRef);
+            sessionContext.setDiagnosticsTracker(diagTracker);
+            registry.register(sessionContext);
 
             sessionMetaPersistence.save(new SessionMetaPersistence.SessionMeta(
                     sessionId, workspaceId, config.workingDir(), config.modelName(),
                     config.baseUrl(), "", phaseRef.get().name(), normalizedMode,
                     System.currentTimeMillis()));
 
+            sessionIndexService.upsert(new SessionIndexEntry(
+                    sessionId, null, workspaceId, config.workingDir(),
+                    config.modelName(), SessionIndexEntry.STATUS_ACTIVE,
+                    System.currentTimeMillis(), System.currentTimeMillis(),
+                    0, false));
+
             log.info("Session {} created successfully", sessionId);
             return sessionId;
         } catch (Exception e) {
             log.error("Failed to create session {}", sessionId, e);
             sink.tryEmitComplete();
-            eventSinks.remove(sessionId);
+            registry.unregister(sessionId);
             if (worktreeManager != null) {
                 worktreeManager.release(sessionId);
             }
@@ -499,14 +468,15 @@ public class AgentService implements DisposableBean, InitializingBean {
      * event and sends a compaction prompt to the agent so it summarizes the conversation.
      */
     public Flux<AgentEvent> compactSession(String sessionId) {
-        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-        if (sink == null) {
+        SessionContext sctx = registry.get(sessionId);
+        if (sctx == null) {
             return Flux.just(AgentEvent.error(sessionId,
                     "Session not found: " + sessionId, "SESSION_NOT_FOUND"));
         }
-        SessionEntry entry = sessions.get(sessionId);
+        Sinks.Many<AgentEvent> sink = sctx.eventSink();
+        SessionEntry entry = sctx.entry();
         int maxTokens = 100_000;
-        if (entry != null && entry.configOrNull() != null) {
+        if (entry.configOrNull() != null) {
             maxTokens = io.kairo.core.model.ModelRegistry.getContextWindow(
                     entry.configOrNull().modelName());
         }
@@ -544,15 +514,13 @@ public class AgentService implements DisposableBean, InitializingBean {
     }
 
     private Flux<AgentEvent> sendMessage(String sessionId, MessageRequest request) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
+        SessionContext sctx = registry.get(sessionId);
+        if (sctx == null) {
             return Flux.just(AgentEvent.error(sessionId,
                     "Session not found: " + sessionId, "SESSION_NOT_FOUND"));
         }
-        // Bump idle timer — reaper won't evict an actively-used session.
-        AtomicLong activity = lastActivityNs.get(sessionId);
-        if (activity != null) activity.set(System.nanoTime());
-        entry = rebuildIfStale(entry);
+        sctx.touch();
+        SessionEntry entry = rebuildIfStale(sctx.entry());
         return entry.payload().handleMessage(request);
     }
 
@@ -572,30 +540,26 @@ public class AgentService implements DisposableBean, InitializingBean {
     // Default Agent/Team payloads return Flux.empty() — only TeamSessionPayload with the
     // experts preset actually drives execution here.
     public boolean confirmBuild(String sessionId) {
-        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
-        if (phaseRef == null || phaseRef.get() != SessionPhase.PLAN_PENDING) {
+        SessionContext sctx = registry.get(sessionId);
+        if (sctx == null) {
+            log.warn("confirmBuild rejected for session {} — not found", sessionId);
+            return false;
+        }
+        AtomicReference<SessionPhase> phaseRef = sctx.phase();
+        if (phaseRef.get() != SessionPhase.PLAN_PENDING) {
             log.warn("confirmBuild rejected for session {} — not in PLAN_PENDING (phase={})",
-                    sessionId, phaseRef != null ? phaseRef.get() : "null");
+                    sessionId, phaseRef.get());
             return false;
         }
 
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
-            return false;
-        }
-
+        SessionEntry entry = sctx.entry();
         CodeAgentConfig cfg = entry.configOrNull();
         if (cfg == null || cfg.workingDir() == null) {
             log.warn("confirmBuild: no config/workingDir available for session {}", sessionId);
             return false;
         }
         String workingDir = cfg.workingDir();
-
-        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-        if (sink == null) {
-            log.warn("confirmBuild: no event sink for session {}", sessionId);
-            return false;
-        }
+        Sinks.Many<AgentEvent> sink = sctx.eventSink();
 
         log.info("Plan confirmed for session {} — delegating to payload.confirmBuild()", sessionId);
 
@@ -638,11 +602,7 @@ public class AgentService implements DisposableBean, InitializingBean {
      * swarm bridge, confirmBuild terminal events) that arrive outside of handleMessage lifecycles.
      */
     public Flux<AgentEvent> sessionEvents(String sessionId) {
-        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-        if (sink == null) {
-            return Flux.empty();
-        }
-        return sink.asFlux();
+        return registry.sessionEvents(sessionId);
     }
 
     /**
@@ -665,8 +625,8 @@ public class AgentService implements DisposableBean, InitializingBean {
             boolean approved,
             String reason,
             Map<String, Object> editedArgs) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
+        SessionContext sctx = registry.get(sessionId);
+        if (sctx == null) {
             return false;
         }
 
@@ -674,52 +634,37 @@ public class AgentService implements DisposableBean, InitializingBean {
                 ? ApprovalResult.allow()
                 : ApprovalResult.denied(reason != null ? reason : "User denied");
 
-        return entry.approvalHandler().resolveApproval(toolCallId, result, editedArgs);
+        return sctx.entry().approvalHandler().resolveApproval(toolCallId, result, editedArgs);
     }
 
     /**
      * Interrupt the current agent execution.
      */
     public void stopAgent(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
+        SessionContext stopCtx = registry.get(sessionId);
+        if (stopCtx == null) {
             return;
         }
 
+        SessionEntry entry = stopCtx.entry();
         try {
-            // Unwind any pending approval blocks first (e.g. exit_plan_mode awaiting human
-            // review). cancelAll() resolves each pending Sinks.One with denied so the in-flight
-            // tool's Mono.block() returns instead of surfacing InterruptedException.
             entry.approvalHandler().cancelAll();
 
-            // Phase transition BEFORE payload.stop(): the run's doFinally races to
-            // compareAndSet(PLANNING, IDLE) once stop() disposes it. Landing the FAILED_*
-            // phase first means that compareAndSet no longer matches, so a stopped run
-            // deterministically stays resumable (resumeSession accepts FAILED_*).
-            //
-            // Use compareAndSet (not set): if the run completed naturally in the window between
-            // reading `current` and this transition (doFinally already moved PLANNING→IDLE), the
-            // CAS fails and we must NOT clobber that legitimate IDLE with a spurious FAILED_*.
-            AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
-            if (phaseRef != null) {
-                SessionPhase current = phaseRef.get();
-                SessionPhase failed =
-                        current == SessionPhase.EXECUTING
-                                ? SessionPhase.FAILED_EXECUTION
-                                : current == SessionPhase.PLANNING ? SessionPhase.FAILED_PLANNING : null;
-                if (failed != null && phaseRef.compareAndSet(current, failed)) {
-                    CodeAgentConfig cfg = entry.configOrNull();
-                    if (cfg != null) persistPhase(cfg.workingDir(), failed);
-                    log.info("Session {} stopped during {} — transitioned to {}",
-                            sessionId, current, failed);
-                } else {
-                    log.info("Session {} stopped (phase={})", sessionId, phaseRef.get());
-                }
+            AtomicReference<SessionPhase> phaseRef = stopCtx.phase();
+            SessionPhase current = phaseRef.get();
+            SessionPhase failed =
+                    current == SessionPhase.EXECUTING
+                            ? SessionPhase.FAILED_EXECUTION
+                            : current == SessionPhase.PLANNING ? SessionPhase.FAILED_PLANNING : null;
+            if (failed != null && phaseRef.compareAndSet(current, failed)) {
+                CodeAgentConfig cfg = entry.configOrNull();
+                if (cfg != null) persistPhase(cfg.workingDir(), failed);
+                log.info("Session {} stopped during {} — transitioned to {}",
+                        sessionId, current, failed);
             } else {
-                log.info("Session {} stopped", sessionId);
+                log.info("Session {} stopped (phase={})", sessionId, phaseRef.get());
             }
 
-            // Delegate cancellation to the payload (sets runningState=false, interrupts agent)
             entry.payload().stop();
         } catch (Exception e) {
             log.warn("Error stopping session {}", sessionId, e);
@@ -734,18 +679,14 @@ public class AgentService implements DisposableBean, InitializingBean {
      * a follow-up message).
      */
     public boolean resumeSession(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
+        SessionContext sctx = registry.get(sessionId);
+        if (sctx == null) {
             log.warn("resumeSession: session {} not found", sessionId);
             return false;
         }
+        SessionEntry entry = sctx.entry();
 
-        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
-        if (phaseRef == null) {
-            log.warn("resumeSession: no phase tracking for session {}", sessionId);
-            return false;
-        }
-
+        AtomicReference<SessionPhase> phaseRef = sctx.phase();
         SessionPhase current = phaseRef.get();
         if (current != SessionPhase.FAILED_EXECUTION && current != SessionPhase.FAILED_PLANNING) {
             log.info("resumeSession: session {} phase is {} -- nothing to resume", sessionId, current);
@@ -758,10 +699,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             persistPhase(cfg.workingDir(), SessionPhase.IDLE);
         }
 
-        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-        if (sink != null) {
-            AgentRuntimeContext.emitSerialized(sink, AgentEvent.sessionResumed(sessionId));
-        }
+        AgentRuntimeContext.emitSerialized(sctx.eventSink(), AgentEvent.sessionResumed(sessionId));
 
         log.info("Session {} resumed from {} -- injecting continuation message", sessionId, current);
 
@@ -806,18 +744,14 @@ public class AgentService implements DisposableBean, InitializingBean {
      * @return true if revert was successful
      */
     public boolean revertSession(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
+        SessionContext sctx = registry.get(sessionId);
+        if (sctx == null) {
             log.warn("revertSession: session {} not found", sessionId);
             return false;
         }
+        SessionEntry entry = sctx.entry();
 
-        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sessionId);
-        if (phaseRef == null) {
-            log.warn("revertSession: no phase tracking for session {}", sessionId);
-            return false;
-        }
-
+        AtomicReference<SessionPhase> phaseRef = sctx.phase();
         SessionPhase current = phaseRef.get();
         if (current == SessionPhase.EXECUTING) {
             log.warn("revertSession rejected for session {} — still EXECUTING, stop first", sessionId);
@@ -863,11 +797,8 @@ public class AgentService implements DisposableBean, InitializingBean {
             } catch (IOException e) {
                 log.debug("Could not delete phase.txt after soft revert: {}", e.getMessage());
             }
-            Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-            if (sink != null) {
-                AgentRuntimeContext.emitSerialized(sink, AgentEvent.reverted(sessionId));
-                AgentRuntimeContext.emitSerialized(sink, AgentEvent.clearExecutionMessages(sessionId));
-            }
+            AgentRuntimeContext.emitSerialized(sctx.eventSink(), AgentEvent.reverted(sessionId));
+            AgentRuntimeContext.emitSerialized(sctx.eventSink(), AgentEvent.clearExecutionMessages(sessionId));
             return true;
         }
 
@@ -889,12 +820,8 @@ public class AgentService implements DisposableBean, InitializingBean {
             log.debug("Could not delete snapshot.ref after revert: {}", e.getMessage());
         }
 
-        // Emit events
-        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-        if (sink != null) {
-            AgentRuntimeContext.emitSerialized(sink, AgentEvent.reverted(sessionId));
-            AgentRuntimeContext.emitSerialized(sink, AgentEvent.clearExecutionMessages(sessionId));
-        }
+        AgentRuntimeContext.emitSerialized(sctx.eventSink(), AgentEvent.reverted(sessionId));
+        AgentRuntimeContext.emitSerialized(sctx.eventSink(), AgentEvent.clearExecutionMessages(sessionId));
 
         log.info("Session {} reverted successfully (ref={}) — phase now PLAN_PENDING", sessionId, snapshotRef);
         return true;
@@ -904,30 +831,19 @@ public class AgentService implements DisposableBean, InitializingBean {
      * Destroy a session and clean up all resources.
      */
     public boolean destroySession(String sessionId) {
-        SessionEntry entry = sessions.remove(sessionId);
-        if (entry == null) {
+        SessionContext sctx = registry.unregister(sessionId);
+        if (sctx == null) {
             return false;
         }
 
         log.info("Destroying session {}", sessionId);
+        SessionEntry entry = sctx.entry();
         entry.approvalHandler().cancelAll();
-        runningState.remove(sessionId);
-        lastActivityNs.remove(sessionId);
-        ToolProgressTracker tracker = progressTrackers.remove(sessionId);
-        if (tracker != null) {
-            tracker.clear();
-        }
-        diagnosticsTrackers.remove(sessionId);
+        sctx.progressTracker().clear();
+        sctx.eventSink().tryEmitComplete();
 
-        // Clean up plan-pending state
-        sessionPhases.remove(sessionId);
-        planOverviews.remove(sessionId);
         sessionMetaPersistence.remove(sessionId);
-
-        Sinks.Many<AgentEvent> sink = eventSinks.remove(sessionId);
-        if (sink != null) {
-            sink.tryEmitComplete();
-        }
+        sessionIndexService.updateStatus(sessionId, SessionIndexEntry.STATUS_IDLE);
 
         try {
             entry.payload().stop();
@@ -948,12 +864,13 @@ public class AgentService implements DisposableBean, InitializingBean {
      *         or null if session not found.
      */
     public AgentEvent bindSession(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
+        SessionContext bindCtx = registry.get(sessionId);
+        if (bindCtx == null) {
             log.warn("bindSession: session {} not found", sessionId);
             return null;
         }
 
+        SessionEntry entry = bindCtx.entry();
         boolean running = isRunning(sessionId);
         List<Map<String, Object>> messages = readCheckpointMessages(entry);
         String messagesJson;
@@ -983,7 +900,6 @@ public class AgentService implements DisposableBean, InitializingBean {
         if (cfg == null || cfg.workingDir() == null) return List.of();
 
         // Session-isolated checkpoint: .kairo-session/{sessionId}/iterations/
-        io.kairo.code.core.SessionStorageLayout layout =
         var sessionStorage = new io.kairo.core.session.FileSessionStorageProvider(
                 Path.of(cfg.workingDir()).resolve(".kairo-session"));
         // Use session-scoped checkpoint store; falls back to legacy if session dir doesn't exist
@@ -1121,33 +1037,8 @@ public class AgentService implements DisposableBean, InitializingBean {
         }
     }
 
-    /**
-     * Return tool-usage stats for a session, or null if not found.
-     * Each entry maps tool name to a map of {calls, successes, totalMillis, successRate, avgMillis}.
-     */
     public Map<String, Map<String, Object>> getSessionToolStats(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
-            return null;
-        }
-        ToolUsageTracker tracker = entry.session().toolUsageTracker();
-        if (tracker == null) {
-            return Map.of();
-        }
-        return tracker.snapshot().entrySet().stream()
-                .collect(java.util.stream.Collectors.toMap(
-                        Map.Entry::getKey,
-                        e -> {
-                            ToolUsageTracker.ToolStat s = e.getValue();
-                            return Map.<String, Object>of(
-                                    "calls", s.calls(),
-                                    "successes", s.successes(),
-                                    "totalMillis", s.totalMillis(),
-                                    "successRate", s.successRate(),
-                                    "avgMillis", s.avgMillis()
-                            );
-                        }
-                ));
+        return diagnosticsService.getSessionToolStats(sessionId);
     }
 
     /**
@@ -1157,12 +1048,17 @@ public class AgentService implements DisposableBean, InitializingBean {
         return defaultConfig != null ? defaultConfig.workingDir() : null;
     }
 
+    public SessionIndexService getSessionIndexService() {
+        return sessionIndexService;
+    }
+
     /**
      * Return a list of active session summaries.
      */
     public List<SessionInfo> listSessions() {
-        return sessions.values().stream()
-                .map(e -> {
+        return registry.list().stream()
+                .map(ctx -> {
+                    SessionEntry e = ctx.entry();
                     CodeAgentConfig cfg = e.configOrNull();
                     String workDir = cfg != null ? cfg.workingDir() : null;
                     String modelName = cfg != null ? cfg.modelName() : null;
@@ -1174,7 +1070,7 @@ public class AgentService implements DisposableBean, InitializingBean {
                             workDir,
                             modelName,
                             e.createdAt(),
-                            isRunning(e.sessionId()),
+                            ctx.running().get(),
                             e.workspaceId(),
                             isGit);
                 })
@@ -1182,8 +1078,8 @@ public class AgentService implements DisposableBean, InitializingBean {
     }
 
     private boolean isRunning(String sessionId) {
-        AtomicBoolean state = runningState.get(sessionId);
-        return state != null && state.get();
+        SessionContext sctx = registry.get(sessionId);
+        return sctx != null && sctx.running().get();
     }
 
     /**
@@ -1222,16 +1118,16 @@ public class AgentService implements DisposableBean, InitializingBean {
         }
     
         // Don't rebuild while running
-        AtomicBoolean running = runningState.get(entry.sessionId());
-        if (running != null && running.get()) {
-            log.warn("Skip rebuild for running session sid={}", entry.sessionId());
+        String sid = entry.sessionId();
+        SessionContext sctx = registry.get(sid);
+        if (sctx != null && sctx.running().get()) {
+            log.warn("Skip rebuild for running session sid={}", sid);
             return entry;
         }
     
         log.info(
                 "Rebuilding session {} after credential update (model {} \u2192 {}, baseUrl {} \u2192 {})",
-                entry.sessionId(),
-                current.modelName(),
+                sid, current.modelName(),
                 defaults.modelName(),
                 current.baseUrl(),
                 defaults.baseUrl());
@@ -1248,18 +1144,17 @@ public class AgentService implements DisposableBean, InitializingBean {
                 defaults.thinkingBudget(),
                 current.llmClassifier());
     
-        Sinks.Many<AgentEvent> sink = eventSinks.get(entry.sessionId());
-        WebSocketApprovalHandler approvalHandler = entry.approvalHandler();
-        String sid = entry.sessionId();
-        AtomicReference<SessionPhase> phaseRef = sessionPhases.get(sid);
-        if (phaseRef == null) {
-            phaseRef = new AtomicReference<>(SessionPhase.IDLE);
-            sessionPhases.put(sid, phaseRef);
+        Sinks.Many<AgentEvent> sink = sctx != null ? sctx.eventSink() : null;
+        if (sink == null) {
+            log.warn("Skip rebuild for session {} — no event sink", sid);
+            return entry;
         }
+        WebSocketApprovalHandler approvalHandler = entry.approvalHandler();
+        AtomicReference<SessionPhase> phaseRef = sctx.phase();
 
         AgentEventBridgeHook bridgeHook = new AgentEventBridgeHook(
                 sink, sid, approvalHandler.announcedToolCallIds(), rebuilt.workingDir(),
-                progressTrackers.get(sid), diagnosticsTrackerFor(sid));
+                sctx.progressTracker(), sctx.diagnostics());
         CompactionEventBridgeHook compactionBridge = new CompactionEventBridgeHook(sink, sid);
         // Plan-pending intercept hook MUST be on the rebuilt session too. Without it,
         // exit_plan_mode tool calls don't transition the session into PLAN_PENDING —
@@ -1267,7 +1162,7 @@ public class AgentService implements DisposableBean, InitializingBean {
         // any post-rebuild plan. Tracked as P1-5 follow-up to the chat-path audit.
         PlanPendingInterceptHook planHook = new PlanPendingInterceptHook(
                 sink, sid, rebuilt.workingDir(), phaseRef,
-                overview -> planOverviews.put(sid, overview),
+                overview -> sctx.setPlanOverview(overview),
                 () -> persistPhase(rebuilt.workingDir(), SessionPhase.PLAN_PENDING));
 
         SessionOptions opts = SessionOptions.empty()
@@ -1282,23 +1177,17 @@ public class AgentService implements DisposableBean, InitializingBean {
         }
 
         try {
-            ToolProgressTracker rebuildTracker = progressTrackers.get(sid);
-            Map<String, Object> rebuildExtraDeps = Map.of();
-            if (rebuildTracker != null) {
-                java.util.function.BiConsumer<String, String> rebuildChunkSink = (toolCallId, chunkText) -> {
-                    if (toolCallId != null) {
-                        AgentRuntimeContext.emitSerialized(sink, AgentEvent.toolOutputChunk(sid, toolCallId, chunkText));
-                    }
-                };
-                rebuildExtraDeps = Map.of(
-                        io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, rebuildChunkSink);
-            }
+            java.util.function.BiConsumer<String, String> rebuildChunkSink = (toolCallId, chunkText) -> {
+                if (toolCallId != null) {
+                    AgentRuntimeContext.emitSerialized(sink, AgentEvent.toolOutputChunk(sid, toolCallId, chunkText));
+                }
+            };
+            Map<String, Object> rebuildExtraDeps = Map.of(
+                    io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, rebuildChunkSink);
             CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts, rebuildExtraDeps);
             Consumer<SessionPhase> persistPhaseFn = p -> persistPhase(rebuilt.workingDir(), p);
             AgentRuntimeContext newCtx = new AgentRuntimeContext(
-                    sid, sink, running != null ? running : new AtomicBoolean(false),
-                    phaseRef != null ? phaseRef : new AtomicReference<>(SessionPhase.IDLE),
-                    persistPhaseFn, concurrencyController);
+                    sid, sink, sctx.running(), phaseRef, persistPhaseFn, concurrencyController);
     
             AgentSessionPayload newPayload = new AgentSessionPayload(rebuilt, newSession, newCtx);
             if (swarmCoordinator != null && triageGate != null
@@ -1319,10 +1208,10 @@ public class AgentService implements DisposableBean, InitializingBean {
             SessionEntry newEntry = new SessionEntry(
                     sid, entry.workspaceId(), entry.sessionMode(),
                     newPayload, approvalHandler, entry.createdAt());
-            sessions.put(sid, newEntry);
+            sctx.setEntry(newEntry);
             return newEntry;
         } catch (Exception e) {
-            log.error("Failed to rebuild session {} with new credentials", entry.sessionId(), e);
+            log.error("Failed to rebuild session {} with new credentials", sid, e);
             return entry;
         }
     }
@@ -1443,95 +1332,20 @@ public class AgentService implements DisposableBean, InitializingBean {
      * Exposed for WebSocket handler / controller integration.
      */
     public SessionPhase getSessionPhase(String sessionId) {
-        AtomicReference<SessionPhase> ref = sessionPhases.get(sessionId);
-        return ref != null ? ref.get() : null;
-    }
-
-    /**
-     * Lazily start the heartbeat scheduler. The first session creates it; the ticker stays alive
-     * for the JVM lifetime (very cheap when no trackers have stale entries — the inner loop is
-     * a single concurrent-map iteration over each session).
-     */
-    private synchronized void startProgressTickerIfNeeded() {
-        if (progressTickSubscription != null && !progressTickSubscription.isDisposed()) {
-            return;
-        }
-        progressTickSubscription =
-                Flux.interval(PROGRESS_TICK, Schedulers.parallel())
-                        .doOnNext(tick -> emitProgressHeartbeats())
-                        .onErrorContinue(
-                                (err, o) ->
-                                        log.warn("TOOL_PROGRESS tick failed: {}", err.toString()))
-                        .subscribe();
-    }
-
-    /** One pass over every session's tracker, emitting TOOL_PROGRESS for any stale tools. */
-    private void emitProgressHeartbeats() {
-        progressTrackers.forEach(
-                (sessionId, tracker) -> {
-                    if (tracker.isEmpty()) return;
-                    Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-                    if (sink == null) return;
-                    tracker.snapshotIfStale(
-                            PROGRESS_THRESHOLD_MS,
-                            inflight -> {
-                                AgentEvent event =
-                                        AgentEvent.toolProgress(
-                                                sessionId,
-                                                inflight.toolCallId(),
-                                                inflight.toolName(),
-                                                inflight.phase().name(),
-                                                inflight.elapsedMs());
-                                Sinks.EmitResult emit = AgentRuntimeContext.emitSerialized(sink, event);
-                                if (emit.isFailure()) {
-                                    log.debug(
-                                            "Skipped TOOL_PROGRESS for {} ({}): {}",
-                                            sessionId,
-                                            inflight.toolCallId(),
-                                            emit);
-                                } else {
-                                    // Touch the agent's diagnostics so StallDetector doesn't
-                                    // kill the parent while a long-running tool (e.g. task
-                                    // subagent) is executing. The heartbeat proves the session
-                                    // is alive even though the agent thread is blocked.
-                                    touchAgentDiagnostics(sessionId);
-                                }
-                            });
-                });
-    }
-
-    private void touchAgentDiagnostics(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) return;
-        try {
-            var diag = entry.session().agent().diagnostics();
-            if (diag != null) {
-                // Use reflection to call recordEvent on the package-private
-                // MutableDiagnostics interface. This keeps StallDetector from killing
-                // the parent session while a subagent tool blocks its thread.
-                java.lang.reflect.Method m = diag.getClass().getMethod("recordEvent", String.class);
-                m.invoke(diag, "tool_progress");
-            }
-        } catch (Exception e) {
-            // Best-effort; don't let diagnostics failure break the heartbeat loop.
-        }
+        SessionContext sctx = registry.get(sessionId);
+        return sctx != null ? sctx.phase().get() : null;
     }
 
     @Override
     public void destroy() {
-        if (progressTickSubscription != null) {
-            progressTickSubscription.dispose();
-            progressTickSubscription = null;
-        }
-        if (idleReaper != null) {
-            idleReaper.shutdownNow();
-            idleReaper = null;
-        }
+        // Registry and DiagnosticsService manage their own lifecycle via @PreDestroy / DisposableBean.
     }
 
     @Override
     public void afterPropertiesSet() {
-        startIdleReaper();
+        registry.setDestroyCallback(this::destroySession);
+        registry.startReaper();
+        sessionIndexService.migrateIfAbsent();
         // Delay rehydrate by 5s to let Spring finish wiring all beans (defaultConfig
         // is set by ServerConfig @Bean which may not be ready during afterPropertiesSet).
         java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
@@ -1573,94 +1387,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             }
         }
         log.info("Rehydrated {}/{} sessions", restored, pending.size());
-    }
-
-    void startIdleReaper() {
-        // Single-threaded daemon — reap is cheap (just a map walk + remove).
-        idleReaper = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "kairo-session-reaper");
-            t.setDaemon(true);
-            return t;
-        });
-        idleReaper.scheduleAtFixedRate(
-                this::reapIdleSessions,
-                reaperPeriodMillis,
-                reaperPeriodMillis,
-                TimeUnit.MILLISECONDS);
-        log.info("Idle session reaper started (ttl={}ms, period={}ms)", idleTtlMillis, reaperPeriodMillis);
-    }
-
-    /**
-     * Visible for testing. Walks the session map and removes anything with no
-     * activity for {@link #idleTtlMillis}. Skips sessions still marked running
-     * — a long-running tool call may legitimately not touch the bump for a
-     * while, killing it mid-flight would lose user work.
-     */
-    void reapIdleSessions() {
-        long now = System.nanoTime();
-        long thresholdNs = TimeUnit.MILLISECONDS.toNanos(idleTtlMillis);
-        int reaped = 0;
-        for (String sid : sessions.keySet()) {
-            AtomicLong lastNs = lastActivityNs.get(sid);
-            if (lastNs == null) {
-                // Defensive: a session without a tracked activity time is bogus.
-                lastActivityNs.put(sid, new AtomicLong(now));
-                continue;
-            }
-            if (now - lastNs.get() < thresholdNs) continue;
-            AtomicBoolean running = runningState.get(sid);
-            if (running != null && running.get()) continue;
-            try {
-                destroySession(sid);
-                reaped++;
-            } catch (RuntimeException e) {
-                log.warn("Idle reaper: failed to destroy session {} — {}", sid, e.getMessage());
-            }
-        }
-        if (reaped > 0) log.info("Idle reaper evicted {} session(s)", reaped);
-    }
-
-    /** Visible for testing — bypass the @PostConstruct so tests can drive reap manually. */
-    long idleTtlMillis() {
-        return idleTtlMillis;
-    }
-
-    /** Visible for testing. */
-    int sessionPoolSize() {
-        return sessionPoolSize;
-    }
-
-    /**
-     * If the session map is at capacity, evict the least-recently-active idle
-     * session to make room. Running sessions are never evicted — a long bash
-     * tool needs to finish even if it pushes us over the cap. If every session
-     * is running, this becomes a no-op and createSession continues; the
-     * pool-size guarantee is best-effort under contention.
-     *
-     * <p>Visible for testing.
-     */
-    void evictLruIfFull() {
-        if (sessions.size() < sessionPoolSize) return;
-        String victim = null;
-        long victimNs = Long.MAX_VALUE;
-        for (Map.Entry<String, AtomicLong> e : lastActivityNs.entrySet()) {
-            AtomicBoolean running = runningState.get(e.getKey());
-            if (running != null && running.get()) continue;
-            long ts = e.getValue().get();
-            if (ts < victimNs) {
-                victimNs = ts;
-                victim = e.getKey();
-            }
-        }
-        if (victim != null) {
-            log.info("Session pool at cap ({}), evicting LRU session {}", sessionPoolSize, victim);
-            destroySession(victim);
-        }
-    }
-
-    /** Visible for testing — register an entry in the activity tracker. */
-    void touchActivity(String sessionId) {
-        lastActivityNs.computeIfAbsent(sessionId, k -> new AtomicLong()).set(System.nanoTime());
+        sessionIndexService.reconcile(registry.sessionIds());
     }
 
     /**
@@ -1692,11 +1419,12 @@ public class AgentService implements DisposableBean, InitializingBean {
      * Returns a state with {@code exists=false} when {@code sessionId} is not in the live map.
      */
     public SessionState getSessionState(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
+        SessionContext sctx = registry.get(sessionId);
+        if (sctx == null) {
             return new SessionState(sessionId, false, false, List.of(), List.of());
         }
-        boolean running = isRunning(sessionId);
+        SessionEntry entry = sctx.entry();
+        boolean running = sctx.running().get();
         var approvalSnapshot = entry.approvalHandler().pendingApprovalsSnapshot();
         List<PendingApproval> pending = new java.util.ArrayList<>(approvalSnapshot.size());
         approvalSnapshot.forEach(
@@ -1707,127 +1435,26 @@ public class AgentService implements DisposableBean, InitializingBean {
                                         req.toolName(),
                                         req.args() != null ? req.args() : Map.of())));
 
-        ToolProgressTracker tracker = progressTrackers.get(sessionId);
+        ToolProgressTracker tracker = sctx.progressTracker();
         List<RunningTool> running_ = new java.util.ArrayList<>();
-        if (tracker != null) {
-            // threshold=0 → emit every entry, regardless of age, so the snapshot reflects
-            // everything currently in flight (not just the heartbeat-eligible subset).
-            tracker.snapshotIfStale(
-                    0L,
-                    inflight ->
-                            running_.add(
-                                    new RunningTool(
-                                            inflight.toolCallId(),
-                                            inflight.toolName(),
-                                            inflight.phase().name(),
-                                            inflight.elapsedMs())));
-        }
+        tracker.snapshotIfStale(
+                0L,
+                inflight ->
+                        running_.add(
+                                new RunningTool(
+                                        inflight.toolCallId(),
+                                        inflight.toolName(),
+                                        inflight.phase().name(),
+                                        inflight.elapsedMs())));
         return new SessionState(sessionId, true, running, pending, running_);
     }
 
-    /**
-     * Build a {@link SessionDiagnostics} snapshot for the given session, or null when unknown.
-     *
-     * <p>Prefers {@link Agent#diagnostics()} from kairo-core (authoritative source maintained by
-     * the agent runtime) when available, falling back to the legacy {@link SessionDiagnosticsTracker}
-     * for agents that don't implement the SPI yet.
-     */
     public SessionDiagnostics getSessionDiagnostics(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
-            return null;
-        }
-        Sinks.Many<AgentEvent> sink = eventSinks.get(sessionId);
-        int wsClients = sink != null ? sink.currentSubscriberCount() : 0;
-
-        // Prefer kairo-core's AgentDiagnostics when the agent implements it.
-        AgentDiagnostics coreDiag = entry.session().agent().diagnostics();
-        if (coreDiag != null) {
-            long lastEpochMs = coreDiag.lastEventAt() != null
-                    ? coreDiag.lastEventAt().toEpochMilli() : 0L;
-            return new SessionDiagnostics(
-                    sessionId,
-                    coreDiag.running(),
-                    lastEpochMs,
-                    coreDiag.msSinceLastEvent(),
-                    coreDiag.eventCounts(),
-                    wsClients);
-        }
-
-        // Legacy fallback: local tracker maintained by AgentEventBridgeHook.
-        // TODO: remove once all agent implementations expose diagnostics()
-        SessionDiagnosticsTracker tracker = diagnosticsTrackers.get(sessionId);
-        long lastEventAt = tracker != null ? tracker.lastEventAt() : 0L;
-        long now = System.currentTimeMillis();
-        long msSince = lastEventAt > 0 ? Math.max(0, now - lastEventAt) : Long.MAX_VALUE;
-        Map<String, Long> counts = tracker != null ? tracker.snapshotCounts() : Map.of();
-        return new SessionDiagnostics(
-                sessionId, isRunning(sessionId), lastEventAt, msSince, counts, wsClients);
+        return diagnosticsService.getSessionDiagnostics(sessionId);
     }
 
-    /**
-     * Mid-session metrics snapshot: tool call counts, redundant file reads,
-     * iterations without tools, hook interventions, plus best-effort
-     * {@code tokensUsed} / {@code iterations} / {@code durationMillis}.
-     *
-     * <p>Returns {@code null} when the session is unknown. Returns an
-     * "empty" snapshot when the session exists but had no
-     * {@code SessionMetricsCollector} registered (e.g. legacy REPL paths
-     * — see {@link CodeAgentFactory}: collector is auto-registered only
-     * for non-REPL sessions, i.e. all WebSocket / HTTP sessions).
-     *
-     * <p>Mirrors the schema written to {@code KAIRO_SESSION_RESULT.json}
-     * by {@code SessionResultWriterHook} so the external-runner protocol
-     * (CLI batch mode) and REST polling (web mode) speak the same shape.
-     */
     public SessionMetricsSnapshot getSessionMetrics(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
-            return null;
-        }
-        io.kairo.code.core.hook.SessionMetricsCollector collector = null;
-        try {
-            collector = entry.session().sessionMetricsCollector();
-        } catch (RuntimeException ignored) {
-            // sessionMetricsCollector() may throw if the agent isn't a CodeAgentSession-backed payload.
-        }
-
-        Map<String, Integer> toolCallCounts = Map.of();
-        List<Map<String, Object>> redundantReads = List.of();
-        int iterationsNoTool = 0;
-        if (collector != null) {
-            toolCallCounts = collector.toolCallCountsSnapshot();
-            redundantReads = collector.redundantReads().stream()
-                    .map(e -> Map.<String, Object>of("file", e.getKey(), "count", e.getValue()))
-                    .toList();
-            iterationsNoTool = collector.iterationsWithoutToolsCount();
-        }
-
-        // tokensUsed + iterations come from AgentDiagnostics, which DefaultReActAgent
-        // now wires to its own atomics (kairo upstream M-EV10 fix). Pre-fix this was
-        // always 0; if the agent doesn't surface diagnostics we still return 0 rather
-        // than fail.
-        long tokensUsed = 0L;
-        int iterations = 0;
-        try {
-            io.kairo.api.agent.AgentDiagnostics agentDiag = entry.session().agent().diagnostics();
-            if (agentDiag != null) {
-                tokensUsed = agentDiag.totalTokensConsumed();
-                iterations = agentDiag.currentIteration();
-            }
-        } catch (RuntimeException ignored) {
-            // Same defensive pattern as the SessionMetricsCollector lookup above.
-        }
-        long durationMs = Math.max(0, System.currentTimeMillis() - entry.createdAt());
-
-        return new SessionMetricsSnapshot(
-                sessionId,
-                tokensUsed,
-                iterations,
-                durationMs,
-                iterationsNoTool,
-                toolCallCounts,
-                redundantReads);
+        return diagnosticsService.getSessionMetrics(sessionId);
     }
 
     /**
@@ -1844,12 +1471,8 @@ public class AgentService implements DisposableBean, InitializingBean {
             Map<String, Integer> toolCallCounts,
             List<Map<String, Object>> redundantReads) {}
 
-    /**
-     * Get-or-create the diagnostics tracker for a session. Used by {@link AgentEventBridgeHook}
-     * via the wiring layer so each emitted event can update its counters.
-     */
     public SessionDiagnosticsTracker diagnosticsTrackerFor(String sessionId) {
-        return diagnosticsTrackers.computeIfAbsent(sessionId, k -> new SessionDiagnosticsTracker());
+        return diagnosticsService.diagnosticsTrackerFor(sessionId);
     }
 
     /**

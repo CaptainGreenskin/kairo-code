@@ -9,6 +9,9 @@ import io.kairo.code.cli.ReplContext;
 import io.kairo.code.cli.SlashCommand;
 import io.kairo.code.core.session.SessionTurn;
 import io.kairo.code.core.session.SessionWriter;
+import io.kairo.code.core.team.SwarmCoordinator;
+import io.kairo.code.core.team.persistence.JsonFileTeamRepository;
+import io.kairo.code.core.team.persistence.TeamManifest;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.DirectoryStream;
@@ -29,6 +32,8 @@ import java.util.Map;
  * <ul>
  *   <li>{@code :resume} — list available JSONL sessions</li>
  *   <li>{@code :resume <session-id>} — resume a JSONL session by ID</li>
+ *   <li>{@code :resume team} — list incomplete team executions</li>
+ *   <li>{@code :resume team:<teamId>} — resume an incomplete team execution</li>
  *   <li>{@code :resume snapshot:<key>} — restore a snapshot (legacy behaviour)</li>
  * </ul>
  */
@@ -56,6 +61,16 @@ public class ResumeCommand implements SlashCommand {
         // Legacy snapshot path: :resume snapshot:<key>
         if (key.startsWith("snapshot:")) {
             resumeSnapshot(key.substring("snapshot:".length()).strip(), context);
+            return;
+        }
+
+        // Team resume: :resume team / :resume team:<teamId>
+        if (key.equals("team")) {
+            listTeams(context);
+            return;
+        }
+        if (key.startsWith("team:")) {
+            resumeTeam(key.substring("team:".length()).strip(), context);
             return;
         }
 
@@ -206,6 +221,81 @@ public class ResumeCommand implements SlashCommand {
             writer.println("Failed to restore snapshot: " + e.getMessage());
         }
         writer.flush();
+    }
+
+    private void listTeams(ReplContext context) {
+        PrintWriter writer = context.writer();
+        Path teamsDir = resolveTeamsDir(context);
+        if (!Files.isDirectory(teamsDir)) {
+            writer.println("No teams found.");
+            writer.flush();
+            return;
+        }
+
+        JsonFileTeamRepository repo = new JsonFileTeamRepository(teamsDir);
+        List<TeamManifest> incomplete = repo.loadIncomplete().collectList().block();
+
+        if (incomplete == null || incomplete.isEmpty()) {
+            writer.println("No incomplete teams found.");
+            writer.flush();
+            return;
+        }
+
+        writer.println();
+        writer.printf("  %-24s  %6s  %-40s%n", "Team ID", "Done", "Goal");
+        writer.println("  " + "─".repeat(74));
+        for (TeamManifest m : incomplete) {
+            String progress = m.completedStepIds().size() + "/" + m.dag().size();
+            String goal = m.goal();
+            if (goal.length() > 40) goal = goal.substring(0, 37) + "...";
+            writer.printf("  %-24s  %6s  %-40s%n", m.teamId(), progress, goal);
+        }
+        writer.println();
+        writer.println("Use :resume team:<team-id> to resume a team.");
+        writer.flush();
+    }
+
+    private void resumeTeam(String teamId, ReplContext context) {
+        PrintWriter writer = context.writer();
+        SwarmCoordinator coordinator = context.swarmCoordinator();
+        if (coordinator == null) {
+            writer.println("Team resume unavailable: no SwarmCoordinator configured.");
+            writer.flush();
+            return;
+        }
+
+        Path teamsDir = resolveTeamsDir(context);
+        JsonFileTeamRepository repo = new JsonFileTeamRepository(teamsDir);
+        TeamManifest manifest = repo.loadManifest(teamId).block();
+
+        if (manifest == null) {
+            writer.println("Team not found: " + teamId);
+            writer.println("Use :resume team to list available teams.");
+            writer.flush();
+            return;
+        }
+
+        writer.printf("Resuming team '%s': %d/%d steps completed...%n",
+                teamId, manifest.completedStepIds().size(), manifest.dag().size());
+        writer.flush();
+
+        try {
+            var result = coordinator.resumeFromManifest(manifest).block();
+            if (result != null) {
+                writer.printf("✓ Team '%s' resumed: status=%s%n", teamId, result.status());
+            }
+        } catch (Exception e) {
+            writer.println("Team resume failed: " + e.getMessage());
+        }
+        writer.flush();
+    }
+
+    private Path resolveTeamsDir(ReplContext context) {
+        String workingDir = context.config() != null ? context.config().workingDir() : null;
+        if (workingDir != null && !workingDir.isBlank()) {
+            return Path.of(workingDir, KAIRO_CODE_DIR, "teams");
+        }
+        return Path.of(System.getProperty("user.home"), KAIRO_CODE_DIR, "teams");
     }
 
     private Path resolveSessionsDir(ReplContext context) {

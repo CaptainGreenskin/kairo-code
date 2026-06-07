@@ -57,18 +57,22 @@ public final class SharedTaskList {
 
     public boolean complete(String taskId, String memberId) {
         SharedTask current = tasks.get(taskId);
-        if (current == null || !memberId.equals(current.ownerId())) return false;
+        if (current == null || current.status() != SharedTask.TaskStatus.IN_PROGRESS) return false;
+        if (current.ownerId() != null && !current.ownerId().equals(memberId)) return false;
         tasks.put(taskId, new SharedTask(taskId, current.teamId(), current.title(),
-            current.description(), SharedTask.TaskStatus.COMPLETED, memberId,
+            current.description(), SharedTask.TaskStatus.COMPLETED,
+            current.ownerId() != null ? current.ownerId() : memberId,
             current.blockedBy(), current.createdAt(), System.currentTimeMillis()));
         return true;
     }
 
     public boolean fail(String taskId, String memberId) {
         SharedTask current = tasks.get(taskId);
-        if (current == null || !memberId.equals(current.ownerId())) return false;
+        if (current == null || current.status() != SharedTask.TaskStatus.IN_PROGRESS) return false;
+        if (current.ownerId() != null && !current.ownerId().equals(memberId)) return false;
         tasks.put(taskId, new SharedTask(taskId, current.teamId(), current.title(),
-            current.description(), SharedTask.TaskStatus.FAILED, memberId,
+            current.description(), SharedTask.TaskStatus.FAILED,
+            current.ownerId() != null ? current.ownerId() : memberId,
             current.blockedBy(), current.createdAt(), System.currentTimeMillis()));
         return true;
     }
@@ -80,6 +84,10 @@ public final class SharedTaskList {
                 && isUnblocked(t))
             .sorted(Comparator.comparingLong(SharedTask::createdAt))
             .collect(java.util.stream.Collectors.toList());
+    }
+
+    public Optional<SharedTask> get(String taskId) {
+        return Optional.ofNullable(tasks.get(taskId));
     }
 
     public List<SharedTask> all() {

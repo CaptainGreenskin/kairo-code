@@ -45,6 +45,19 @@ public final class SubagentInboxHook {
         if (messages.isEmpty()) {
             return HookResult.proceed(event);
         }
+
+        boolean shutdownRequested = messages.stream()
+                .anyMatch(m -> m.contains("\"type\"") && m.contains("shutdown_request"));
+        if (shutdownRequested) {
+            registry.markShuttingDown(agentName);
+            return HookResult.inject(event,
+                    Msg.of(MsgRole.USER,
+                            "<shutdown_request>\nYou have been asked to shut down. "
+                                    + "Finish your current work immediately, report your final "
+                                    + "status, and stop.\n</shutdown_request>"),
+                    "SubagentInboxHook");
+        }
+
         String combined = messages.stream()
                 .map(m -> "<peer_message from=\"parent\">\n" + m + "\n</peer_message>")
                 .reduce((a, b) -> a + "\n\n" + b)

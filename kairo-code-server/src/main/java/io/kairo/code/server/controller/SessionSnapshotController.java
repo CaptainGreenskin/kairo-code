@@ -50,16 +50,25 @@ public class SessionSnapshotController {
 
     private final Path sessionsDir;
     private final ObjectMapper objectMapper;
+    private final io.kairo.code.service.SessionIndexService sessionIndexService;
 
     @Autowired
-    public SessionSnapshotController(ObjectMapper objectMapper) {
-        this(Paths.get(System.getProperty("user.home"), ".kairo-code", "sessions"), objectMapper);
+    public SessionSnapshotController(ObjectMapper objectMapper,
+                                     io.kairo.code.service.AgentService agentService) {
+        this(Paths.get(System.getProperty("user.home"), ".kairo-code", "sessions"),
+             objectMapper, agentService.getSessionIndexService());
     }
 
     /** Test-only — direct sessionsDir override. */
     public SessionSnapshotController(Path sessionsDir, ObjectMapper objectMapper) {
+        this(sessionsDir, objectMapper, new io.kairo.code.service.SessionIndexService());
+    }
+
+    SessionSnapshotController(Path sessionsDir, ObjectMapper objectMapper,
+                              io.kairo.code.service.SessionIndexService sessionIndexService) {
         this.sessionsDir = sessionsDir;
         this.objectMapper = objectMapper;
+        this.sessionIndexService = sessionIndexService;
     }
 
     public record SnapshotMeta(String sessionId, String name, long savedAt, int messageCount) {}
@@ -116,6 +125,13 @@ public class SessionSnapshotController {
         Path file = sessionsDir.resolve(id + ".json");
         Files.writeString(file, objectMapper.writeValueAsString(node), StandardCharsets.UTF_8);
 
+        int msgCount = node.path("messages").size();
+        String name = node.path("name").asText(null);
+        sessionIndexService.updateSnapshot(id, true, msgCount);
+        if (name != null && !name.isBlank()) {
+            sessionIndexService.updateName(id, name);
+        }
+
         evictOldSnapshots();
 
         return Map.of("sessionId", id, "savedAt", savedAt);
@@ -144,6 +160,7 @@ public class SessionSnapshotController {
         validateSessionId(id);
         Path file = sessionsDir.resolve(id + ".json");
         Files.deleteIfExists(file);
+        sessionIndexService.updateSnapshot(id, false, 0);
         return ResponseEntity.noContent().build();
     }
 
@@ -163,6 +180,7 @@ public class SessionSnapshotController {
         }
         obj.put("name", name);
         Files.writeString(file, objectMapper.writeValueAsString(node), StandardCharsets.UTF_8);
+        sessionIndexService.updateName(id, name);
         return true;
     }
 

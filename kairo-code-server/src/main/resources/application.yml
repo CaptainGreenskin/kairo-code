@@ -62,6 +62,23 @@ kairo:
       max-length-retries: 3
       tool-activity-lookback: 3
       min-tool-calls: 2
+  evolution:
+    enabled: true
+    skill-enabled: true
+    memory-enabled: true
+    auto-apply: false
+    iteration-threshold: 8
+    review-timeout-seconds: 120
+    governance:
+      quarantine: true
+      scan-required: true
+    curator:
+      enabled: true
+      auto-start: true
+      review-interval-minutes: 60
+      stale-after-days: 30
+      archive-after-days: 90
+
   code:
     # Leave model/provider/base-url empty when no env var is set so the resolve
     # chain in ServerConfig (env > ~/.kairo-code/config.properties > built-in default)

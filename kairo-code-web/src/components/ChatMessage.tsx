@@ -19,6 +19,7 @@ import { MessageReaction } from './MessageReaction';
 import { ReportLayout, extractHeadings, shouldUseReportLayout } from './ReportLayout';
 import { ExpertStepChatCard } from './ExpertStepChatCard';
 import { CompactionEventCard } from './CompactionEventCard';
+import { TaskNotificationCard } from './TaskNotificationCard';
 
 interface ChatMessageProps {
     message: Message;
@@ -139,6 +140,17 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
             maxTokens={message.compactionMeta.maxTokens}
             timestamp={message.timestamp}
             summary={message.compactionMeta.summary}
+        />;
+    }
+
+    if (message.kind === 'taskNotification' && message.taskNotificationMeta) {
+        return <TaskNotificationCard
+            taskId={message.taskNotificationMeta.taskId}
+            description={message.taskNotificationMeta.description}
+            status={message.taskNotificationMeta.status}
+            durationMs={message.taskNotificationMeta.durationMs}
+            result={message.taskNotificationMeta.result}
+            timestamp={message.timestamp}
         />;
     }
 

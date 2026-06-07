@@ -56,7 +56,7 @@ class TeamA2aWiringTest {
     @Test
     void apiTeamManagerBeanCreated() {
         InProcessAgentCardResolver resolver = config.agentCardResolver();
-        io.kairo.api.team.TeamManager apiTm = config.apiTeamManager(resolver);
+        io.kairo.api.team.TeamManager apiTm = config.teamManager(resolver);
         assertThat(apiTm).isNotNull();
     }
 
@@ -64,7 +64,7 @@ class TeamA2aWiringTest {
     void teamAwareA2aClientBeanCreated() {
         InProcessAgentCardResolver resolver = config.agentCardResolver();
         InProcessA2aClient a2aClient = config.inProcessA2aClient(resolver);
-        io.kairo.api.team.TeamManager apiTm = config.apiTeamManager(resolver);
+        io.kairo.api.team.TeamManager apiTm = config.teamManager(resolver);
 
         TeamAwareA2aClient teamClient = config.teamAwareA2aClient(a2aClient, resolver, apiTm);
         assertThat(teamClient).isNotNull();
@@ -74,13 +74,12 @@ class TeamA2aWiringTest {
     void teamAwareA2aClientCanRegisterAndDiscover() {
         InProcessAgentCardResolver resolver = config.agentCardResolver();
         InProcessA2aClient a2aClient = config.inProcessA2aClient(resolver);
-        io.kairo.api.team.TeamManager apiTm = config.apiTeamManager(resolver);
-        // Pre-create the team so addAgent succeeds
-        apiTm.create("expert-team");
+        io.kairo.api.team.TeamManager apiTm = config.teamManager(resolver);
+        io.kairo.api.team.Team team = apiTm.create("expert-team");
 
-        TeamAwareA2aClient teamClient = config.teamAwareA2aClient(a2aClient, resolver, apiTm);
+        TeamAwareA2aClient teamClient =
+                new TeamAwareA2aClient(a2aClient, resolver, apiTm, team.teamId());
 
-        // Create a minimal stub agent
         Agent stubAgent = new Agent() {
             @Override public String id() { return "test-agent"; }
             @Override public String name() { return "Test Agent"; }
@@ -94,7 +93,6 @@ class TeamA2aWiringTest {
         AgentCard card = AgentCard.of("test-agent", "Test Agent", "A test agent");
         teamClient.registerTeamAgent(card, stubAgent);
 
-        // Verify the agent is discoverable within the team
         var discovered = teamClient.discoverTeamAgents(null);
         assertThat(discovered).extracting(AgentCard::id).contains("test-agent");
     }

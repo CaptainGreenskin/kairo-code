@@ -125,6 +125,10 @@ public final class ReplChildSessionSpawner implements ChildSessionSpawner {
                         .withHooks(List.of(prefixedPrinter))
                         .asChildSession();
 
+        if (agentType != null) {
+            opts = opts.withAgentType(agentType);
+        }
+
         if (parentSkillRegistry != null && parentActiveSkills != null) {
             opts = opts.withSkills(parentSkillRegistry, parentActiveSkills);
         }

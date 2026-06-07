@@ -25,18 +25,25 @@ export const usePreferencesStore = create<PreferencesState>()(
     ),
 );
 
+const READ_SAFE_TOOLS = new Set([
+    'read_file', 'list_dir', 'grep', 'glob', 'web_search', 'web_fetch',
+    'search', 'find', 'list_files', 'read', 'skill_list',
+]);
+
 /**
  * Decide whether a tool call should be auto-approved given the current mode and tool name.
  * Returns `true` when the frontend should immediately call approveTool(true).
  *
  * `exit_plan_mode` is *never* auto-approved regardless of mode — its entire purpose is to
  * surface the proposed plan for user review before write-tools become available.
+ *
+ * Read-only tools are auto-approved in all modes (except exit_plan_mode).
  */
 export function shouldAutoApprove(mode: ApprovalMode, toolName: string): boolean {
     if (toolName === 'exit_plan_mode') return false;
+    if (READ_SAFE_TOOLS.has(toolName)) return true;
     if (mode === 'yolo') return true;
     if (mode === 'auto-safe') {
-        // bash is the only thing that can run arbitrary shell commands; keep it gated
         return toolName !== 'bash';
     }
     return false;

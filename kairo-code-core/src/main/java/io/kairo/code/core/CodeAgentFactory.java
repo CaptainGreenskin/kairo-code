@@ -12,6 +12,7 @@ import io.kairo.api.tool.UserApprovalHandler;
 import io.kairo.api.memory.MemoryStore;
 import io.kairo.api.tracing.Tracer;
 import io.kairo.code.core.mcp.McpConfig;
+import io.kairo.code.core.task.AgentType;
 import io.kairo.code.core.evolution.FailurePatternTracker;
 import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.evolution.ReflectionPipeline;
@@ -267,6 +268,12 @@ public final class CodeAgentFactory {
         TaskToolDependencies taskDeps = options.taskToolDependencies();
         if (taskDeps != null) {
             registry.registerTool(TaskTool.class);
+            // Scripted workflow only for parent sessions — child sessions should not
+            // orchestrate sub-workflows (same recursion guard as team tools).
+            if (!options.childSession()) {
+                registry.registerTool(
+                        io.kairo.code.core.workflow.ScriptedWorkflowTool.class);
+            }
         }
 
         // expert_team tool removed from Agent mode — it causes stalls and duplicates
@@ -296,6 +303,14 @@ public final class CodeAgentFactory {
                     new SendMessageTool(null, null, subagentReg));
         }
 
+        // Shared task board tools — available to ALL agents (coordinator + workers)
+        // so workers can claim/complete tasks. The SharedTaskList instance is injected
+        // via toolDependencies bean map for cross-session sharing.
+        registry.registerTool(io.kairo.code.core.team.tools.SharedTaskCreateTool.class);
+        registry.registerTool(io.kairo.code.core.team.tools.SharedTaskUpdateTool.class);
+        registry.registerTool(io.kairo.code.core.team.tools.SharedTaskListTool.class);
+        registry.registerTool(io.kairo.code.core.team.tools.SharedTaskGetTool.class);
+
         // Wire MCP tools from config if present.
         McpClientRegistry mcpRegistry = registerMcpTools(registry, config);
 
@@ -312,6 +327,14 @@ public final class CodeAgentFactory {
                 buildLlmBashClassifierIfEnabled(config, options, modelProvider);
         io.kairo.api.guardrail.GuardrailChain guardrailChain =
                 buildGuardrailChainOrNull(llmClassifier);
+
+        // Coordinator bash write guard: block file-writing bash commands
+        // so the coordinator cannot bypass write tool restriction via bash echo.
+        if (guardrailChain instanceof io.kairo.core.guardrail.DefaultGuardrailChain dgc
+                && options.agentType() != null
+                && "coordinator".equals(options.agentType().id())) {
+            dgc.addPolicy(new io.kairo.code.core.guardrail.BashWriteGuardPolicy());
+        }
 
         DefaultToolExecutor executor =
                 new DefaultToolExecutor(
@@ -363,6 +386,31 @@ public final class CodeAgentFactory {
             registry.registerInstance("list_plans", listPlans);
         }
 
+        // ── Hard tool filtering (MUST be after ALL tool registrations) ──────────
+        // When an AgentType with a non-null allowedTools whitelist is set, physically
+        // remove all tools NOT in the whitelist from the registry. Placed here — after
+        // MCP, workflow, plan-mode, skill tools are all registered — so nothing escapes.
+        AgentType agentType = options.agentType();
+        if (agentType != null && agentType.allowedTools() != null) {
+            Set<String> allowed = agentType.allowedTools();
+            List<ToolDefinition> toRemove = registry.getAll().stream()
+                    .filter(t -> !allowed.contains(t.name()))
+                    .toList();
+            for (ToolDefinition t : toRemove) {
+                registry.unregister(t.name());
+            }
+            List<String> keptNames = registry.getAll().stream()
+                    .map(ToolDefinition::name).sorted().toList();
+            List<String> removedNames = toRemove.stream()
+                    .map(ToolDefinition::name).sorted().toList();
+            log.info("AgentType '{}' tool filtering: kept {}/{} tools — kept={}, removed={}",
+                    agentType.id(), keptNames.size(),
+                    keptNames.size() + removedNames.size(), keptNames, removedNames);
+            // Defense-in-depth: set the same whitelist on the executor so tools
+            // registered dynamically after this point are also blocked at call time.
+            executor.setAllowedToolNames(agentType.allowedTools());
+        }
+
         Set<String> activeSkills = options.activeSkills();
         String systemPrompt =
                 resolveSystemPrompt(
@@ -372,6 +420,10 @@ public final class CodeAgentFactory {
                         activeSkills,
                         options.toolUsageTracker(),
                         options.memoryStore());
+
+        if (agentType != null && !agentType.systemPromptPrefix().isEmpty()) {
+            systemPrompt = agentType.systemPromptPrefix() + "\n\n" + systemPrompt;
+        }
 
         AgentBuilder builder =
                 AgentBuilder.create()
@@ -398,12 +450,18 @@ public final class CodeAgentFactory {
                         // through the 200K budget and IterationGuards fires GRACEFUL_EXIT.
                         // Defaults trigger snip@0.80 → micro@0.85 → collapse@0.90 → auto@0.95
                         // → partial@0.98 of effective budget (context − maxOutput − 13K buffer).
-                        .compactionThresholds(CompactionThresholds.DEFAULTS)
-                        // Enable smart continuation: when the model emits text-only
-                        // narration (zero tool calls) mid-task, nudge it to keep going
-                        // instead of terminating prematurely. Critical for chatty models
-                        // like glm-5.1 that narrate between tool rounds.
-                        .withSmartContinuation();
+                        .compactionThresholds(CompactionThresholds.DEFAULTS);
+
+        // Generic smart continuation (PendingTodoNudge + RecentToolActivity) is disabled:
+        // was causing "一直不停止" (infinite nudge loop) in web sessions.
+        // Only PendingBackgroundTaskStrategy is wired — it blocks (not nudge-loops)
+        // on the notification queue when background subagents are active.
+        if (taskDeps != null && taskDeps.subagentRegistry() != null
+                && taskDeps.notificationQueue() != null) {
+            builder.continuationStrategy(
+                    new io.kairo.code.core.task.PendingBackgroundTaskStrategy(
+                            taskDeps.subagentRegistry(), taskDeps.notificationQueue()));
+        }
 
         // Bind the session workspace so file tools resolve relative paths against workingDir (not
         // the JVM cwd) — keeping tool path resolution aligned with the executor's workspace-write
@@ -420,10 +478,24 @@ public final class CodeAgentFactory {
                     .sessionStorage(new io.kairo.core.session.FileSessionStorageProvider(sessionRoot));
         }
 
+        // Tool dependencies: bean map accessible via ToolContext.getBean()
+        Map<String, Object> toolDeps = new LinkedHashMap<>();
         if (taskDeps != null && !options.childSession()) {
-            Map<String, Object> deps = new LinkedHashMap<>();
-            deps.put(TaskToolDependencies.class.getName(), taskDeps);
-            builder.toolDependencies(deps);
+            toolDeps.put(TaskToolDependencies.class.getName(), taskDeps);
+            toolDeps.put(io.kairo.code.core.workflow.WorkflowDependencies.class.getName(),
+                    new io.kairo.code.core.workflow.WorkflowDependencies(
+                            taskDeps.spawner(),
+                            taskDeps.workspaceProvider(),
+                            config,
+                            io.kairo.code.core.workflow.WorkflowProgressEmitter.SLF4J_INSTANCE,
+                            taskDeps.subagentRegistry()));
+        }
+        // SharedTaskList: shared across ALL sessions in the same process (parent + children).
+        // Uses a global singleton so coordinator and spawned workers share the same task board.
+        toolDeps.put(io.kairo.code.core.team.SharedTaskList.class.getName(),
+                GlobalSharedTaskList.INSTANCE);
+        if (!toolDeps.isEmpty()) {
+            builder.toolDependencies(toolDeps);
         }
 
         if (options.approvalHandler() != null) {
@@ -448,6 +520,9 @@ public final class CodeAgentFactory {
         List<Object> hooks = options.hooks();
         for (Object hook : hooks) {
             builder.hook(hook);
+            if (hook instanceof io.kairo.api.agent.SystemPromptContributor spc) {
+                builder.systemPromptContributor(spc);
+            }
         }
 
         // Auto-register ContextWindowGuardHook: warns on large context to prevent GLM-5.1
@@ -994,7 +1069,8 @@ public final class CodeAgentFactory {
             SwarmCoordinator swarmCoordinator,
             TeamManager teamManager,
             MessageBus teamMessageBus,
-            String sessionId) {
+            String sessionId,
+            AgentType agentType) {
 
         public SessionOptions {
             if (hooks == null) hooks = List.of();
@@ -1004,7 +1080,7 @@ public final class CodeAgentFactory {
         public static SessionOptions empty() {
             return new SessionOptions(
                     null, null, List.of(), null, Set.of(), null, null, false, null, null, null,
-                    false, null, null, null, null, null, null, null);
+                    false, null, null, null, null, null, null, null, null);
         }
 
         public SessionOptions withModelProvider(ModelProvider provider) {
@@ -1012,7 +1088,8 @@ public final class CodeAgentFactory {
                     provider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         public SessionOptions withApprovalHandler(UserApprovalHandler handler) {
@@ -1020,7 +1097,8 @@ public final class CodeAgentFactory {
                     modelProvider, handler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         public SessionOptions withHooks(List<Object> hookList) {
@@ -1030,7 +1108,7 @@ public final class CodeAgentFactory {
                     skillRegistry, activeSkills, restoreFrom, taskToolDependencies,
                     childSession, textDeltaConsumer, toolUsageTracker, turnMetricsCollector,
                     isRepl, checkpointInitialMessage, memoryStore, tracer, swarmCoordinator,
-                    teamManager, teamMessageBus, sessionId);
+                    teamManager, teamMessageBus, sessionId, agentType);
         }
 
         public SessionOptions withSkills(SkillRegistry registry, Set<String> active) {
@@ -1039,7 +1117,8 @@ public final class CodeAgentFactory {
                     active == null ? Set.of() : Set.copyOf(active),
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         public SessionOptions withRestoreFrom(AgentSnapshot snapshot) {
@@ -1047,7 +1126,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     snapshot, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         public SessionOptions withTaskTool(TaskToolDependencies deps) {
@@ -1055,7 +1135,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, deps, childSession, textDeltaConsumer, toolUsageTracker,
                     turnMetricsCollector, isRepl, checkpointInitialMessage, memoryStore, tracer,
-                    swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    swarmCoordinator, teamManager, teamMessageBus, sessionId, agentType);
         }
 
         public SessionOptions withTextDeltaConsumer(
@@ -1064,7 +1144,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, consumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         public SessionOptions asChildSession() {
@@ -1072,7 +1153,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, true, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         public SessionOptions withToolUsageTracker(ToolUsageTracker tracker) {
@@ -1080,7 +1162,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     tracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         public SessionOptions withTurnMetricsCollector(TurnMetricsCollector collector) {
@@ -1088,7 +1171,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, collector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         public SessionOptions asReplSession() {
@@ -1096,7 +1180,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, true, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         /**
@@ -1109,7 +1194,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, msg,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         /**
@@ -1122,7 +1208,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    store, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    store, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         /**
@@ -1133,7 +1220,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, t, swarmCoordinator, teamManager, teamMessageBus, sessionId);
+                    memoryStore, t, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         /**
@@ -1155,7 +1243,8 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, coord, teamManager, teamMessageBus, sessionId);
+                    memoryStore, tracer, coord, teamManager, teamMessageBus, sessionId,
+                    agentType);
         }
 
         /**
@@ -1172,7 +1261,7 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, mgr, bus, sessionId);
+                    memoryStore, tracer, swarmCoordinator, mgr, bus, sessionId, agentType);
         }
 
         public SessionOptions withSessionId(String sid) {
@@ -1180,7 +1269,17 @@ public final class CodeAgentFactory {
                     modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
                     restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
                     toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
-                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sid);
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sid,
+                    agentType);
+        }
+
+        public SessionOptions withAgentType(AgentType type) {
+            return new SessionOptions(
+                    modelProvider, approvalHandler, hooks, skillRegistry, activeSkills,
+                    restoreFrom, taskToolDependencies, childSession, textDeltaConsumer,
+                    toolUsageTracker, turnMetricsCollector, isRepl, checkpointInitialMessage,
+                    memoryStore, tracer, swarmCoordinator, teamManager, teamMessageBus, sessionId,
+                    type);
         }
     }
 

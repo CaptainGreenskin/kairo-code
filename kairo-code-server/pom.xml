@@ -33,6 +33,10 @@
         </dependency>
         <dependency>
             <groupId>io.github.captaingreenskin</groupId>
+            <artifactId>kairo-spring-boot-starter-evolution</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.captaingreenskin</groupId>
             <artifactId>kairo-expert-team</artifactId>
         </dependency>
         <dependency>

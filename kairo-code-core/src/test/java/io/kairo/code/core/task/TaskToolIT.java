@@ -90,7 +90,9 @@ class TaskToolIT {
                         .withTaskTool(deps)
                         .asChildSession();
         CodeAgentSession child = CodeAgentFactory.createSession(CONFIG, childOpts);
-        assertThat(child.toolRegistry().get("task")).isEmpty();
+        // The task tool is registered (schema visible) but its dependencies are
+        // NOT wired for child sessions — invoking it returns an error.
+        assertThat(child.toolRegistry().get("task")).isPresent();
     }
 
     @Test
@@ -132,6 +134,7 @@ class TaskToolIT {
         input.put("description", "create hello.java");
         input.put("prompt", "write a Java file");
         input.put("__tool_use_id", "tu-it-1");
+        input.put("run_in_background", false);
 
         ToolContext ctx =
                 new ToolContext(

@@ -48,6 +48,7 @@ public final class TextOnlyStallHook {
 
     private final boolean isRepl;
     private int fileWriteCount;
+    private int totalToolCalls;
     private int stallInjections;
 
     public TextOnlyStallHook() {
@@ -57,11 +58,13 @@ public final class TextOnlyStallHook {
     public TextOnlyStallHook(boolean isRepl) {
         this.isRepl = isRepl;
         this.fileWriteCount = 0;
+        this.totalToolCalls = 0;
         this.stallInjections = 0;
     }
 
     @HookHandler(HookPhase.POST_ACTING)
     public HookResult<PostActingEvent> onPostActing(PostActingEvent event) {
+        totalToolCalls++;
         if (FILE_WRITE_TOOLS.contains(event.toolName())) {
             fileWriteCount++;
         }
@@ -70,7 +73,10 @@ public final class TextOnlyStallHook {
 
     @HookHandler(HookPhase.PRE_COMPLETE)
     public HookResult<PreCompleteEvent> onPreComplete(PreCompleteEvent event) {
-        if (isRepl || fileWriteCount > 0 || stallInjections >= MAX_INJECTIONS) {
+        // Skip nudge if: REPL mode, already wrote files, exhausted injections,
+        // or agent made substantial tool calls (task is read/analysis, not impl).
+        if (isRepl || fileWriteCount > 0 || stallInjections >= MAX_INJECTIONS
+                || totalToolCalls >= 3) {
             return HookResult.proceed(event);
         }
         stallInjections++;

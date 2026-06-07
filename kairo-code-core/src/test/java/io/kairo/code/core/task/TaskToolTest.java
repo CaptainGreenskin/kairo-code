@@ -80,6 +80,7 @@ class TaskToolTest {
         input.put("description", "add greeting file");
         input.put("prompt", "create child.txt");
         input.put("__tool_use_id", "tu-1");
+        input.put("run_in_background", false);
 
         ToolResult result = tool.execute(input, ctx).block();
 
@@ -126,6 +127,7 @@ class TaskToolTest {
         Map<String, Object> input = new HashMap<>();
         input.put("description", "throwaway");
         input.put("prompt", "create child.txt");
+        input.put("run_in_background", false);
 
         ToolResult result = tool.execute(input, ctxWithDeps(deps)).block();
 
@@ -154,6 +156,7 @@ class TaskToolTest {
         Map<String, Object> input = new HashMap<>();
         input.put("description", "no-op");
         input.put("prompt", "do nothing");
+        input.put("run_in_background", false);
 
         ToolResult result = tool.execute(input, ctxWithDeps(deps)).block();
 
@@ -223,6 +226,7 @@ class TaskToolTest {
         input.put("prompt", "Check the main service");
         input.put("expert_role", "reviewer");
         input.put("isolation", "none");
+        input.put("run_in_background", false);
 
         ToolResult result = tool.execute(input, ctx).block();
 
@@ -314,6 +318,7 @@ class TaskToolTest {
         input.put("description", "simple task");
         input.put("prompt", "just do work");
         input.put("isolation", "none");
+        input.put("run_in_background", false);
 
         ToolResult result = tool.execute(input, ctx).block();
 

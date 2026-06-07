@@ -31,7 +31,7 @@ import javax.annotation.Nullable;
  */
 public final class SubagentRegistry {
 
-    public enum Status { RUNNING, COMPLETED, FAILED }
+    public enum Status { RUNNING, SHUTTING_DOWN, COMPLETED, FAILED }
 
     public record Entry(
             String taskId,
@@ -55,6 +55,11 @@ public final class SubagentRegistry {
     public void markFailed(String name) {
         Entry e = byName.get(name);
         if (e != null) e.status().set(Status.FAILED);
+    }
+
+    public void markShuttingDown(String name) {
+        Entry e = byName.get(name);
+        if (e != null) e.status().set(Status.SHUTTING_DOWN);
     }
 
     public void unregister(String name) {

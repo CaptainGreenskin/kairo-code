@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, memo } from 'react';
 
-export type Phase = 'thinking' | 'tool' | 'writing';
+export type Phase = 'thinking' | 'tool' | 'writing' | 'waiting';
 
 interface ThinkingIndicatorProps {
     isVisible: boolean;
@@ -37,6 +37,18 @@ function ThinkingIndicatorInner({ isVisible, toolName, phase = 'thinking', toolE
     }, [thinkingText, expanded]);
 
     if (!isVisible) return null;
+
+    // Waiting phase: agent is parked while background workers run
+    if (phase === 'waiting') {
+        return (
+            <div className="flex justify-start">
+                <div className="flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)]">
+                    <div className="w-3 h-3 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
+                    <span>Waiting for background workers{dots}</span>
+                </div>
+            </div>
+        );
+    }
 
     // Tool phase with spinner and elapsed time
     if (phase === 'tool') {

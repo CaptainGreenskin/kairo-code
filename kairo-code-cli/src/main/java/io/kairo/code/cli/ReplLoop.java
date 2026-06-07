@@ -442,6 +442,10 @@ public class ReplLoop {
 
             printBanner(writer);
 
+            // Auto-resume: check for interrupted sessions and offer to resume
+            AutoResumeDetector.checkAndPrompt(
+                    config.workingDir(), context, lineReader, writer);
+
             // Resolve context window limit for the token status line.
             int contextLimit = eventPrinter != null
                     ? eventPrinter.maxContextTokens()
@@ -591,6 +595,9 @@ public class ReplLoop {
             if (eventPrinter != null) {
                 eventPrinter.printSessionSummary(elapsedMs);
             }
+            if (context.sessionWriter() != null) {
+                context.sessionWriter().writeEndMarker();
+            }
         } catch (IOException e) {
             log.error("Failed to create terminal", e);
             System.err.println("Error: Failed to create terminal — " + e.getMessage());
@@ -684,6 +691,7 @@ public class ReplLoop {
         registry.register(new McpServerCommand());
         registry.register(new io.kairo.code.cli.commands.CronCommand());
         registry.register(new io.kairo.code.cli.commands.LspCommand());
+        registry.register(new io.kairo.code.cli.commands.WorkflowsCommand());
 
         return registry;
     }

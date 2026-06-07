@@ -15,16 +15,47 @@ function formatDuration(ms: number): string {
     return `${m}m${s % 60}s`;
 }
 
-function buildToolSummary(events: SubagentEvent[]): string {
-    const counts: Record<string, number> = {};
-    for (const e of events) {
+function isReadTool(name: string): boolean {
+    return ['read', 'read_file', 'cat', 'view', 'batch_read'].some(k => name.toLowerCase().includes(k));
+}
+function isWriteTool(name: string): boolean {
+    return ['write', 'edit', 'create', 'patch', 'replace', 'batch_write'].some(k => name.toLowerCase().includes(k));
+}
+function isSearchTool(name: string): boolean {
+    return ['search', 'grep', 'find', 'glob', 'explore', 'tree'].some(k => name.toLowerCase().includes(k));
+}
+
+function buildSemanticSummary(events: SubagentEvent[]): string {
+    const completed = events.filter(e => e.childEventType === 'TOOL_RESULT');
+    if (completed.length === 0) return '';
+
+    let reads = 0, writes = 0, cmds = 0, searches = 0;
+    for (const e of completed) {
+        const name = e.childToolName ?? '';
+        if (isReadTool(name)) reads++;
+        else if (isWriteTool(name)) writes++;
+        else if (isSearchTool(name)) searches++;
+        else if (name === 'bash' || name === 'mvn' || name === 'terminal') cmds++;
+    }
+    const parts: string[] = [];
+    if (reads > 0) parts.push(`Read ${reads}`);
+    if (writes > 0) parts.push(`Write ${writes}`);
+    if (cmds > 0) parts.push(`Cmd ${cmds}`);
+    if (searches > 0) parts.push(`Search ${searches}`);
+    return parts.join(' · ');
+}
+
+function getLatestActivity(events: SubagentEvent[]): string | null {
+    for (let i = events.length - 1; i >= 0; i--) {
+        const e = events[i];
+        if (e.childEventType === 'TOOL_CALL' && e.childToolName) {
+            return `Running ${e.childToolName}...`;
+        }
         if (e.childEventType === 'TOOL_RESULT' && e.childToolName) {
-            counts[e.childToolName] = (counts[e.childToolName] || 0) + 1;
+            return `Finished ${e.childToolName}`;
         }
     }
-    return Object.entries(counts)
-        .map(([name, count]) => `${name} ${count}`)
-        .join(' · ');
+    return null;
 }
 
 function OutcomeIcon({ outcome }: { outcome: string }) {
@@ -37,7 +68,7 @@ function OutcomeIcon({ outcome }: { outcome: string }) {
 }
 
 export function SubagentCard({ toolCall, onStop }: SubagentCardProps) {
-    const [expanded, setExpanded] = useState(true);
+    const [expanded, setExpanded] = useState(false);
 
     const description = (toolCall.input?.description as string) || (toolCall.input?.prompt as string)?.slice(0, 80) || 'Subtask';
     const isRunning = toolCall.status === 'approved' || toolCall.status === 'pending';
@@ -51,7 +82,8 @@ export function SubagentCard({ toolCall, onStop }: SubagentCardProps) {
     const insertions = meta['task.insertions'] as number | undefined;
     const deletions = meta['task.deletions'] as number | undefined;
 
-    const toolSummary = buildToolSummary(events);
+    const semanticSummary = buildSemanticSummary(events);
+    const latestActivity = isRunning ? getLatestActivity(events) : null;
     const elapsed = toolCall.progressElapsedMs
         ? formatDuration(toolCall.progressElapsedMs)
         : toolCall.durationMs
@@ -115,9 +147,32 @@ export function SubagentCard({ toolCall, onStop }: SubagentCardProps) {
                 )}
             </div>
 
+            {/* Collapsed summary: semantic activity line */}
+            {!expanded && (semanticSummary || latestActivity) && (
+                <div className="px-3 pb-2 -mt-0.5 flex items-center gap-2">
+                    {semanticSummary && (
+                        <span className="text-[10px] text-[var(--text-muted)]">
+                            {semanticSummary}
+                        </span>
+                    )}
+                    {latestActivity && (
+                        <span className="text-[10px] text-blue-400 animate-pulse">
+                            {latestActivity}
+                        </span>
+                    )}
+                </div>
+            )}
+
             {/* Body */}
             {expanded && (
                 <div className="px-3 pb-2 space-y-1.5">
+                    {/* Semantic summary */}
+                    {semanticSummary && (
+                        <p className="text-[10px] text-[var(--text-muted)]">
+                            {semanticSummary}
+                        </p>
+                    )}
+
                     {/* Tool call activity stream */}
                     {events.length > 0 && (
                         <div className="flex flex-wrap gap-1">
@@ -145,13 +200,6 @@ export function SubagentCard({ toolCall, onStop }: SubagentCardProps) {
                     {isRunning && events.length === 0 && (
                         <p className="text-[10px] text-[var(--text-muted)] italic">
                             Spawning child agent...
-                        </p>
-                    )}
-
-                    {/* Tool summary when collapsed/done */}
-                    {isDone && toolSummary && (
-                        <p className="text-[10px] text-[var(--text-muted)]">
-                            {toolSummary}
                         </p>
                     )}
 

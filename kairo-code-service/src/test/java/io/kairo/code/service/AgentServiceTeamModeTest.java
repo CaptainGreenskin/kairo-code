@@ -2,9 +2,9 @@ package io.kairo.code.service;
 
 import io.kairo.api.agent.Agent;
 import io.kairo.code.core.CodeAgentConfig;
-import io.kairo.code.core.team.MessageBus;
+import io.kairo.api.team.MessageBus;
 import io.kairo.code.core.team.SwarmCoordinator;
-import io.kairo.code.core.team.TeamManager;
+import io.kairo.api.team.TeamManager;
 import io.kairo.code.service.agent.AgentSessionPayload;
 import io.kairo.code.service.team.TriageGate;
 import org.junit.jupiter.api.Test;
@@ -33,11 +33,11 @@ class AgentServiceTeamModeTest {
     @Test
     void createSession_teamMode_normalizesToAgent() throws Exception {
         AgentService service = new AgentService();
-        injectTeamPrimitives(service, new TeamManager(), new MessageBus());
+        injectTeamPrimitives(service, stubTeamManager(), stubMessageBus());
 
         String sid = service.createSession(CONFIG, null, false, "team");
         try {
-            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            AgentService.SessionEntry entry = sessionEntryOf(service, sid);
             assertThat(entry).isNotNull();
             assertThat(entry.sessionMode()).isEqualTo("agent");
             assertThat(entry.payload()).isInstanceOf(AgentSessionPayload.class);
@@ -52,7 +52,7 @@ class AgentServiceTeamModeTest {
 
         String sid = service.createSession(CONFIG, null, false, "team");
         try {
-            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            AgentService.SessionEntry entry = sessionEntryOf(service, sid);
             assertThat(entry).isNotNull();
             assertThat(entry.sessionMode()).isEqualTo("agent");
             assertThat(entry.payload()).isInstanceOf(AgentSessionPayload.class);
@@ -62,16 +62,16 @@ class AgentServiceTeamModeTest {
     }
 
     @Test
-    void createSession_expertsMode_normalizesToAgentWithEscalation() throws Exception {
+    void createSession_expertsMode_preservesExpertsMode() throws Exception {
         AgentService service = new AgentService();
-        injectTeamPrimitives(service, new TeamManager(), new MessageBus());
+        injectTeamPrimitives(service, stubTeamManager(), stubMessageBus());
         injectExpertsPrimitives(service, newStubSwarmCoordinator(), goal -> true);
 
         String sid = service.createSession(withWorkingDir(), null, false, "experts");
         try {
-            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            AgentService.SessionEntry entry = sessionEntryOf(service, sid);
             assertThat(entry).isNotNull();
-            assertThat(entry.sessionMode()).isEqualTo("agent");
+            assertThat(entry.sessionMode()).isEqualTo("experts");
             assertThat(entry.payload()).isInstanceOf(AgentSessionPayload.class);
 
             AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
@@ -86,12 +86,12 @@ class AgentServiceTeamModeTest {
     @Test
     void createSession_expertsMode_noEscalationWhenSwarmCoordinatorMissing() throws Exception {
         AgentService service = new AgentService();
-        injectTeamPrimitives(service, new TeamManager(), new MessageBus());
+        injectTeamPrimitives(service, stubTeamManager(), stubMessageBus());
         injectExpertsPrimitives(service, null, goal -> true);
 
         String sid = service.createSession(withWorkingDir(), null, false, "experts");
         try {
-            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            AgentService.SessionEntry entry = sessionEntryOf(service, sid);
             assertThat(entry).isNotNull();
             AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
             assertThat(escalationConfigOf(payload))
@@ -105,12 +105,12 @@ class AgentServiceTeamModeTest {
     @Test
     void createSession_expertsMode_noEscalationWhenTriageGateMissing() throws Exception {
         AgentService service = new AgentService();
-        injectTeamPrimitives(service, new TeamManager(), new MessageBus());
+        injectTeamPrimitives(service, stubTeamManager(), stubMessageBus());
         injectExpertsPrimitives(service, newStubSwarmCoordinator(), null);
 
         String sid = service.createSession(withWorkingDir(), null, false, "experts");
         try {
-            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            AgentService.SessionEntry entry = sessionEntryOf(service, sid);
             assertThat(entry).isNotNull();
             AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
             assertThat(escalationConfigOf(payload))
@@ -124,12 +124,12 @@ class AgentServiceTeamModeTest {
     @Test
     void createSession_expertsMode_wiresNarratorModelProvider() throws Exception {
         AgentService service = new AgentService();
-        injectTeamPrimitives(service, new TeamManager(), new MessageBus());
+        injectTeamPrimitives(service, stubTeamManager(), stubMessageBus());
         injectExpertsPrimitives(service, newStubSwarmCoordinator(), goal -> true);
 
         String sid = service.createSession(withWorkingDir(), null, false, "experts");
         try {
-            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            AgentService.SessionEntry entry = sessionEntryOf(service, sid);
             assertThat(entry).isNotNull();
             AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
             AgentSessionPayload.EscalationConfig esc = escalationConfigOf(payload);
@@ -147,7 +147,7 @@ class AgentServiceTeamModeTest {
         AgentService service = new AgentService();
         String sid = service.createSession(CONFIG, null, false, "agent");
         try {
-            AgentService.SessionEntry entry = sessionsFieldOf(service).get(sid);
+            AgentService.SessionEntry entry = sessionEntryOf(service, sid);
             assertThat(entry).isNotNull();
             AgentSessionPayload payload = (AgentSessionPayload) entry.payload();
             assertThat(escalationConfigOf(payload))
@@ -189,7 +189,7 @@ class AgentServiceTeamModeTest {
                 null, new io.kairo.multiagent.orchestration.SimpleEvaluationStrategy(),
                 null, planner, registry);
         return new SwarmCoordinator(
-                coord, registry, new io.kairo.multiagent.orchestration.tck.NoopMessageBus(), List.<Agent>of());
+                coord, registry, stubMessageBus(), List.<Agent>of());
     }
 
     private static AgentSessionPayload.EscalationConfig escalationConfigOf(
@@ -205,11 +205,49 @@ class AgentServiceTeamModeTest {
         f.set(target, value);
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, AgentService.SessionEntry> sessionsFieldOf(
-            AgentService service) throws Exception {
-        Field f = AgentService.class.getDeclaredField("sessions");
+    private static SessionRegistry registryOf(AgentService service) throws Exception {
+        Field f = AgentService.class.getDeclaredField("registry");
         f.setAccessible(true);
-        return (Map<String, AgentService.SessionEntry>) f.get(service);
+        return (SessionRegistry) f.get(service);
+    }
+
+    private static AgentService.SessionEntry sessionEntryOf(
+            AgentService service, String sid) throws Exception {
+        SessionContext ctx = registryOf(service).get(sid);
+        return ctx != null ? ctx.entry() : null;
+    }
+
+    private static TeamManager stubTeamManager() {
+        return new TeamManager() {
+            @Override
+            public io.kairo.api.team.Team create(io.kairo.api.team.TeamCreateRequest req) {
+                return new io.kairo.api.team.Team("stub", List.of(), stubMessageBus());
+            }
+            @Override
+            public void delete(String teamId) {}
+            @Override
+            public io.kairo.api.team.Team get(String teamId) { return null; }
+            @Override
+            public void addAgent(String teamId, Agent agent) {}
+            @Override
+            public void removeAgent(String teamId, String agentId) {}
+        };
+    }
+
+    private static MessageBus stubMessageBus() {
+        return new MessageBus() {
+            @Override
+            public reactor.core.publisher.Mono<Void> send(String from, String to, io.kairo.api.message.Msg msg) {
+                return reactor.core.publisher.Mono.empty();
+            }
+            @Override
+            public reactor.core.publisher.Flux<io.kairo.api.message.Msg> receive(String agentId) {
+                return reactor.core.publisher.Flux.empty();
+            }
+            @Override
+            public reactor.core.publisher.Mono<Void> broadcast(String from, io.kairo.api.message.Msg msg) {
+                return reactor.core.publisher.Mono.empty();
+            }
+        };
     }
 }

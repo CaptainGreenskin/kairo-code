@@ -31,7 +31,7 @@ import io.kairo.multiagent.orchestration.ExpertTeamCoordinator;
 import io.kairo.multiagent.orchestration.SimpleEvaluationStrategy;
 import io.kairo.multiagent.orchestration.internal.DefaultPlanner;
 import io.kairo.multiagent.subagent.ExpertRoleRegistry;
-import io.kairo.multiagent.orchestration.tck.NoopMessageBus;
+import io.kairo.code.cli.testutil.NoopMessageBus;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.Duration;

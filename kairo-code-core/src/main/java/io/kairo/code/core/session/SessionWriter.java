@@ -127,6 +127,50 @@ public class SessionWriter {
     }
 
     /**
+     * Write a session-end marker to the JSONL file. Call on clean shutdown so
+     * {@link #hasEndMarker()} can detect interrupted (crash) sessions.
+     */
+    public void writeEndMarker() {
+        try {
+            Path parent = sessionFile.getParent();
+            if (parent != null && !Files.isDirectory(parent)) {
+                Files.createDirectories(parent);
+            }
+            Map<String, Object> marker = Map.of(
+                    "type", "session_end",
+                    "ts", Instant.now().toString());
+            String jsonLine = mapper.writeValueAsString(marker) + "\n";
+            Files.writeString(sessionFile, jsonLine,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND,
+                    StandardOpenOption.WRITE);
+        } catch (IOException e) {
+            log.warn("Failed to write end marker to {}: {}", sessionFile, e.getMessage());
+        }
+    }
+
+    /**
+     * Check whether the session file ends with a session_end marker.
+     * A missing marker indicates the session was interrupted.
+     */
+    public boolean hasEndMarker() {
+        if (!Files.exists(sessionFile)) return false;
+        try (BufferedReader reader = Files.newBufferedReader(sessionFile)) {
+            String lastLine = null;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.isBlank()) lastLine = line;
+            }
+            if (lastLine == null) return false;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = mapper.readValue(lastLine, Map.class);
+            return "session_end".equals(map.get("type"));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
      * Rebuild the in-memory index from the session file on disk.
      * Useful when resuming a session from an existing JSONL file.
      */
@@ -141,6 +185,7 @@ public class SessionWriter {
     @SuppressWarnings("unchecked")
     private SessionTurn parseTurn(String json) throws JsonProcessingException {
         Map<String, Object> map = mapper.readValue(json, Map.class);
+        if (map.containsKey("type")) return null;
         String role = (String) map.get("role");
         String content = (String) map.get("content");
         int tokens = map.get("tokens") instanceof Number n ? n.intValue() : 0;

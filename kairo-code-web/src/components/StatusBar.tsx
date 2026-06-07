@@ -14,6 +14,8 @@ interface StatusBarProps {
     onOpenTimeline?: () => void;
     onExport?: () => void;
     onOpenMcp?: () => void;
+    evolvedSkillCount?: number;
+    evolutionReviewing?: boolean;
 }
 
 const statusDotClass: Record<ConnectionStatus, string> = {
@@ -38,6 +40,8 @@ export function StatusBar({
     onOpenShortcuts,
     onToggleTheme,
     onOpenShell,
+    evolvedSkillCount,
+    evolutionReviewing,
     onOpenBookmarks,
     onOpenTimeline,
     onExport,
@@ -72,6 +76,18 @@ export function StatusBar({
                     </span>
                 )}
                 {currentModel && <span className="font-mono">{currentModel}</span>}
+                {evolutionReviewing && (
+                    <span className="flex items-center gap-1 text-purple-400 animate-pulse" title="Self-evolution review in progress">
+                        <span>🧬</span>
+                        <span>Evolving...</span>
+                    </span>
+                )}
+                {!evolutionReviewing && evolvedSkillCount != null && evolvedSkillCount > 0 && (
+                    <span className="flex items-center gap-1 text-purple-400" title={`${evolvedSkillCount} evolved skill${evolvedSkillCount > 1 ? 's' : ''} active`}>
+                        <span>✨</span>
+                        <span>{evolvedSkillCount} skill{evolvedSkillCount > 1 ? 's' : ''}</span>
+                    </span>
+                )}
             </div>
             <div className="flex items-center gap-2">
                 {onOpenMemory && (

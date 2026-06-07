@@ -207,6 +207,13 @@ public final class AgentSessionPayload implements SessionPayload {
 
         long startedAtMs = System.currentTimeMillis();
 
+        // Heartbeat: emit a lightweight HEARTBEAT event (not THINKING) so the frontend
+        // stall detector updates lastEventAt without causing UI re-renders or state changes.
+        Disposable heartbeat = reactor.core.publisher.Flux.interval(
+                        java.time.Duration.ofSeconds(30), java.time.Duration.ofSeconds(30))
+                .takeWhile(tick -> running.get())
+                .subscribe(tick -> ctx.emit(AgentEvent.heartbeat(sessionId)));
+
         // Subscribe to agent.call() — terminal events (DONE/ERROR) are emitted by
         // AgentEventBridgeHook.onSessionEnd(), not here.
         Disposable disposable = localAgent.call(userMsg)
@@ -215,6 +222,7 @@ public final class AgentSessionPayload implements SessionPayload {
                         thinkingConsumer))
                 .subscribeOn(Schedulers.boundedElastic())
                 .doFinally(signal -> {
+                    heartbeat.dispose();
                     slot.close();
                     running.set(false);
                     currentRun.set(null);

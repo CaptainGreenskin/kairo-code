@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
 
-const YELLOW_THRESHOLD_MS = 30_000;
-const RED_THRESHOLD_MS = 120_000;
+const YELLOW_THRESHOLD_MS = 60_000;
+const RED_THRESHOLD_MS = 300_000;
 
 interface Props {
     /** Force-cancel callback. Wired to {@code handleStop} in App.tsx. */

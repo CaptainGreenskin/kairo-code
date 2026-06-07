@@ -22,7 +22,8 @@ public enum AgentType {
     EXPLORE(
             "explore",
             "Fast read-only search agent for locating code. Use it to find files, grep for symbols, or answer 'where is X defined'. Do NOT use for code modifications.",
-            Set.of("bash", "read", "grep", "glob", "tree", "batch_read", "diff", "json_query", "git"),
+            Set.of("bash", "read", "grep", "glob", "tree", "batch_read", "diff", "json_query", "git",
+                    "task_create", "task_update", "task_list", "task_get"),
             "You are a read-only exploration agent. Your job is to search and analyze code — never modify files. "
                     + "Be thorough but concise. Return findings as structured data the parent agent can act on."
     ),
@@ -30,7 +31,8 @@ public enum AgentType {
     PLAN(
             "plan",
             "Software architect agent for designing implementation plans. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs.",
-            Set.of("bash", "read", "grep", "glob", "tree", "batch_read", "diff", "json_query", "git"),
+            Set.of("bash", "read", "grep", "glob", "tree", "batch_read", "diff", "json_query", "git",
+                    "task_create", "task_update", "task_list", "task_get"),
             "You are a planning agent. Analyze the codebase, identify the right approach, and produce a clear "
                     + "step-by-step implementation plan. Do NOT modify any files — only read and analyze. "
                     + "Your output should be a structured plan the parent agent can execute."
@@ -47,9 +49,32 @@ public enum AgentType {
     REVIEWER(
             "reviewer",
             "Code review agent. Reads code and git diffs, identifies bugs, suggests improvements. Read-only.",
-            Set.of("bash", "read", "grep", "glob", "tree", "batch_read", "diff", "json_query", "git"),
+            Set.of("bash", "read", "grep", "glob", "tree", "batch_read", "diff", "json_query", "git",
+                    "task_create", "task_update", "task_list", "task_get"),
             "You are a code reviewer. Analyze the code for correctness bugs, security issues, performance problems, "
                     + "and code quality. Be specific — cite file paths and line numbers. Do NOT modify files."
+    ),
+
+    COORDINATOR(
+            "coordinator",
+            "Orchestration-only agent that understands context then delegates all modifications to specialized workers.",
+            Set.of("task", "scripted_workflow", "task_create", "task_update", "task_list",
+                    "task_get", "todo_read", "todo_write", "team_create", "send_message",
+                    "team_delete", "enter_plan_mode", "exit_plan_mode", "list_plans",
+                    "ask_user", "read", "bash", "grep", "glob", "tree", "batch_read",
+                    "diff", "json_query", "git"),
+            "You are a Coordinator Agent. Your job is to understand the task, create a plan, "
+                    + "then delegate all implementation work to specialized workers via the task tool. "
+                    + "You can read files and search code to understand context, but you MUST NOT "
+                    + "write, edit, or create files directly — spawn coder/explore/reviewer workers instead. "
+                    + "Rules:\n"
+                    + "- Always create a plan before spawning workers\n"
+                    + "- Each worker should have a clear, bounded scope\n"
+                    + "- Provide workers with specific instructions and expected outputs\n"
+                    + "- Monitor progress and synthesize results into a coherent response\n"
+                    + "- Use task_create/task_update/task_list to manage a shared task board\n"
+                    + "- When all work is done, send a shutdown message to each worker via send_message: "
+                    + "{\"type\":\"shutdown_request\"}"
     );
 
     private final String id;
@@ -82,6 +107,7 @@ public enum AgentType {
         map.put("coder", CODER);
         map.put("reviewer", REVIEWER);
         map.put("general", GENERAL_PURPOSE);
+        map.put("coordinator", COORDINATOR);
         BY_ID = Map.copyOf(map);
     }
 
@@ -97,6 +123,6 @@ public enum AgentType {
      * List all available agent type IDs for error messages.
      */
     public static List<String> availableIds() {
-        return List.of("general-purpose", "explore", "plan", "coder", "reviewer");
+        return List.of("general-purpose", "explore", "plan", "coder", "reviewer", "coordinator");
     }
 }

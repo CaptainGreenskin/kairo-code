@@ -319,7 +319,7 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
             patchSession(state, sid, (s) => ({
                 ...s,
                 messages: s.messages.map((m) =>
-                    m.id === mid ? { ...m, thinking: (m.thinking ?? '') + text } : m,
+                    m.id === mid ? { ...m, thinking: text } : m,
                 ),
             })),
         ),

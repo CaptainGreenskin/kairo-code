@@ -106,7 +106,9 @@ public class TaskTool implements SyncTool {
                             + "'explore' (read-only search/analysis), "
                             + "'plan' (architecture/design planning, read-only), "
                             + "'coder' (implementation with full write access), "
-                            + "'reviewer' (code review, read-only). "
+                            + "'reviewer' (code review, read-only), "
+                            + "'coordinator' (orchestration-only — can read code but delegates all "
+                            + "modifications to workers via task tool). "
                             + "Choose based on what tools the agent needs.",
             required = false)
     private String subagent_type;
@@ -150,6 +152,22 @@ public class TaskTool implements SyncTool {
                             + "auto-expanded to 'expert:reviewer'.",
             required = false)
     private String expert_role;
+
+    @ToolParam(
+            description =
+                    "When true, the child's output is verified by a model before returning to the parent. "
+                            + "The verifier judges whether the output correctly fulfills the original prompt. "
+                            + "If verification returns REVISE, the child is retried with feedback (up to 2 times).",
+            required = false)
+    private Boolean verify;
+
+    @ToolParam(
+            description =
+                    "Model to use for verification (only effective when verify=true). "
+                            + "Defaults to the parent session's model. Set to a stronger model for higher "
+                            + "quality verification.",
+            required = false)
+    private String verify_model;
 
     @Override
     public Mono<ToolResult> execute(Map<String, Object> input, ToolContext context) {
@@ -255,21 +273,31 @@ public class TaskTool implements SyncTool {
             final String finalModelOverride = modelOverride;
             final String finalDescIn = descIn;
             try {
-                final String finalAgentName = agentName;
-                final boolean hasName = finalAgentName != null && !finalAgentName.isBlank();
-                if (hasName && deps.subagentRegistry() != null) {
+                final boolean hasExplicitName = agentName != null && !agentName.isBlank();
+                // Always register async tasks so PendingBackgroundTaskStrategy can track them.
+                // Use the explicit name if provided, otherwise fall back to the taskId.
+                final String finalAgentName = hasExplicitName ? agentName : taskId;
+                if (deps.subagentRegistry() != null) {
                     deps.subagentRegistry().register(finalAgentName, taskId);
                 }
-                CodeAgentSession child = hasName && deps.subagentRegistry() != null
+                CodeAgentSession child = deps.subagentRegistry() != null
                         ? deps.spawner().spawn(taskId, workDir, finalAgentType, finalModelOverride,
                                 finalAgentName, deps.subagentRegistry())
                         : deps.spawner().spawn(taskId, workDir, finalAgentType, finalModelOverride);
+                final Boolean finalVerify = boolInput(input, "verify");
+                final String finalVerifyModel = stringInput(input, "verify_model");
                 Thread.startVirtualThread(() -> {
                     long startMs = System.currentTimeMillis();
                     String resultText = null;
                     Throwable failure = null;
                     try {
                         Msg response = child.agent().call(Msg.of(MsgRole.USER, effectivePrompt)).block();
+                        if (Boolean.TRUE.equals(finalVerify) && response != null
+                                && deps.parentConfig() != null) {
+                            response = runVerification(
+                                    response, effectivePrompt, finalVerifyModel,
+                                    deps.parentConfig(), child, taskId);
+                        }
                         if (response != null) {
                             resultText = response.text();
                         }
@@ -278,6 +306,25 @@ public class TaskTool implements SyncTool {
                         LOG.warn("Background task {} failed: {}", taskId, t.toString());
                     } finally {
                         if (isolated) {
+                            if (failure == null) {
+                                try {
+                                    io.kairo.code.core.workspace.DiffStats bgDiff =
+                                            provider.lifecycle().diff(workDir);
+                                    if (!bgDiff.isEmpty()) {
+                                        WorktreeMergeChoice bgChoice = deps.mergePrompter()
+                                                .prompt(taskId, finalDescIn, bgDiff, workDir)
+                                                .blockOptional()
+                                                .orElse(WorktreeMergeChoice.DISCARD);
+                                        applyChoice(provider.lifecycle(), bgChoice, taskId,
+                                                provider.parentRoot(), workDir);
+                                        LOG.info("Background task {} worktree {}: {}",
+                                                taskId, bgChoice, bgDiff);
+                                    }
+                                } catch (Exception e) {
+                                    LOG.warn("Background task {} merge failed: {}",
+                                            taskId, e.getMessage());
+                                }
+                            }
                             try { provider.release(ws.id()); } catch (Exception ignored) {}
                         }
                         if (finalAgentName != null && !finalAgentName.isBlank()
@@ -328,10 +375,20 @@ public class TaskTool implements SyncTool {
         Msg childResponse;
         Throwable childFailure = null;
         CodeAgentSession child = null;
+        Boolean verifyInput = boolInput(input, "verify");
+        String verifyModelInput = stringInput(input, "verify_model");
         try {
             child = deps.spawner().spawn(taskId, workDir, agentType, modelOverride);
             childResponse =
                     child.agent().call(Msg.of(MsgRole.USER, effectivePrompt)).block();
+
+            // Verification loop: if verify=true and parentConfig is available
+            if (Boolean.TRUE.equals(verifyInput) && childResponse != null
+                    && deps.parentConfig() != null) {
+                childResponse = runVerification(
+                        childResponse, effectivePrompt, verifyModelInput,
+                        deps.parentConfig(), child, taskId);
+            }
         } catch (Throwable t) {
             childResponse = null;
             childFailure = t;
@@ -380,6 +437,52 @@ public class TaskTool implements SyncTool {
     }
 
     /* ------------------------------------------------------------------ helpers */
+
+    private static final int MAX_VERIFY_ATTEMPTS = 2;
+
+    /**
+     * Run the verification loop: verify child output with a stronger model, retry on REVISE.
+     */
+    private static Msg runVerification(
+            Msg childResponse, String originalPrompt, String verifyModelOverride,
+            io.kairo.code.core.CodeAgentConfig parentConfig, CodeAgentSession child, String taskId) {
+
+        String verifyModelName = (verifyModelOverride != null && !verifyModelOverride.isBlank())
+                ? verifyModelOverride : parentConfig.modelName();
+        io.kairo.api.model.ModelProvider verifyProvider =
+                io.kairo.code.core.CodeAgentFactory.buildModelProvider(
+                        parentConfig.apiKey(), parentConfig.baseUrl());
+
+        Msg current = childResponse;
+        for (int attempt = 0; attempt < MAX_VERIFY_ATTEMPTS; attempt++) {
+            SubagentVerifier.VerificationResult vr = SubagentVerifier.verify(
+                    originalPrompt, current.text(), verifyProvider, verifyModelName);
+
+            if (vr.verdict() == SubagentVerifier.Verdict.PASS) {
+                LOG.debug("Task {} verification PASS on attempt {}", taskId, attempt);
+                return current;
+            }
+            if (vr.verdict() == SubagentVerifier.Verdict.FAIL) {
+                LOG.info("Task {} verification FAIL: {}", taskId, vr.feedback());
+                return Msg.of(MsgRole.ASSISTANT,
+                        current.text() + "\n\n[VERIFICATION FAILED: " + vr.feedback() + "]");
+            }
+            // REVISE: retry the child with feedback
+            LOG.info("Task {} verification REVISE (attempt {}): {}", taskId, attempt + 1, vr.feedback());
+            try {
+                Msg retry = child.agent().call(Msg.of(MsgRole.USER,
+                        "Your previous output was reviewed and needs revision:\n\n"
+                                + vr.feedback() + "\n\nPlease revise your output.")).block();
+                if (retry != null) {
+                    current = retry;
+                }
+            } catch (Exception e) {
+                LOG.warn("Task {} verification retry failed: {}", taskId, e.getMessage());
+                break;
+            }
+        }
+        return current;
+    }
 
     /**
      * Build the effective prompt sent to the child agent. If an expert profile is resolved, its

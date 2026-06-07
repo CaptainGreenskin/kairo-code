@@ -93,6 +93,10 @@ public final class ServerChildSessionSpawner implements ChildSessionSpawner {
                 .withHooks(hooks)
                 .asChildSession();
 
+        if (agentType != null) {
+            opts = opts.withAgentType(agentType);
+        }
+
         if (depth < 1 && workspaceProvider != null) {
             ServerChildSessionSpawner childSpawner = new ServerChildSessionSpawner(
                     childConfig, modelProvider, parentSink, parentSessionId, depth + 1, workspaceProvider);

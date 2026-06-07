@@ -1,4 +1,4 @@
-import type { ServerConfig, SessionInfo, FileEntry, FileContentResponse, SearchResponse } from '@/types/agent';
+import type { ServerConfig, SessionInfo, SessionIndexEntry, FileEntry, FileContentResponse, SearchResponse } from '@/types/agent';
 
 const API_BASE = '/api';
 
@@ -40,6 +40,10 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 export async function listSessions(): Promise<SessionInfo[]> {
     return request<SessionInfo[]>('/sessions');
+}
+
+export async function fetchSessionIndex(): Promise<SessionIndexEntry[]> {
+    return request<SessionIndexEntry[]>('/sessions/index');
 }
 
 function buildQuery(params: Record<string, string | number | undefined>): string {

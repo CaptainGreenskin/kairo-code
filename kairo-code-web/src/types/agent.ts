@@ -188,9 +188,16 @@ export interface Message {
     imageMediaType?: string;   // e.g. "image/png"
     /** When set, this message renders as a live expert-step card (qoder-style inline agent
      *  card) bound to expertTeamStore, instead of a plain text bubble. */
-    kind?: 'expertStep' | 'compaction';
+    kind?: 'expertStep' | 'compaction' | 'taskNotification';
     stepRef?: { teamId: string; stepId: string };
     compactionMeta?: { beforeTokens: number; maxTokens: number; summary?: string };
+    taskNotificationMeta?: {
+        taskId: string;
+        description: string;
+        status: 'completed' | 'failed';
+        durationMs: number;
+        result: string;
+    };
     /** Reasoning_content captured during AGENT_THINKING events. Pinned onto the
      *  message so users can expand it in the chat after the response completes,
      *  mirroring Claude Code's collapsible 思考过程 box. */
@@ -252,6 +259,22 @@ export interface SessionInfo {
     running?: boolean;
     workspaceId?: string;
     isGit?: boolean;
+}
+
+export type SessionStatus = 'active' | 'idle' | 'archived';
+
+export interface SessionIndexEntry {
+    sessionId: string;
+    name: string | null;
+    workspaceId: string | null;
+    workingDir: string | null;
+    model: string | null;
+    status: SessionStatus;
+    createdAt: number;
+    updatedAt: number;
+    messageCount: number;
+    hasSnapshot: boolean;
+    running: boolean;
 }
 
 /**
