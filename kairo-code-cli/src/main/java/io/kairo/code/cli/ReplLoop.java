@@ -321,7 +321,7 @@ public class ReplLoop {
                     }
                     io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk
                             .initialize();
-                    cliTracer = new io.kairo.code.core.observability.SessionAwareTracer(
+                    cliTracer = new io.kairo.core.tracing.SessionAwareTracer(
                             io.kairo.observability.OTelTracerFactory.create(),
                             cliSessionId,
                             System.getProperty("user.name"));

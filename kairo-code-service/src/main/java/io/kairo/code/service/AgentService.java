@@ -344,7 +344,7 @@ public class AgentService implements DisposableBean, InitializingBean {
                 // chats into one Session view — was the #1 user pain on the
                 // existing OTLP integration.
                 opts = opts.withTracer(
-                        new io.kairo.code.core.observability.SessionAwareTracer(
+                        new io.kairo.core.tracing.SessionAwareTracer(
                                 tracer, sessionId, workspaceId));
             }
             // Chunk sink: forward streaming tool output (e.g. bash stdout) to the
@@ -1173,7 +1173,7 @@ public class AgentService implements DisposableBean, InitializingBean {
         if (tracer != null) {
             // Same session-id stamping as createSession — see Langfuse rationale there.
             opts = opts.withTracer(
-                    new io.kairo.code.core.observability.SessionAwareTracer(
+                    new io.kairo.core.tracing.SessionAwareTracer(
                             tracer, sid, entry.workspaceId()));
         }
 

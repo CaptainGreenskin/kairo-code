@@ -1,5 +1,6 @@
 package io.kairo.code.core.observability;
 
+import io.kairo.core.tracing.SessionAwareTracer;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.tracing.Span;
