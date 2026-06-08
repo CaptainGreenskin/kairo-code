@@ -15,8 +15,7 @@
  */
 package io.kairo.code.cli.commands;
 
-import io.kairo.api.agent.Agent;
-import io.kairo.api.agent.AgentSnapshot;
+import io.kairo.api.cost.UsageSummary;
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.cli.SlashCommand;
 import io.kairo.code.core.CodeAgentSession;
@@ -27,7 +26,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.OptionalDouble;
 
 /**
  * Displays a session-level summary: duration, turns, tool calls, token estimate, and cost.
@@ -36,7 +34,7 @@ import java.util.OptionalDouble;
  */
 public class SessionCommand implements SlashCommand {
 
-    private static final String SEPARATOR = "\u2500".repeat(42);
+    private static final String SEPARATOR = "─".repeat(42);
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
 
@@ -62,7 +60,6 @@ public class SessionCommand implements SlashCommand {
         writer.println("Session Summary");
         writer.println(SEPARATOR);
 
-        // Start time and duration
         Instant start = context.sessionStartTime();
         Duration elapsed = Duration.between(start, Instant.now());
         writer.printf("Started:    %s%n", TIME_FMT.format(start));
@@ -78,51 +75,29 @@ public class SessionCommand implements SlashCommand {
         }
 
         writer.printf("Turns:      %d%n", totalTurns);
-        writer.printf("Tool calls: %d  (avg %.1f/turn)%n",
-                totalToolCalls, metrics.avgToolCallsPerTurn());
+        writer.printf(
+                "Tool calls: %d  (avg %.1f/turn)%n", totalToolCalls, metrics.avgToolCallsPerTurn());
         writer.println(SEPARATOR);
 
-        // Token and cost info — try agent.snapshot() first, fall back to reflection
-        String modelName = context.modelName();
-        long totalTokens = 0;
-        boolean tokensAvailable = false;
+        UsageSummary summary = session.costTracker().summary();
 
-        Agent agent = context.agent();
-        if (agent != null) {
-            try {
-                AgentSnapshot snapshot = agent.snapshot();
-                totalTokens = snapshot.totalTokensUsed();
-                tokensAvailable = true;
-            } catch (UnsupportedOperationException e) {
-                try {
-                    var method = agent.getClass().getMethod("totalTokensUsed");
-                    totalTokens = (long) method.invoke(agent);
-                    tokensAvailable = true;
-                } catch (Exception ignored) {
-                    // Not available
-                }
-            }
-        }
-
-        if (tokensAvailable && totalTokens > 0) {
-            writer.printf("Total tokens:         %,9d%n", totalTokens);
-
-            OptionalDouble cost = CostEstimator.estimate(modelName, totalTokens);
-            if (cost.isPresent()) {
-                writer.printf("Est. cost:            %11s%n", CostEstimator.format(cost.getAsDouble()));
+        if (summary.totalTokens() > 0) {
+            writer.printf("Total tokens:         %,9d%n", summary.totalTokens());
+            if (summary.estimatedCostUsd() > 0) {
+                writer.printf(
+                        "Est. cost:            %11s%n",
+                        CostEstimator.format(summary.estimatedCostUsd()));
             } else {
-                writer.printf("Est. cost:            %11s%n", "\u2014");
+                writer.printf("Est. cost:            %11s%n", "—");
             }
         } else {
-            writer.printf("Est. tokens (input):  %11s%n", "\u2014");
-            writer.printf("Est. tokens (output): %11s%n", "\u2014");
-            writer.printf("Est. cost:            %11s%n", "\u2014");
+            writer.printf("Total tokens:         %11s%n", "—");
+            writer.printf("Est. cost:            %11s%n", "—");
         }
 
         writer.flush();
     }
 
-    /** Format a Duration as "Xh Ym Zs", omitting zero-leading units. */
     private static String formatDuration(Duration d) {
         long hours = d.toHours();
         long minutes = d.toMinutesPart();

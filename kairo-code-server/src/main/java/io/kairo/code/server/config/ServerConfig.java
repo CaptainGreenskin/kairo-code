@@ -105,7 +105,7 @@ public class ServerConfig {
     public io.kairo.api.model.ModelProvider modelProvider() {
         ServerProperties props = serverProperties();
         return io.kairo.code.core.CodeAgentFactory.buildModelProvider(
-                props.apiKey(), props.baseUrl());
+                props.apiKey(), props.baseUrl(), props.model());
     }
 
     @Bean

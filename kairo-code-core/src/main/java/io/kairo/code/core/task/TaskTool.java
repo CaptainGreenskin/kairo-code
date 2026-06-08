@@ -451,7 +451,7 @@ public class TaskTool implements SyncTool {
                 ? verifyModelOverride : parentConfig.modelName();
         io.kairo.api.model.ModelProvider verifyProvider =
                 io.kairo.code.core.CodeAgentFactory.buildModelProvider(
-                        parentConfig.apiKey(), parentConfig.baseUrl());
+                        parentConfig.apiKey(), parentConfig.baseUrl(), verifyModelName);
 
         Msg current = childResponse;
         for (int attempt = 0; attempt < MAX_VERIFY_ATTEMPTS; attempt++) {

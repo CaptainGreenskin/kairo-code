@@ -88,7 +88,7 @@ public final class ServerChildSessionSpawner implements ChildSessionSpawner {
 
         CodeAgentFactory.SessionOptions opts = CodeAgentFactory.SessionOptions.empty()
                 .withModelProvider(modelOverride != null && !modelOverride.isBlank()
-                        ? CodeAgentFactory.buildModelProvider(parentConfig.apiKey(), parentConfig.baseUrl())
+                        ? CodeAgentFactory.buildModelProvider(parentConfig.apiKey(), parentConfig.baseUrl(), parentConfig.modelName())
                         : modelProvider)
                 .withHooks(hooks)
                 .asChildSession();

@@ -176,7 +176,7 @@ public final class KairoCodeClient {
             // The SDK exposes chatPath / timeout fields that aren't on CodeAgentConfig yet —
             // a future revision will wire them through. baseUrl alone is enough for the
             // common case (OpenAI-compatible endpoints all use /v1/chat/completions).
-            ModelProvider provider = CodeAgentFactory.buildModelProvider(apiKey, baseUrl);
+            ModelProvider provider = CodeAgentFactory.buildModelProvider(apiKey, baseUrl, model);
             return new KairoCodeClient(cfg, provider);
         }
     }

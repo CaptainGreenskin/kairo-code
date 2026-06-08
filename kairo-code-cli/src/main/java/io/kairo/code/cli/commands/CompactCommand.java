@@ -69,7 +69,7 @@ public class CompactCommand implements SlashCommand {
         try {
             ModelProvider provider = testProvider != null
                     ? testProvider
-                    : CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+                    : CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl(), config.modelName());
             var modelCfg = io.kairo.api.model.ModelConfig.builder()
                     .model(config.modelName()).maxTokens(2048).build();
             String prompt = "Summarize the following conversation into a concise continuation prompt. "

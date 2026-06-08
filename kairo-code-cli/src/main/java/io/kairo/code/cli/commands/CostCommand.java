@@ -1,12 +1,10 @@
 package io.kairo.code.cli.commands;
 
-import io.kairo.api.agent.Agent;
-import io.kairo.api.agent.AgentSnapshot;
+import io.kairo.api.cost.UsageSummary;
 import io.kairo.code.cli.ReplContext;
 import io.kairo.code.cli.SlashCommand;
 import io.kairo.code.core.cost.CostEstimator;
 import java.io.PrintWriter;
-import java.util.OptionalDouble;
 
 /**
  * Shows token usage and estimated USD cost for the current session.
@@ -28,41 +26,28 @@ public class CostCommand implements SlashCommand {
     @Override
     public void execute(String args, ReplContext context) {
         PrintWriter writer = context.writer();
-        Agent agent = context.agent();
         String modelName = context.config().modelName();
-
-        long totalTokens = 0;
-        boolean available = false;
-
-        try {
-            AgentSnapshot snapshot = agent.snapshot();
-            totalTokens = snapshot.totalTokensUsed();
-            available = true;
-        } catch (UnsupportedOperationException e) {
-            try {
-                var method = agent.getClass().getMethod("totalTokensUsed");
-                totalTokens = (long) method.invoke(agent);
-                available = true;
-            } catch (Exception ignored) {
-                // Not available
-            }
-        }
+        UsageSummary summary = context.session().costTracker().summary();
 
         writer.println();
         writer.println("Session Token Usage");
         writer.println("──────────────────────────────");
-        if (available) {
-            writer.printf("Total tokens : %,d%n", totalTokens);
-            writer.printf("Model        : %s%n", modelName != null ? modelName : "unknown");
-            OptionalDouble cost = CostEstimator.estimate(modelName, totalTokens);
-            if (cost.isPresent()) {
-                writer.printf("Est. cost    : ~%s USD%n", CostEstimator.format(cost.getAsDouble()));
-                writer.println("               (public pricing, indicative only)");
-            } else {
-                writer.println("Est. cost    : unknown model");
-            }
+        writer.printf("Input tokens  : %,d%n", summary.inputTokens());
+        writer.printf("Output tokens : %,d%n", summary.outputTokens());
+        if (summary.cacheReadTokens() > 0 || summary.cacheCreationTokens() > 0) {
+            writer.printf("Cache read    : %,d%n", summary.cacheReadTokens());
+            writer.printf("Cache write   : %,d%n", summary.cacheCreationTokens());
+        }
+        writer.printf("Total tokens  : %,d%n", summary.totalTokens());
+        writer.printf("Model calls   : %d%n", summary.callCount());
+        writer.printf("Model         : %s%n", modelName != null ? modelName : "unknown");
+        if (summary.estimatedCostUsd() > 0) {
+            writer.printf(
+                    "Est. cost     : ~%s USD%n",
+                    CostEstimator.format(summary.estimatedCostUsd()));
+            writer.println("                (public pricing, indicative only)");
         } else {
-            writer.println("Token tracking not available for this agent.");
+            writer.println("Est. cost     : unknown model pricing");
         }
         writer.println();
         writer.flush();

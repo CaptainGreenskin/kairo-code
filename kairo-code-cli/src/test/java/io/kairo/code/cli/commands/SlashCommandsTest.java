@@ -111,25 +111,24 @@ class SlashCommandsTest {
 
     @Test
     void costShowsTokenCount() {
-        Agent agentWithSnapshot = new StubAgentWithSnapshot(12450);
-        ReplContext context = createContext(agentWithSnapshot);
-
-        new CostCommand().execute("", context);
-
-        String output = outputCapture.toString();
-        assertThat(output).contains("Session Token Usage");
-        assertThat(output).contains("Total tokens : 12,450");
-    }
-
-    @Test
-    void costHandlesUnsupportedSnapshot() {
         ReplContext context = createContext(stubAgent());
 
         new CostCommand().execute("", context);
 
         String output = outputCapture.toString();
         assertThat(output).contains("Session Token Usage");
-        assertThat(output).contains("Token tracking not available");
+        assertThat(output).contains("Total tokens");
+    }
+
+    @Test
+    void costHandlesZeroTokens() {
+        ReplContext context = createContext(stubAgent());
+
+        new CostCommand().execute("", context);
+
+        String output = outputCapture.toString();
+        assertThat(output).contains("Session Token Usage");
+        assertThat(output).contains("Total tokens  : 0");
     }
 
     // ─── :plan ───────────────────────────────────────────────────

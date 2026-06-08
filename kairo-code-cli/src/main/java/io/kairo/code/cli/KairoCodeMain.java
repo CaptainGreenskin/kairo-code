@@ -475,25 +475,29 @@ public class KairoCodeMain implements Callable<Integer> {
 
         if (response != null) {
             if (showUsage) {
-                try {
-                    AgentSnapshot snap = agent.snapshot();
-                    long tokens = snap.totalTokensUsed();
-                    io.kairo.code.core.cost.CostEstimator
-                            .estimate(config.modelName(), tokens)
-                            .ifPresentOrElse(
-                                    cost ->
-                                            System.err.printf(
-                                                    "[USAGE] total_tokens=%d iterations=%d"
-                                                            + " est_cost_usd=~%s%n",
-                                                    tokens,
-                                                    snap.iteration(),
-                                                    io.kairo.code.core.cost.CostEstimator.format(
-                                                            cost)),
-                                    () ->
-                                            System.err.printf(
-                                                    "[USAGE] total_tokens=%d iterations=%d%n",
-                                                    tokens, snap.iteration()));
-                } catch (UnsupportedOperationException ignored) {
+                io.kairo.api.cost.UsageSummary summary =
+                        (agent instanceof io.kairo.core.agent.DefaultReActAgent dra)
+                                ? dra.costTracker().summary()
+                                : new io.kairo.api.cost.UsageSummary(0, 0, 0, 0, 0.0, 0);
+                if (summary.totalTokens() > 0) {
+                    int iterations = 0;
+                    try {
+                        iterations = agent.snapshot().iteration();
+                    } catch (UnsupportedOperationException ignored) {
+                    }
+                    if (summary.estimatedCostUsd() > 0) {
+                        System.err.printf(
+                                "[USAGE] total_tokens=%d iterations=%d est_cost_usd=~%s%n",
+                                summary.totalTokens(),
+                                iterations,
+                                io.kairo.code.core.cost.CostEstimator.format(
+                                        summary.estimatedCostUsd()));
+                    } else {
+                        System.err.printf(
+                                "[USAGE] total_tokens=%d iterations=%d%n",
+                                summary.totalTokens(), iterations);
+                    }
+                } else {
                     System.err.println("[USAGE] token stats not available for this agent");
                 }
             }

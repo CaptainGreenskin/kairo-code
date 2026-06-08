@@ -194,7 +194,7 @@ public final class CodeAgentFactory {
         ModelProvider modelProvider =
                 options.modelProvider() != null
                         ? options.modelProvider()
-                        : buildModelProvider(config.apiKey(), config.baseUrl());
+                        : buildModelProvider(config.apiKey(), config.baseUrl(), config.modelName());
 
         DefaultToolRegistry registry = new DefaultToolRegistry();
         registry.registerTool(BashTool.class);
@@ -425,6 +425,8 @@ public final class CodeAgentFactory {
             systemPrompt = agentType.systemPromptPrefix() + "\n\n" + systemPrompt;
         }
 
+        io.kairo.api.cost.CostTracker costTracker = new io.kairo.core.cost.DefaultCostTracker();
+
         AgentBuilder builder =
                 AgentBuilder.create()
                         .name("kairo-code")
@@ -432,6 +434,7 @@ public final class CodeAgentFactory {
                         .tools(registry)
                         .toolExecutor(executor)
                         .modelName(config.modelName())
+                        .costTracker(costTracker)
                         .systemPrompt(systemPrompt)
                         .maxIterations(config.maxIterations())
                         // Pin tokenBudget to the model's actual contextWindow so IterationGuards'
@@ -683,7 +686,7 @@ public final class CodeAgentFactory {
         TurnMetricsCollector turnMetrics = findTurnMetricsCollector(hooks);
         return new CodeAgentSession(
                 agent, executor, registry, activeSkills, mcpRegistry,
-                tracker, turnMetrics, sessionMetrics, llmClassifier);
+                tracker, turnMetrics, sessionMetrics, llmClassifier, costTracker);
     }
 
     /**
@@ -788,21 +791,41 @@ public final class CodeAgentFactory {
      * provider wiring as the session agent but don't need the tool registry / hooks pipeline.
      */
     public static ModelProvider buildModelProvider(String apiKey, String baseUrl) {
-        var registry = DefaultProviderRegistry.withBuiltIns();
+        return buildModelProvider(apiKey, baseUrl, null);
+    }
+
+    /**
+     * Build a {@link ModelProvider} using {@link io.kairo.core.model.DefaultModelCatalog} for
+     * model-name-to-provider resolution when {@code modelName} is available. Falls back to URL
+     * heuristics when the catalog cannot resolve the model.
+     */
+    public static ModelProvider buildModelProvider(
+            String apiKey, String baseUrl, String modelName) {
+        var providerRegistry = DefaultProviderRegistry.withBuiltIns();
+
+        if (modelName != null && !modelName.isBlank()) {
+            var catalog = io.kairo.core.model.DefaultModelCatalog.withBuiltIns();
+            var info = catalog.resolve(modelName);
+            if (info.isPresent()) {
+                return providerRegistry.create(
+                        info.get().providerName(),
+                        ProviderSpec.of(apiKey, baseUrl).withModel(modelName));
+            }
+        }
+
         if (baseUrl != null && baseUrl.toLowerCase().contains("anthropic")) {
-            return registry.create("anthropic", ProviderSpec.of(apiKey, baseUrl));
+            return providerRegistry.create("anthropic", ProviderSpec.of(apiKey, baseUrl));
         }
         if (baseUrl != null && baseUrl.matches(".*/v\\d+/?$")) {
-            // Corner case the registry doesn't model directly: URL already includes the version
-            // segment, so we construct the OpenAIProvider 3-arg variant explicitly.
             String url =
                     baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
             return new OpenAIProvider(apiKey, url, "/chat/completions");
         }
         if (baseUrl != null && !baseUrl.isBlank()) {
-            return registry.create("openai-compatible", ProviderSpec.of(apiKey, baseUrl));
+            return providerRegistry.create(
+                    "openai-compatible", ProviderSpec.of(apiKey, baseUrl));
         }
-        return registry.create("openai", ProviderSpec.of(apiKey));
+        return providerRegistry.create("openai", ProviderSpec.of(apiKey));
     }
 
     private static ToolUsageTracker findToolUsageTracker(List<Object> hooks) {

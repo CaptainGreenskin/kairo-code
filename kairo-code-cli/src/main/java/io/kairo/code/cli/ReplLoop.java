@@ -983,7 +983,7 @@ public class ReplLoop {
     private static SwarmCoordinator buildSwarmCoordinator(CodeAgentConfig config) {
         try {
             var modelProvider =
-                    CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+                    CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl(), config.modelName());
             return ExpertTeamFactory.create(config, modelProvider, 3);
         } catch (Throwable t) {
             log.warn("Failed to bootstrap SwarmCoordinator: {}", t.getMessage());

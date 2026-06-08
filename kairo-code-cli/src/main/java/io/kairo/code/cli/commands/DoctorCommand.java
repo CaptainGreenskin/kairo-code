@@ -76,7 +76,7 @@ public class DoctorCommand implements SlashCommand {
         if (hasApiKey) {
             try {
                 var provider = io.kairo.code.core.CodeAgentFactory.buildModelProvider(
-                        context.config().apiKey(), context.config().baseUrl());
+                        context.config().apiKey(), context.config().baseUrl(), context.config().modelName());
                 var msg = io.kairo.api.message.Msg.of(io.kairo.api.message.MsgRole.USER, "ping");
                 var modelCfg = io.kairo.api.model.ModelConfig.builder()
                         .model(context.config().modelName())

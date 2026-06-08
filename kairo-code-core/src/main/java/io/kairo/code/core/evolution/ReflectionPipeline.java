@@ -50,7 +50,7 @@ public final class ReflectionPipeline {
                 // appended /v1/chat/completions to URLs like /api/coding/paas/v4,
                 // producing a 404 on non-OpenAI endpoints.
                 ModelProvider provider = CodeAgentFactory.buildModelProvider(
-                        config.apiKey(), config.baseUrl());
+                        config.apiKey(), config.baseUrl(), config.modelName());
                 String lesson = generateLesson(event, provider, config.modelName());
                 if (lesson != null && !lesson.isBlank()) {
                     Lesson saved = Lesson.create(event.toolName(), lesson, Status.PENDING);

@@ -367,7 +367,7 @@ public class AgentService implements DisposableBean, InitializingBean {
                 WorktreeWorkspaceProvider workspaceProvider =
                         new WorktreeWorkspaceProvider(Path.of(finalWorkingDir), lifecycle);
                 io.kairo.api.model.ModelProvider mp =
-                        CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+                        CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl(), config.modelName());
                 var subagentRegistry = new io.kairo.code.core.task.SubagentRegistry();
                 var notificationQueue = new io.kairo.code.core.task.BackgroundTaskNotificationQueue();
                 TaskToolDependencies taskDeps = new TaskToolDependencies(
@@ -396,6 +396,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             Map<String, Object> extraToolDeps = Map.of(
                     io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, chunkSink);
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts, extraToolDeps);
+            bridgeHook.setCostTracker(session.costTracker());
 
             // ── Unified payload: always AgentSessionPayload + optional escalation ──
             AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
@@ -407,7 +408,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             if (explicitExperts && swarmCoordinator != null && triageGate != null
                     && teamManager != null && messageBus != null) {
                 io.kairo.api.model.ModelProvider narratorModel =
-                        CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl());
+                        CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl(), config.modelName());
                 agentPayload.setEscalationConfig(new AgentSessionPayload.EscalationConfig(
                         swarmCoordinator,
                         io.kairo.api.team.TeamConfig.defaults(),
@@ -1185,6 +1186,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             Map<String, Object> rebuildExtraDeps = Map.of(
                     io.kairo.core.tool.ToolInvocationRunner.CHUNK_SINK_KEY, rebuildChunkSink);
             CodeAgentSession newSession = CodeAgentFactory.createSession(rebuilt, opts, rebuildExtraDeps);
+            bridgeHook.setCostTracker(newSession.costTracker());
             Consumer<SessionPhase> persistPhaseFn = p -> persistPhase(rebuilt.workingDir(), p);
             AgentRuntimeContext newCtx = new AgentRuntimeContext(
                     sid, sink, sctx.running(), phaseRef, persistPhaseFn, concurrencyController);
@@ -1193,7 +1195,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             if (swarmCoordinator != null && triageGate != null
                     && teamManager != null && messageBus != null) {
                 io.kairo.api.model.ModelProvider narratorModel =
-                        CodeAgentFactory.buildModelProvider(rebuilt.apiKey(), rebuilt.baseUrl());
+                        CodeAgentFactory.buildModelProvider(rebuilt.apiKey(), rebuilt.baseUrl(), rebuilt.modelName());
                 newPayload.setEscalationConfig(new AgentSessionPayload.EscalationConfig(
                         swarmCoordinator,
                         io.kairo.api.team.TeamConfig.defaults(),

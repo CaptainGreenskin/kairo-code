@@ -1,6 +1,8 @@
 package io.kairo.code.core;
 
 import io.kairo.api.agent.Agent;
+import io.kairo.api.cost.CostTracker;
+import io.kairo.api.cost.NoopCostTracker;
 import io.kairo.code.core.hook.SessionMetricsCollector;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
@@ -42,7 +44,8 @@ public record CodeAgentSession(
         ToolUsageTracker toolUsageTracker,
         TurnMetricsCollector turnMetricsCollector,
         SessionMetricsCollector sessionMetricsCollector,
-        LlmBashClassifier llmBashClassifier) {
+        LlmBashClassifier llmBashClassifier,
+        CostTracker costTracker) {
 
     public CodeAgentSession(
             Agent agent,
@@ -50,7 +53,7 @@ public record CodeAgentSession(
             DefaultToolRegistry toolRegistry,
             Set<String> loadedSkills) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, null,
-                new ToolUsageTracker(), new TurnMetricsCollector(), null, null);
+                new ToolUsageTracker(), new TurnMetricsCollector(), null, null, null);
     }
 
     public CodeAgentSession(
@@ -60,7 +63,7 @@ public record CodeAgentSession(
             Set<String> loadedSkills,
             McpClientRegistry mcpRegistry) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
-                new ToolUsageTracker(), new TurnMetricsCollector(), null, null);
+                new ToolUsageTracker(), new TurnMetricsCollector(), null, null, null);
     }
 
     /** Legacy 7-arg constructor (pre-sessionMetricsCollector) preserved for callers. */
@@ -73,7 +76,7 @@ public record CodeAgentSession(
             ToolUsageTracker toolUsageTracker,
             TurnMetricsCollector turnMetricsCollector) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
-                toolUsageTracker, turnMetricsCollector, null, null);
+                toolUsageTracker, turnMetricsCollector, null, null, null);
     }
 
     /** Legacy 8-arg constructor (pre-llmBashClassifier) preserved for callers. */
@@ -87,7 +90,23 @@ public record CodeAgentSession(
             TurnMetricsCollector turnMetricsCollector,
             SessionMetricsCollector sessionMetricsCollector) {
         this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
-                toolUsageTracker, turnMetricsCollector, sessionMetricsCollector, null);
+                toolUsageTracker, turnMetricsCollector, sessionMetricsCollector, null, null);
+    }
+
+    /** Legacy 9-arg constructor (pre-costTracker) preserved for callers. */
+    public CodeAgentSession(
+            Agent agent,
+            DefaultToolExecutor toolExecutor,
+            DefaultToolRegistry toolRegistry,
+            Set<String> loadedSkills,
+            McpClientRegistry mcpRegistry,
+            ToolUsageTracker toolUsageTracker,
+            TurnMetricsCollector turnMetricsCollector,
+            SessionMetricsCollector sessionMetricsCollector,
+            LlmBashClassifier llmBashClassifier) {
+        this(agent, toolExecutor, toolRegistry, loadedSkills, mcpRegistry,
+                toolUsageTracker, turnMetricsCollector, sessionMetricsCollector,
+                llmBashClassifier, null);
     }
 
     public CodeAgentSession {
@@ -97,7 +116,6 @@ public record CodeAgentSession(
         loadedSkills = loadedSkills == null ? Set.of() : Set.copyOf(loadedSkills);
         if (toolUsageTracker == null) toolUsageTracker = new ToolUsageTracker();
         if (turnMetricsCollector == null) turnMetricsCollector = new TurnMetricsCollector();
-        // sessionMetricsCollector intentionally nullable — REPL paths don't auto-register it.
-        // llmBashClassifier intentionally nullable — only set when the fallback is enabled.
+        if (costTracker == null) costTracker = NoopCostTracker.INSTANCE;
     }
 }

@@ -33,6 +33,8 @@ public class AgentEventBridgeHook {
     private final ToolProgressTracker progressTracker;
     /** Optional telemetry counter; nullable for tests / legacy constructors. */
     private final SessionDiagnosticsTracker diagnosticsTracker;
+    /** Optional cost tracker for real cost in AGENT_DONE events. Late-bound via setter. */
+    private volatile io.kairo.api.cost.CostTracker costTracker;
 
     /** Tool-use id → tool name, populated on POST_REASONING. POST_ACTING reads this to identify
      *  which tool finished (PostActingEvent already carries toolName, but we also use the map for
@@ -52,12 +54,12 @@ public class AgentEventBridgeHook {
     private final Set<String> announcedToolCallIds;
 
     public AgentEventBridgeHook(Sinks.Many<AgentEvent> sink, String sessionId) {
-        this(sink, sessionId, ConcurrentHashMap.newKeySet(), null, null, null);
+        this(sink, sessionId, ConcurrentHashMap.newKeySet(), null, null, null, null);
     }
 
     public AgentEventBridgeHook(
             Sinks.Many<AgentEvent> sink, String sessionId, Set<String> announcedToolCallIds) {
-        this(sink, sessionId, announcedToolCallIds, null, null, null);
+        this(sink, sessionId, announcedToolCallIds, null, null, null, null);
     }
 
     public AgentEventBridgeHook(
@@ -65,7 +67,7 @@ public class AgentEventBridgeHook {
             String sessionId,
             Set<String> announcedToolCallIds,
             String workingDir) {
-        this(sink, sessionId, announcedToolCallIds, workingDir, null, null);
+        this(sink, sessionId, announcedToolCallIds, workingDir, null, null, null);
     }
 
     public AgentEventBridgeHook(
@@ -74,7 +76,7 @@ public class AgentEventBridgeHook {
             Set<String> announcedToolCallIds,
             String workingDir,
             ToolProgressTracker progressTracker) {
-        this(sink, sessionId, announcedToolCallIds, workingDir, progressTracker, null);
+        this(sink, sessionId, announcedToolCallIds, workingDir, progressTracker, null, null);
     }
 
     public AgentEventBridgeHook(
@@ -84,12 +86,34 @@ public class AgentEventBridgeHook {
             String workingDir,
             ToolProgressTracker progressTracker,
             SessionDiagnosticsTracker diagnosticsTracker) {
+        this(sink, sessionId, announcedToolCallIds, workingDir, progressTracker,
+                diagnosticsTracker, null);
+    }
+
+    public AgentEventBridgeHook(
+            Sinks.Many<AgentEvent> sink,
+            String sessionId,
+            Set<String> announcedToolCallIds,
+            String workingDir,
+            ToolProgressTracker progressTracker,
+            SessionDiagnosticsTracker diagnosticsTracker,
+            io.kairo.api.cost.CostTracker costTracker) {
         this.sink = sink;
         this.sessionId = sessionId;
         this.announcedToolCallIds = announcedToolCallIds;
         this.workingDir = workingDir;
         this.progressTracker = progressTracker;
         this.diagnosticsTracker = diagnosticsTracker;
+        this.costTracker = costTracker;
+    }
+
+    /**
+     * Late-bind the cost tracker after session creation. The bridge hook is constructed before the
+     * session (and its CostTracker) exists, so this setter is called by AgentService after
+     * {@code CodeAgentFactory.createSession()} returns.
+     */
+    public void setCostTracker(io.kairo.api.cost.CostTracker costTracker) {
+        this.costTracker = costTracker;
     }
 
     /**
@@ -229,7 +253,8 @@ public class AgentEventBridgeHook {
                         event.error() != null ? event.error() : "Agent session failed",
                         "AGENT_FAILED"));
             } else {
-                emit(AgentEvent.done(sessionId, (int) Math.min(event.tokensUsed(), Integer.MAX_VALUE), 0.0));
+                double cost = costTracker != null ? costTracker.summary().estimatedCostUsd() : 0.0;
+                emit(AgentEvent.done(sessionId, (int) Math.min(event.tokensUsed(), Integer.MAX_VALUE), cost));
             }
         } catch (Exception e) {
             log.warn("SESSION_END bridge failed for session {}: {}", sessionId, e.getMessage());

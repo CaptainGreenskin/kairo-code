@@ -453,6 +453,8 @@ public class ReplContext {
         if (config == null) {
             return;
         }
+        io.kairo.api.cost.CostTracker previousCostTracker =
+                session != null ? session.costTracker() : null;
         CodeAgentFactory.SessionOptions opts = CodeAgentFactory.SessionOptions.empty();
         if (skillRegistry != null) {
             opts = opts.withSkills(skillRegistry, Set.copyOf(loadedSkills));
@@ -461,6 +463,22 @@ public class ReplContext {
             opts = opts.withRestoreFrom(restoreFrom);
         }
         opts = sessionOptionsCustomizer.apply(opts);
-        this.session = CodeAgentFactory.createSession(config, opts);
+        CodeAgentSession newSession = CodeAgentFactory.createSession(config, opts);
+        if (previousCostTracker != null
+                && !(previousCostTracker instanceof io.kairo.api.cost.NoopCostTracker)) {
+            newSession =
+                    new CodeAgentSession(
+                            newSession.agent(),
+                            newSession.toolExecutor(),
+                            newSession.toolRegistry(),
+                            newSession.loadedSkills(),
+                            newSession.mcpRegistry(),
+                            newSession.toolUsageTracker(),
+                            newSession.turnMetricsCollector(),
+                            newSession.sessionMetricsCollector(),
+                            newSession.llmBashClassifier(),
+                            previousCostTracker);
+        }
+        this.session = newSession;
     }
 }

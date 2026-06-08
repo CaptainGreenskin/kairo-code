@@ -46,7 +46,7 @@ public class EvolutionConfig {
             ServerConfig.ServerProperties props) {
         String modelName = resolveModel(props);
         ModelProvider mp = CodeAgentFactory.buildModelProvider(
-                props.apiKey(), resolveBaseUrl(props));
+                props.apiKey(), resolveBaseUrl(props), modelName);
         int threshold = 8;
         log.info("Evolution: using KairoEvolutionPolicy (model={}, threshold={}, timeout=120s)",
                 modelName, threshold);
