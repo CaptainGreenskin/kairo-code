@@ -252,6 +252,7 @@ public class AgentEventBridgeHook {
                         sessionId,
                         event.error() != null ? event.error() : "Agent session failed",
                         "AGENT_FAILED"));
+                failInProgressTodos();
             } else {
                 double cost = costTracker != null ? costTracker.summary().estimatedCostUsd() : 0.0;
                 emit(AgentEvent.done(sessionId, (int) Math.min(event.tokensUsed(), Integer.MAX_VALUE), cost));
@@ -260,6 +261,23 @@ public class AgentEventBridgeHook {
             log.warn("SESSION_END bridge failed for session {}: {}", sessionId, e.getMessage());
         }
         return HookResult.proceed(event);
+    }
+
+    private void failInProgressTodos() {
+        if (workingDir == null || workingDir.isBlank()) return;
+        java.nio.file.Path todoFile =
+                java.nio.file.Path.of(workingDir, ".kairo", "todos.json");
+        if (!java.nio.file.Files.exists(todoFile)) return;
+        try {
+            String content = java.nio.file.Files.readString(todoFile);
+            String updated = content.replace("\"in_progress\"", "\"failed\"");
+            if (!updated.equals(content)) {
+                java.nio.file.Files.writeString(todoFile, updated);
+                log.info("Marked in_progress todos as failed for session {}", sessionId);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to update todos on session end: {}", e.getMessage());
+        }
     }
 
     private void emit(AgentEvent event) {
