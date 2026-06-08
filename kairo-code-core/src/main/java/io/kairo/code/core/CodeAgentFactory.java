@@ -27,24 +27,24 @@ import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.hook.AutoCommitOnSuccessHook;
 import io.kairo.code.core.hook.CompileErrorFeedbackHook;
-import io.kairo.code.core.hook.ContextWindowGuardHook;
 import io.kairo.code.core.hook.ExecutionTraceHook;
 import io.kairo.code.core.hook.FullTestSuiteHook;
-import io.kairo.code.core.hook.MaxTurnsGuardHook;
 import io.kairo.code.core.hook.MissingTestHintHook;
 import io.kairo.code.core.hook.NoWriteDetectedHook;
 import io.kairo.code.core.hook.PlanWithoutActionHook;
 import io.kairo.code.core.hook.PostBatchEditVerifyHook;
 import io.kairo.code.core.hook.PostEditHintHook;
-import io.kairo.code.core.hook.RepetitiveToolHook;
 import io.kairo.code.core.hook.SessionMetricsCollector;
 import io.kairo.code.core.hook.SessionMetricsHook;
 import io.kairo.code.core.hook.SessionResultWriterHook;
 import io.kairo.code.core.hook.StaleReadDetectorHook;
 import io.kairo.code.core.hook.TestFailureFeedbackHook;
 import io.kairo.code.core.hook.TextOnlyStallHook;
-import io.kairo.code.core.hook.ToolBudgetHook;
 import io.kairo.code.core.hook.UnfulfilledInstructionHook;
+import io.kairo.core.governance.ContextSizeGuard;
+import io.kairo.core.governance.MaxTurnsGuard;
+import io.kairo.core.governance.RepetitiveToolGuard;
+import io.kairo.core.governance.ToolCallBudgetGuard;
 import io.kairo.core.agent.AgentBuilder;
 import io.kairo.core.context.CompactionThresholds;
 import io.kairo.core.model.ModelRegistry;
@@ -528,9 +528,9 @@ public final class CodeAgentFactory {
             }
         }
 
-        // Auto-register ContextWindowGuardHook: warns on large context to prevent GLM-5.1
-        // overflow. Active in both REPL and one-shot mode.
-        builder.hook(new ContextWindowGuardHook());
+        // Governance: context size guard — warns on large context to prevent overflow.
+        // Active in both REPL and one-shot mode (ContextSizeGuard does not suppress in interactive).
+        builder.hook(new ContextSizeGuard());
 
         // Auto-register AutoMemoryHook: after each reasoning step, heuristically extracts
         // durable facts/preferences/decisions into the MemoryStore so future sessions can
@@ -585,27 +585,22 @@ public final class CodeAgentFactory {
         SessionMetricsCollector sessionMetrics = null;
 
         if (!options.isRepl()) {
-            TurnMetricsCollector metrics = findTurnMetricsCollector(hooks);
-            if (metrics != null) {
-                builder.hook(new MaxTurnsGuardHook(metrics));
-            }
+            // Governance guards (framework-level, from io.kairo.core.governance):
+            builder.hook(new MaxTurnsGuard(20, 30, false));
 
-            // ToolBudgetHook: guards against excessive total tool calls.
-            // warn = 60% of force (floor); when force=0 use env defaults.
             int forceThreshold = config.toolBudgetForce();
             if (forceThreshold > 0) {
                 int warnThreshold = (int) Math.floor(forceThreshold * 0.6);
-                builder.hook(new ToolBudgetHook(false, warnThreshold, forceThreshold));
+                builder.hook(new ToolCallBudgetGuard(warnThreshold, forceThreshold, false));
             } else {
-                builder.hook(new ToolBudgetHook(false));
+                builder.hook(new ToolCallBudgetGuard());
             }
 
-            // RepetitiveToolHook: detects same-tool called in consecutive turns.
             int repThreshold = config.repetitiveToolThreshold();
             if (repThreshold > 0) {
-                builder.hook(new RepetitiveToolHook(false, repThreshold));
+                builder.hook(new RepetitiveToolGuard(repThreshold, false));
             } else {
-                builder.hook(new RepetitiveToolHook(false));
+                builder.hook(new RepetitiveToolGuard());
             }
 
             builder.hook(new PlanWithoutActionHook());
