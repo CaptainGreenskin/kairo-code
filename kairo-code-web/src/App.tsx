@@ -889,6 +889,11 @@ function App() {
     const [showTeamPanel, setShowTeamPanel] = useState(false);
     const [expertTeamId, setExpertTeamId] = useState<string | null>(null);
     const [expertTeamReplayId, setExpertTeamReplayId] = useState<string | null>(null);
+
+    // Hoist zustand selectors out of JSX to avoid conditional hook calls
+    // (the early return for needsOnboarding would skip hooks called in JSX props)
+    const evolvedSkillCount = useEvolutionStore((s) => s.skillCount);
+    const evolutionReviewing = useEvolutionStore((s) => s.reviewing);
     const [bookmarks, setBookmarks] = useState<Set<string>>(() =>
         sessionId ? new Set(getBookmarks(sessionId)) : new Set()
     );
@@ -1798,8 +1803,8 @@ ${content}
                 onOpenTimeline={() => setShowTimeline(true)}
                 onExport={() => handleExport('markdown')}
                 onOpenMcp={handleOpenMcpServers}
-                evolvedSkillCount={useEvolutionStore((s) => s.skillCount)}
-                evolutionReviewing={useEvolutionStore((s) => s.reviewing)}
+                evolvedSkillCount={evolvedSkillCount}
+                evolutionReviewing={evolutionReviewing}
             />
 
             {showSettings && serverConfig && (
