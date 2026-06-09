@@ -349,6 +349,24 @@ function App() {
     }, [canvasTeamId, isConnected, teamSubscribe]);
 
 
+    // When expert team completes, insert the final summary into the chat conversation
+    const prevTeamStatusRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!canvasTeamId) return;
+        const team = useExpertTeamStore.getState().teams[canvasTeamId];
+        if (!team) return;
+        const prev = prevTeamStatusRef.current;
+        prevTeamStatusRef.current = team.status;
+        if (prev && prev !== 'completed' && team.status === 'completed' && team.finalOutput) {
+            addMessage({
+                id: `expert-summary-${canvasTeamId}`,
+                role: 'assistant',
+                content: team.finalOutput,
+                timestamp: new Date().toISOString(),
+            });
+        }
+    });
+
     useEffect(() => {
         approveToolRef.current = approveTool;
     }, [approveTool]);

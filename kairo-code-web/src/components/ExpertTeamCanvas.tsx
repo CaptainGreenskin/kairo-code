@@ -63,7 +63,7 @@ export function ExpertTeamCanvas({ sendAction }: ExpertTeamCanvasProps) {
     ) : null;
 
     const body = (
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
             {teamId ? (
                 <ExpertTeamPanel teamId={teamId} sendAction={sendAction} />
             ) : (
