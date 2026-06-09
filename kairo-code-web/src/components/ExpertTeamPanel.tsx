@@ -3,7 +3,6 @@ import { ExternalLink } from 'lucide-react';
 import { useExpertTeamStore, TeamState, StepState, deriveToolSummary } from '../store/expertTeamStore';
 import { useOpenFilesStore } from '../store/openFilesStore';
 import { RejectFeedbackModal } from './RejectFeedbackModal';
-import { SynthesizerCard } from './SynthesizerCard';
 import { useThinkingTimer } from '../hooks/useThinkingTimer';
 import { DagGraphView } from './DagGraphView';
 
@@ -248,17 +247,16 @@ export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendActio
         </div>
       )}
 
-      {/* Synthesizer card when completed */}
-      {team.status === 'completed' && team.finalOutput && (
-        <div className="p-3 overflow-y-auto shrink-0 border-b border-[var(--border)]">
-          <SynthesizerCard
-            finalOutput={team.finalOutput}
-            cost={team.cost}
-            teamId={teamId}
-            completedAt={team.completedAt}
-            startedAt={team.startedAt}
-            onReplay={onReplay}
-          />
+      {/* Completion banner — full summary is in the chat conversation */}
+      {team.status === 'completed' && (
+        <div className="px-3 py-2 border-b border-[var(--border)] bg-green-500/5 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">✅</span>
+            <span className="text-xs font-semibold text-[var(--text-primary)]">Team Completed</span>
+          </div>
+          <p className="text-[10px] text-[var(--text-muted)] mt-1">
+            Full report available in the chat conversation.
+          </p>
         </div>
       )}
 
