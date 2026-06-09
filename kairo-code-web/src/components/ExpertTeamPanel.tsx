@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, X, FileText } from 'lucide-react';
 import { useExpertTeamStore, TeamState, StepState, deriveToolSummary } from '../store/expertTeamStore';
 import { useOpenFilesStore } from '../store/openFilesStore';
 import { RejectFeedbackModal } from './RejectFeedbackModal';
@@ -190,6 +190,60 @@ export interface ExpertTeamPanelProps {
   onReplay?: () => void;
 }
 
+function ReportSection({ finalOutput }: { finalOutput: string }) {
+  const [open, setOpen] = useState(false);
+  const cleaned = finalOutput.replace(/```\n(`[^`]+`)\n```/g, '$1');
+  return (
+    <div className="p-3 border-b border-[var(--border)] shrink-0">
+      <div className="flex items-center gap-2">
+        <span className="text-sm">✅</span>
+        <span className="text-xs font-semibold text-[var(--text-primary)]">Team Completed</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400">Done</span>
+        <button
+          onClick={() => setOpen(true)}
+          className="ml-auto flex items-center gap-1 text-[10px] text-violet-400 hover:text-violet-300 transition-colors"
+        >
+          <FileText size={11} />
+          View full report
+        </button>
+      </div>
+      {open && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+             onClick={() => setOpen(false)}>
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl shadow-2xl
+                          w-[90vw] max-w-4xl h-[80vh] flex flex-col"
+               onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2">
+                <FileText size={14} className="text-violet-400" />
+                <span className="text-sm font-semibold text-[var(--text-primary)]">Expert Team Report</span>
+              </div>
+              <button onClick={() => setOpen(false)}
+                      className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6
+                            prose prose-invert max-w-none
+                            text-sm text-[var(--text-secondary)] leading-relaxed
+                            [&_p]:my-2 [&_ul]:my-2 [&_li]:my-1 [&_code]:text-xs
+                            [&_pre]:bg-[var(--bg-primary)] [&_pre]:rounded-lg [&_pre]:p-3
+                            [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-[var(--text-primary)]
+                            [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-[var(--text-primary)] [&_h2]:mt-6
+                            [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-[var(--text-primary)] [&_h3]:mt-4
+                            [&_table]:w-full [&_table]:text-xs [&_table]:border-collapse [&_table]:my-3
+                            [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:border [&_th]:border-[var(--border)] [&_th]:bg-[var(--bg-primary)]
+                            [&_td]:px-3 [&_td]:py-2 [&_td]:border [&_td]:border-[var(--border)]
+                            [&_hr]:border-[var(--border)] [&_hr]:my-4">
+              <LazyMarkdown>{cleaned}</LazyMarkdown>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendAction, onReplay }: ExpertTeamPanelProps) {
   const team = useExpertTeamStore(state => state.teams[teamId]);
   const openExpertStepTab = useOpenFilesStore(s => s.openExpertStepTab);
@@ -250,28 +304,7 @@ export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendActio
 
       {/* Completion card with collapsible full report */}
       {team.status === 'completed' && team.finalOutput && (
-        <div className="p-3 border-b border-[var(--border)] shrink-0">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-sm">✅</span>
-            <span className="text-xs font-semibold text-[var(--text-primary)]">Team Completed</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400">Done</span>
-          </div>
-          <details className="group">
-            <summary className="text-[10px] text-violet-400 cursor-pointer hover:text-violet-300 list-none flex items-center gap-1">
-              <span className="group-open:rotate-90 transition-transform text-[8px]">▶</span>
-              Show full report
-            </summary>
-            <div className="mt-2 max-h-96 overflow-y-auto border border-[var(--border)] rounded-lg p-3
-                            prose prose-sm prose-invert max-w-none text-xs text-[var(--text-secondary)]
-                            [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0.5 [&_code]:text-[11px]
-                            [&_pre]:bg-[var(--bg-primary)] [&_pre]:rounded [&_pre]:p-2
-                            [&_table]:w-full [&_table]:text-[11px] [&_table]:border-collapse
-                            [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:border [&_th]:border-[var(--border)]
-                            [&_td]:px-2 [&_td]:py-1 [&_td]:border [&_td]:border-[var(--border)]">
-              <LazyMarkdown>{team.finalOutput.replace(/```\n(`[^`]+`)\n```/g, '$1')}</LazyMarkdown>
-            </div>
-          </details>
-        </div>
+        <ReportSection finalOutput={team.finalOutput} />
       )}
 
       {/* DAG graph: visual dependency graph when steps exist */}
