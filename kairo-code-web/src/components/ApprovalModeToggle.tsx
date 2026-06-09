@@ -79,7 +79,7 @@ export function ApprovalModeToggle({ dropUp = false }: ApprovalModeToggleProps =
             </button>
             {open && (
                 <div
-                    className={`absolute right-0 w-56 rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] shadow-xl z-50 py-1 text-xs ${
+                    className={`absolute left-0 w-56 rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] shadow-xl z-[9999] py-1 text-xs ${
                         dropUp ? 'bottom-full mb-1' : 'mt-1'
                     }`}
                 >
