@@ -5,6 +5,7 @@ import { useOpenFilesStore } from '../store/openFilesStore';
 import { RejectFeedbackModal } from './RejectFeedbackModal';
 import { useThinkingTimer } from '../hooks/useThinkingTimer';
 import { DagGraphView } from './DagGraphView';
+import { LazyMarkdown } from './LazyMarkdown';
 
 // ── Role metadata ────────────────────────────────────────────────────────────
 
@@ -247,16 +248,29 @@ export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendActio
         </div>
       )}
 
-      {/* Completion banner — full summary is in the chat conversation */}
-      {team.status === 'completed' && (
-        <div className="px-3 py-2 border-b border-[var(--border)] bg-green-500/5 shrink-0">
-          <div className="flex items-center gap-2">
+      {/* Completion card with collapsible full report */}
+      {team.status === 'completed' && team.finalOutput && (
+        <div className="p-3 border-b border-[var(--border)] shrink-0">
+          <div className="flex items-center gap-2 mb-2">
             <span className="text-sm">✅</span>
             <span className="text-xs font-semibold text-[var(--text-primary)]">Team Completed</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400">Done</span>
           </div>
-          <p className="text-[10px] text-[var(--text-muted)] mt-1">
-            Full report available in the chat conversation.
-          </p>
+          <details className="group">
+            <summary className="text-[10px] text-violet-400 cursor-pointer hover:text-violet-300 list-none flex items-center gap-1">
+              <span className="group-open:rotate-90 transition-transform text-[8px]">▶</span>
+              Show full report
+            </summary>
+            <div className="mt-2 max-h-96 overflow-y-auto border border-[var(--border)] rounded-lg p-3
+                            prose prose-sm prose-invert max-w-none text-xs text-[var(--text-secondary)]
+                            [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0.5 [&_code]:text-[11px]
+                            [&_pre]:bg-[var(--bg-primary)] [&_pre]:rounded [&_pre]:p-2
+                            [&_table]:w-full [&_table]:text-[11px] [&_table]:border-collapse
+                            [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:border [&_th]:border-[var(--border)]
+                            [&_td]:px-2 [&_td]:py-1 [&_td]:border [&_td]:border-[var(--border)]">
+              <LazyMarkdown>{team.finalOutput.replace(/```\n(`[^`]+`)\n```/g, '$1')}</LazyMarkdown>
+            </div>
+          </details>
         </div>
       )}
 

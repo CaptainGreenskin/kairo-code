@@ -349,7 +349,8 @@ function App() {
     }, [canvasTeamId, isConnected, teamSubscribe]);
 
 
-    // When expert team completes, insert the final summary into the chat conversation
+    // When expert team completes, insert a concise summary into the chat conversation.
+    // The full output is available in the Canvas; the chat message is kept short.
     const prevTeamStatusRef = useRef<string | null>(null);
     useEffect(() => {
         if (!canvasTeamId) return;
@@ -358,10 +359,29 @@ function App() {
         const prev = prevTeamStatusRef.current;
         prevTeamStatusRef.current = team.status;
         if (prev && prev !== 'completed' && team.status === 'completed' && team.finalOutput) {
+            const steps = Object.values(team.steps);
+            const done = steps.filter(s => s.status === 'done').length;
+            const total = steps.length;
+            const files = steps.flatMap(s => s.toolCalls
+                .filter(t => ['write', 'edit', 'create'].some(k => t.toolName.toLowerCase().includes(k)))
+                .map(t => (t.args?.file_path ?? t.args?.path ?? '') as string)
+                .filter(Boolean)
+                .map(p => p.split('/').slice(-2).join('/'))
+            );
+            const uniqueFiles = [...new Set(files)];
+            const summary = [
+                `✅ **Expert Team Completed** (${done}/${total} steps)`,
+                '',
+                uniqueFiles.length > 0
+                    ? `**Files created:** ${uniqueFiles.map(f => '`' + f + '`').join(', ')}`
+                    : '',
+                '',
+                '_Full details available in the Experts Canvas panel →_',
+            ].filter(Boolean).join('\n');
             addMessage({
                 id: `expert-summary-${canvasTeamId}`,
                 role: 'assistant',
-                content: team.finalOutput,
+                content: summary,
                 timestamp: new Date().toISOString(),
             });
         }
