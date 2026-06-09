@@ -1,6 +1,47 @@
 import { useState, lazy, Suspense } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { LazyMarkdown } from './LazyMarkdown';
 import type { CostSnapshot } from '../store/expertTeamStore';
+
+function CollapsibleSection({ title, children, defaultOpen = false }: {
+  title: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border border-[var(--border)] rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-1.5 px-3 py-2 bg-[var(--bg-primary)]
+                   border-b border-[var(--border)] hover:bg-[var(--bg-hover)] transition-colors text-left"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span className="text-xs font-semibold text-[var(--text-primary)] truncate">{title}</span>
+      </button>
+      {open && (
+        <div className="px-3 py-2 prose prose-sm prose-invert max-w-none overflow-x-auto
+                        text-xs text-[var(--text-secondary)]
+                        [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0.5 [&_code]:text-[11px]
+                        [&_pre]:bg-[var(--bg-primary)] [&_pre]:rounded [&_pre]:p-2
+                        [&_table]:w-full [&_table]:text-[11px] [&_table]:border-collapse
+                        [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:border [&_th]:border-[var(--border)] [&_th]:bg-[var(--bg-primary)]
+                        [&_td]:px-2 [&_td]:py-1 [&_td]:border [&_td]:border-[var(--border)]">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function splitIntoSections(text: string): { title: string; content: string }[] {
+  const parts = text.split(/\n(?=\[[\w-]+\])/);
+  return parts.filter(p => p.trim()).map((part, i) => {
+    const match = part.match(/^\[([\w-]+)\]\s*(.*)/s);
+    if (match) {
+      return { title: match[1], content: match[2].trim() };
+    }
+    return { title: i === 0 ? 'Summary' : `Section ${i + 1}`, content: part.trim() };
+  });
+}
 
 const GitStatusPanel = lazy(() => import('./GitStatusPanel').then(m => ({ default: m.GitStatusPanel })));
 
@@ -140,19 +181,14 @@ export function SynthesizerCard({
             );
           })
         ) : (
-          // Render full output as markdown
-          <div className="prose prose-sm prose-invert max-w-none overflow-x-auto
-                          text-xs text-[var(--text-secondary)]
-                          [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0.5 [&_code]:text-[11px]
-                          [&_pre]:bg-[var(--bg-primary)] [&_pre]:rounded [&_pre]:p-2
-                          [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-[var(--text-primary)]
-                          [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:text-[var(--text-primary)]
-                          [&_table]:w-full [&_table]:text-[11px] [&_table]:border-collapse
-                          [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:border [&_th]:border-[var(--border)] [&_th]:bg-[var(--bg-primary)]
-                          [&_td]:px-2 [&_td]:py-1 [&_td]:border [&_td]:border-[var(--border)]
-                          [&_table]:rounded [&_table]:overflow-hidden">
-            <LazyMarkdown>{finalOutput}</LazyMarkdown>
-          </div>
+          // Render as collapsible sections (split by [tag] markers)
+          <>
+            {splitIntoSections(finalOutput).map((section, i) => (
+              <CollapsibleSection key={i} title={section.title} defaultOpen={i === 0}>
+                <LazyMarkdown>{section.content}</LazyMarkdown>
+              </CollapsibleSection>
+            ))}
+          </>
         )}
 
         {/* Files Changed — embedded git diff */}

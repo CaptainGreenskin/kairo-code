@@ -221,7 +221,7 @@ export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendActio
     : Object.values(team.steps).map(s => ({ stepId: s.stepId, roleId: s.roleId, instruction: '' }));
 
   return (
-    <div className="flex flex-col h-full bg-[var(--bg-primary)] overflow-hidden">
+    <div className="flex flex-col h-full bg-[var(--bg-primary)] overflow-y-auto">
       <TopBar team={team} />
 
       {/* Plan summary — concise overview before execution */}
