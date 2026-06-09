@@ -4,9 +4,8 @@ import { persist } from 'zustand/middleware';
 /**
  * Tool-call approval mode.
  *
- *  - manual:    every risky tool (bash / write_file / edit_file) prompts for explicit approval (default)
- *  - auto-safe: read-only/write tools auto-approve; bash still prompts (recommended)
- *  - yolo:      auto-approve every risky tool — destructive, only enable in trusted workspaces
+ *  - manual: every risky tool prompts for explicit approval
+ *  - yolo:   auto-approve all tools (default for productive use)
  */
 export type ApprovalMode = 'manual' | 'auto-safe' | 'yolo';
 
@@ -42,9 +41,6 @@ const READ_SAFE_TOOLS = new Set([
 export function shouldAutoApprove(mode: ApprovalMode, toolName: string): boolean {
     if (toolName === 'exit_plan_mode') return false;
     if (READ_SAFE_TOOLS.has(toolName)) return true;
-    if (mode === 'yolo') return true;
-    if (mode === 'auto-safe') {
-        return toolName !== 'bash';
-    }
+    if (mode === 'yolo' || mode === 'auto-safe') return true;
     return false;
 }

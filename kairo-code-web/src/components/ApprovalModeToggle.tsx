@@ -21,20 +21,12 @@ const MODES: ModeMeta[] = [
         chipText: 'text-emerald-400',
     },
     {
-        value: 'auto-safe',
-        label: 'Auto-safe',
-        desc: 'Auto-approve writes, gate bash',
-        icon: ShieldAlert,
-        chip: 'bg-amber-500/10',
-        chipText: 'text-amber-400',
-    },
-    {
         value: 'yolo',
-        label: 'YOLO',
-        desc: 'Auto-approve everything',
+        label: 'Auto',
+        desc: 'Auto-approve all tools',
         icon: ShieldOff,
-        chip: 'bg-rose-500/10',
-        chipText: 'text-rose-400',
+        chip: 'bg-violet-500/10',
+        chipText: 'text-violet-400',
     },
 ];
 
