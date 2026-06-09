@@ -646,7 +646,8 @@ function App() {
 
     const handleStop = useCallback(() => {
         if (sessionId) stopAgent(sessionId);
-    }, [stopAgent, sessionId]);
+        setThinking(false);
+    }, [stopAgent, sessionId, setThinking]);
 
     const handleCompact = useCallback(() => {
         if (sessionId) send({ action: 'compact', sessionId });
