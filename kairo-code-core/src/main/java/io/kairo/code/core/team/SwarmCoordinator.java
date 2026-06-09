@@ -107,7 +107,15 @@ public class SwarmCoordinator {
      * Convenience overload using default configuration.
      */
     public Mono<TeamResult> startExpertTeam(String goal) {
-        return startExpertTeam(goal, TeamConfig.defaults(), List.of());
+        TeamConfig config = new TeamConfig(
+                TeamConfig.defaults().riskProfile(),
+                TeamConfig.defaults().maxFeedbackRounds(),
+                java.time.Duration.ofMinutes(30),
+                null,
+                TeamConfig.defaults().evaluatorPreference(),
+                TeamConfig.defaults().plannerFailureMode(),
+                TeamConfig.defaults().resourceConstraint());
+        return startExpertTeam(goal, config, List.of());
     }
 
     /**
