@@ -115,7 +115,8 @@ function rosterStatusText(step: StepState | undefined, thinkingTime: string): st
     const dur = step.thinkingDuration ? ` · ${Math.round(step.thinkingDuration / 1000)}s` : '';
     const s = deriveToolSummary(step.toolCalls);
     const n = s.filesRead + s.filesWritten + s.commandsRun + s.searchesPerformed;
-    return `${n} tool${n === 1 ? '' : 's'}${dur}`;
+    const files = s.writtenFiles.length > 0 ? `\n📄 ${s.writtenFiles.join('  ')}` : '';
+    return `${n} tool${n === 1 ? '' : 's'}${dur}${files}`;
   }
   return null;
 }
@@ -151,7 +152,11 @@ function RosterRow({ entry, step, onOpen, index }: {
             </span>
           </div>
           {detail && (
-            <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">{detail}</div>
+            <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+              {detail.split('\n').map((line, i) => (
+                <div key={i} className={i === 0 ? 'truncate' : 'truncate opacity-70'}>{line}</div>
+              ))}
+            </div>
           )}
           {!detail && !expanded && entry.instruction && (
             <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">{entry.instruction}</div>

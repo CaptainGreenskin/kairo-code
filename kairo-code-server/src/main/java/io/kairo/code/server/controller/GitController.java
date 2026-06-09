@@ -73,7 +73,15 @@ public class GitController {
     @GetMapping("/status")
     public List<Map<String, String>> getStatus(
             @RequestParam(required = false) String workspaceId) {
-        String output = runGit(resolveWorkingDir(workspaceId), "git", "status", "--porcelain");
+        Path workingDir = resolveWorkingDir(workspaceId);
+        String output = runGit(workingDir, "git", "status", "--porcelain");
+        if (output.isEmpty() && !java.nio.file.Files.isDirectory(workingDir.resolve(".git"))) {
+            runGit(workingDir, "git", "init");
+            runGit(workingDir, "git", "add", "-A");
+            runGit(workingDir, "git", "commit", "-m",
+                    "Initial workspace snapshot (auto-created by kairo-code)");
+            output = runGit(workingDir, "git", "status", "--porcelain");
+        }
         List<Map<String, String>> result = new ArrayList<>();
         for (String line : output.split("\n")) {
             if (line.isBlank() || line.length() < 3) continue;

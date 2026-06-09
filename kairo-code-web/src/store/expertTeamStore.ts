@@ -159,11 +159,22 @@ function isSearchTool(name: string): boolean {
 }
 
 export function deriveToolSummary(toolCalls: ToolCallEntry[]) {
+  const writtenFiles = new Set<string>();
+  for (const t of toolCalls) {
+    if (isWriteTool(t.toolName)) {
+      const p = (t.args?.file_path ?? t.args?.path ?? '') as string;
+      if (p) {
+        const short = p.split('/').slice(-2).join('/');
+        writtenFiles.add(short);
+      }
+    }
+  }
   return {
     filesRead: toolCalls.filter((t) => isReadTool(t.toolName)).length,
     filesWritten: toolCalls.filter((t) => isWriteTool(t.toolName)).length,
     commandsRun: toolCalls.filter((t) => t.toolName === 'bash' || t.toolName === 'terminal').length,
     searchesPerformed: toolCalls.filter((t) => isSearchTool(t.toolName)).length,
+    writtenFiles: [...writtenFiles],
   };
 }
 

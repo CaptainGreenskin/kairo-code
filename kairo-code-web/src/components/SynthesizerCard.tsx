@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { LazyMarkdown } from './LazyMarkdown';
 import type { CostSnapshot } from '../store/expertTeamStore';
+
+const GitStatusPanel = lazy(() => import('./GitStatusPanel').then(m => ({ default: m.GitStatusPanel })));
 
 export interface SynthesizerCardProps {
   finalOutput: string;
@@ -152,6 +154,20 @@ export function SynthesizerCard({
             <LazyMarkdown>{finalOutput}</LazyMarkdown>
           </div>
         )}
+
+        {/* Files Changed — embedded git diff */}
+        <div className="border border-[var(--border)] rounded-lg overflow-hidden">
+          <div className="flex items-center gap-1.5 px-3 py-2 bg-[var(--bg-primary)]
+                          border-b border-[var(--border)]">
+            <span className="text-xs">📂</span>
+            <span className="text-xs font-semibold text-[var(--text-primary)]">Files Changed</span>
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            <Suspense fallback={<div className="p-3 text-xs text-[var(--text-muted)]">Loading diff...</div>}>
+              <GitStatusPanel embedded onClose={() => {}} />
+            </Suspense>
+          </div>
+        </div>
 
         {/* Cost breakdown */}
         {(cost.spent > 0 || cost.budget > 0) && (
