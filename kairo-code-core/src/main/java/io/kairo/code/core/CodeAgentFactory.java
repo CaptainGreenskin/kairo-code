@@ -652,6 +652,13 @@ public final class CodeAgentFactory {
                 builder.hook(new SessionResultWriterHook(Path.of(wd), sessionMetrics));
             }
 
+            // Auto-register SessionSummaryHook: saves a compressed session summary as a
+            // memory entry at session end, enabling the next session to pick up context.
+            if (options.memoryStore() != null) {
+                builder.hook(
+                        new io.kairo.code.core.hook.SessionSummaryHook(options.memoryStore()));
+            }
+
             // Wire framework IterationCheckpointStore: persists full Msg objects (including
             // metadata) after each tool execution for session resume support.
             // Replaces the custom CheckpointWriterHook which used a lossy serialization format.

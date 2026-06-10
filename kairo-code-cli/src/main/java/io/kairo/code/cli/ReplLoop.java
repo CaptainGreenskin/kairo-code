@@ -40,7 +40,6 @@ import io.kairo.code.core.evolution.LearnedLessonStore;
 import io.kairo.code.core.evolution.ReflectionPipeline;
 import io.kairo.code.core.evolution.ToolStrikeEvent;
 import io.kairo.code.core.hook.SessionAppendHook;
-import io.kairo.code.core.memory.AutoMemoryHook;
 import io.kairo.code.core.stats.ToolUsageTracker;
 import io.kairo.code.core.stats.TurnMetricsCollector;
 import io.kairo.code.core.session.SessionWriter;
@@ -256,9 +255,12 @@ public class ReplLoop {
             MemoryStore memoryStore = new FileMemoryStore(memoryDir);
             log.debug("FileMemoryStore initialized at {}", memoryDir);
 
-            // Wire auto-memory hook: extracts facts/preferences from model responses and saves
-            // them to the memory store for cross-session enrichment.
-            allHooks.add(new AutoMemoryHook(memoryStore));
+            // AutoMemoryHook is registered by CodeAgentFactory.createSession() — no need to
+            // add it here. Adding it twice causes duplicate memory extraction.
+
+            // GC stale memory entries on startup (auto:fact/project older than 30 days).
+            new io.kairo.code.core.memory.MemoryGarbageCollector(memoryStore)
+                    .collect().subscribe();
 
             // Wire session persistence: each turn (user + assistant) is appended to a JSONL file
             // under {workingDir}/.kairo-code/sessions/<sessionId>.jsonl.

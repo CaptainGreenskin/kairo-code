@@ -63,6 +63,7 @@ public class MemoryCommand implements SlashCommand {
             case "add" -> handleAdd(rest, store, writer);
             case "delete" -> handleDelete(rest, store, writer);
             case "info" -> handleInfo(rest, store, writer);
+            case "edit" -> handleEdit(rest, store, context, writer);
             case "clear" -> handleClear(rest, store, context, writer);
             default -> printUsage(writer);
         }
@@ -216,6 +217,54 @@ public class MemoryCommand implements SlashCommand {
             writer.println("  Metadata:    " + entry.metadata());
         }
         writer.println();
+        writer.flush();
+    }
+
+    private void handleEdit(String idAndContent, MemoryStore store,
+            ReplContext context, PrintWriter writer) {
+        String[] parts = idAndContent.split("\\s+", 2);
+        String id = parts[0];
+        if (id.isBlank()) {
+            writer.println("Usage: :memory edit <id> <new content>");
+            writer.flush();
+            return;
+        }
+
+        MemoryEntry existing = store.get(id).block();
+        if (existing == null) {
+            writer.println("Memory entry not found: " + id);
+            writer.flush();
+            return;
+        }
+
+        String newContent;
+        if (parts.length > 1 && !parts[1].isBlank()) {
+            newContent = parts[1];
+        } else {
+            writer.println("Current content: " + existing.content());
+            writer.print("New content> ");
+            writer.flush();
+            try {
+                newContent = context.lineReader().readLine();
+            } catch (Exception e) {
+                writer.println("Edit cancelled.");
+                writer.flush();
+                return;
+            }
+        }
+
+        if (newContent == null || newContent.isBlank()) {
+            writer.println("Edit cancelled (empty content).");
+            writer.flush();
+            return;
+        }
+
+        MemoryEntry updated = new MemoryEntry(
+                existing.id(), existing.agentId(), newContent, existing.rawContent(),
+                existing.scope(), existing.importance(), existing.tags(),
+                existing.timestamp(), existing.embedding(), existing.metadata());
+        store.save(updated).block();
+        writer.println("Updated memory: " + id);
         writer.flush();
     }
 

@@ -329,11 +329,14 @@ public class AgentService implements DisposableBean, InitializingBean {
                 sessionStorage.gc();
             }
             ToolUsageTracker usageTracker = new ToolUsageTracker();
+            Path memoryDir = Path.of(System.getProperty("user.home"), ".kairo-code", "memory");
+            io.kairo.api.memory.MemoryStore memoryStore = new io.kairo.core.memory.FileMemoryStore(memoryDir);
             SessionOptions opts = SessionOptions.empty()
                     .asReplSession()
                     .withSessionId(sessionId)
                     .withApprovalHandler(approvalHandler)
                     .withToolUsageTracker(usageTracker)
+                    .withMemoryStore(memoryStore)
                     .withHooks(hooks);
             if (teamManager != null && messageBus != null) {
                 opts = opts.withTeamPrimitives(teamManager, messageBus);
