@@ -213,6 +213,8 @@ public final class CodeAgentFactory {
         registry.registerTool(AskUserTool.class);
         registry.registerTool(TodoReadTool.class);
         registry.registerTool(TodoWriteTool.class);
+        registry.registerTool(io.kairo.tools.agent.SearchToolsTool.class);
+        registry.registerTool(io.kairo.tools.agent.ExecuteDeferredTool.class);
         registry.registerTool(TreeTool.class);
         // --- M57: extended tool set ---
         registry.registerTool(DiffTool.class);
@@ -497,6 +499,7 @@ public final class CodeAgentFactory {
         // Uses a global singleton so coordinator and spawned workers share the same task board.
         toolDeps.put(io.kairo.code.core.team.SharedTaskList.class.getName(),
                 GlobalSharedTaskList.INSTANCE);
+        toolDeps.put("toolRegistry", registry);
         if (!toolDeps.isEmpty()) {
             builder.toolDependencies(toolDeps);
         }
