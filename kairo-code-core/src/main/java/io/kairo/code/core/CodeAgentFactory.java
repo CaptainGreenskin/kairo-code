@@ -500,6 +500,7 @@ public final class CodeAgentFactory {
         toolDeps.put(io.kairo.code.core.team.SharedTaskList.class.getName(),
                 GlobalSharedTaskList.INSTANCE);
         toolDeps.put("toolRegistry", registry);
+        toolDeps.put("toolExecutor", executor);
         if (!toolDeps.isEmpty()) {
             builder.toolDependencies(toolDeps);
         }

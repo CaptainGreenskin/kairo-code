@@ -53,6 +53,9 @@ public final class AgentSessionPayload implements SessionPayload {
     /** Maximum pending refinement messages per session. */
     private static final int MAX_REFINEMENT_QUEUE_SIZE = 5;
 
+    /** Maximum pending user messages queued while agent is busy. */
+    private static final int MAX_MESSAGE_QUEUE_SIZE = 10;
+
     private static final Set<String> CODE_KEYWORDS = Set.of(
             "refactor", "implement", "test", "fix", "review", "debug",
             "build", "deploy", "api", "database", "migration", "endpoint",
@@ -75,6 +78,7 @@ public final class AgentSessionPayload implements SessionPayload {
     // ── Payload-owned state ──────────────────────────────────────────────────────
     private final AtomicBoolean refineProcessing = new AtomicBoolean(false);
     private final ConcurrentLinkedDeque<Msg> refineQueue = new ConcurrentLinkedDeque<>();
+    private final ConcurrentLinkedDeque<MessageRequest> messageQueue = new ConcurrentLinkedDeque<>();
     private final AtomicReference<Disposable> currentRun = new AtomicReference<>();
 
     /**
@@ -175,8 +179,16 @@ public final class AgentSessionPayload implements SessionPayload {
         // ── CAS running state ──
         AtomicBoolean running = ctx.runningState();
         if (!running.compareAndSet(false, true)) {
-            return Flux.just(AgentEvent.error(sessionId,
-                    "Session is already running", "SESSION_BUSY"));
+            if (messageQueue.size() >= MAX_MESSAGE_QUEUE_SIZE) {
+                return Flux.just(AgentEvent.error(sessionId,
+                        "Message queue full (" + MAX_MESSAGE_QUEUE_SIZE + ")", "QUEUE_FULL"));
+            }
+            messageQueue.addLast(request);
+            int pos = messageQueue.size();
+            log.info("Message queued for session {} (position {}): {}",
+                    sessionId, pos, request.text().substring(0, Math.min(50, request.text().length())));
+            ctx.emit(AgentEvent.queued(sessionId, pos));
+            return ctx.sharedSink().asFlux();
         }
 
         Sinks.Many<AgentEvent> sink = ctx.sharedSink();
@@ -234,6 +246,8 @@ public final class AgentSessionPayload implements SessionPayload {
                     phaseRef.compareAndSet(SessionPhase.PLANNING, SessionPhase.IDLE);
                     // Drain any queued refinement messages
                     drainRefineQueue();
+                    // Drain any queued user messages
+                    drainMessageQueue();
                 })
                 .subscribe(
                         responseMsg -> {
@@ -405,6 +419,23 @@ public final class AgentSessionPayload implements SessionPayload {
             return; // already being processed
         }
         processRefinementQueue(ctx.sharedSink());
+    }
+
+    public void clearMessageQueue() {
+        int cleared = messageQueue.size();
+        messageQueue.clear();
+        if (cleared > 0) {
+            log.info("Cleared {} queued message(s) for session {}", cleared, ctx.sessionId());
+        }
+    }
+
+    private void drainMessageQueue() {
+        MessageRequest next = messageQueue.pollFirst();
+        if (next == null) return;
+        log.info("Draining queued message for session {}: {}",
+                ctx.sessionId(),
+                next.text().substring(0, Math.min(50, next.text().length())));
+        Schedulers.boundedElastic().schedule(() -> handleMessage(next).subscribe());
     }
 
     // ── Accessors for backward compatibility with AgentService internals ──

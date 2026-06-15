@@ -644,6 +644,15 @@ public class AgentService implements DisposableBean, InitializingBean {
     /**
      * Interrupt the current agent execution.
      */
+    public void cancelQueue(String sessionId) {
+        SessionContext ctx = registry.get(sessionId);
+        if (ctx == null) return;
+        SessionPayload payload = ctx.entry().payload();
+        if (payload instanceof AgentSessionPayload asp) {
+            asp.clearMessageQueue();
+        }
+    }
+
     public void stopAgent(String sessionId) {
         SessionContext stopCtx = registry.get(sessionId);
         if (stopCtx == null) {

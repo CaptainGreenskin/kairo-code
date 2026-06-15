@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { X, Loader2, Eye, Pencil, ChevronRight, FileWarning } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { X, Loader2, Eye, Pencil, ChevronRight, FileWarning, Diff } from 'lucide-react';
 import { getFileContent, putFileContent } from '@api/config';
 import * as monaco from 'monaco-editor';
 import { LazyMarkdown } from './LazyMarkdown';
@@ -24,6 +24,41 @@ function isLikelyBinary(path: string): boolean {
     return KNOWN_BINARY_EXTS.has(name.substring(dot + 1).toLowerCase());
 }
 
+/** Parse unified diff to extract added/modified line numbers in the new file. */
+function parseDiffLines(diffText: string): { added: number[]; modified: number[] } {
+    const added: number[] = [];
+    const modified: number[] = [];
+    const lines = diffText.split('\n');
+    let newLine = 0;
+    let pendingRemoves = 0;
+
+    for (const line of lines) {
+        const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (hunkMatch) {
+            newLine = parseInt(hunkMatch[1], 10);
+            pendingRemoves = 0;
+            continue;
+        }
+        if (newLine === 0) continue;
+
+        if (line.startsWith('-') && !line.startsWith('---')) {
+            pendingRemoves++;
+        } else if (line.startsWith('+') && !line.startsWith('+++')) {
+            if (pendingRemoves > 0) {
+                modified.push(newLine);
+                pendingRemoves--;
+            } else {
+                added.push(newLine);
+            }
+            newLine++;
+        } else {
+            pendingRemoves = 0;
+            if (!line.startsWith('\\')) newLine++;
+        }
+    }
+    return { added, modified };
+}
+
 interface FileEditorPanelProps {
     path: string;
     onClose: () => void;
@@ -34,9 +69,11 @@ interface FileEditorPanelProps {
     /** When true, render as a full-width tab body inside an editor area (no fixed
      *  width / left border / X button). Tab bar handles close. */
     embedded?: boolean;
+    /** When true, auto-fetch git diff and highlight changed lines on open. */
+    initialShowDiff?: boolean;
 }
 
-export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine, embedded = false }: FileEditorPanelProps) {
+export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine, embedded = false, initialShowDiff = false }: FileEditorPanelProps) {
     const [content, setContent] = useState('');
     const [savedContent, setSavedContent] = useState('');
     const [language, setLanguage] = useState('plaintext');
@@ -46,6 +83,8 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
     const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
     const [binary, setBinary] = useState(false);
     const [oversize, setOversize] = useState<string | null>(null);
+    const [showDiff, setShowDiff] = useState(initialShowDiff);
+    const diffDecorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
     const isMarkdown = language === 'markdown' || /\.(md|markdown|mdx)$/i.test(path);
     const monacoTheme = useMonacoTheme();
 
@@ -199,6 +238,45 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
         };
     }, [gotoLine, loading]);
 
+    // Fetch git diff and apply inline decorations when showDiff is toggled on.
+    useEffect(() => {
+        const editor = editorRef.current;
+        if (!editor || !showDiff || loading || binary || oversize) {
+            if (diffDecorationsRef.current) {
+                diffDecorationsRef.current.clear();
+                diffDecorationsRef.current = null;
+            }
+            return;
+        }
+        const qs = new URLSearchParams({ path });
+        if (workspaceId) qs.set('workspaceId', workspaceId);
+        // Untracked (new) files need untracked=true to get the full content as diff.
+        qs.set('untracked', 'true');
+
+        fetch(`/api/git/diff?${qs.toString()}`)
+            .then(r => r.json())
+            .then((data: { diff?: string }) => {
+                if (!data.diff || !editorRef.current) return;
+                const { added, modified } = parseDiffLines(data.diff);
+                const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+                for (const ln of added) {
+                    decorations.push({
+                        range: new monaco.Range(ln, 1, ln, 1),
+                        options: { isWholeLine: true, className: 'diff-added-line', marginClassName: 'diff-added-margin' },
+                    });
+                }
+                for (const ln of modified) {
+                    decorations.push({
+                        range: new monaco.Range(ln, 1, ln, 1),
+                        options: { isWholeLine: true, className: 'diff-modified-line', marginClassName: 'diff-modified-margin' },
+                    });
+                }
+                if (diffDecorationsRef.current) diffDecorationsRef.current.clear();
+                diffDecorationsRef.current = editorRef.current.createDecorationsCollection(decorations);
+            })
+            .catch(() => { /* best-effort: no diff available */ });
+    }, [showDiff, loading, binary, oversize, path, workspaceId]);
+
     return (
         <div className={
             embedded
@@ -232,6 +310,15 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
                             className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors"
                         >
                             {viewMode === 'preview' ? <Pencil size={13} /> : <Eye size={13} />}
+                        </button>
+                    )}
+                    {!binary && !oversize && (
+                        <button
+                            onClick={() => setShowDiff(d => !d)}
+                            title={showDiff ? 'Hide diff highlights' : 'Show diff highlights'}
+                            className={`p-1 rounded transition-colors ${showDiff ? 'text-green-400 bg-green-400/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'}`}
+                        >
+                            <Diff size={13} />
                         </button>
                     )}
                     {!binary && !oversize && (

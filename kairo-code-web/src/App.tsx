@@ -33,6 +33,9 @@ import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
 import { PendingApprovalBanner } from '@components/PendingApprovalBanner';
+import { QueueBanner } from '@components/QueueBanner';
+import { QueuedMessagesCard } from '@components/QueuedMessagesCard';
+import { useQueueStore } from '@store/queueStore';
 import { MessageSearchBar } from '@components/MessageSearchBar';
 import { OnboardingWizard, isOnboardingDone, markOnboardingDone } from '@components/OnboardingWizard';
 import { ErrorBoundary } from '@components/ErrorBoundary';
@@ -126,6 +129,8 @@ function App() {
     // user switches tabs mid-stream.
     const assistantMsgRef = useRef<Record<string, string | null>>({});
     const hasErrorRef = useRef(false);
+    const pendingSessionRef = useRef<Promise<string> | null>(null);
+    const pendingMessagesRef = useRef<Array<{text: string; image: AttachedImage | null}>>([]);
     const wasConnectedRef = useRef(false);
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const [agentPhase, setAgentPhase] = useState<Phase>('thinking');
@@ -610,12 +615,19 @@ function App() {
                     setShowWorkspaceSettings({ open: true, workspaceId: null });
                     return;
                 }
+                // If session creation is already in-flight, queue this message
+                if (pendingSessionRef.current) {
+                    pendingMessagesRef.current.push({ text, image });
+                    return;
+                }
                 connect();
-                createSession(currentWorkspaceId)
+                const sessionPromise = createSession(currentWorkspaceId);
+                pendingSessionRef.current = sessionPromise;
+                sessionPromise
                     .then((newId) => {
                         setSessionId(newId);
-                        // Add user message AFTER session exists so it's stored correctly
                         addMessage(userMsg);
+                        useSessionStore.getState().setRunningFor(newId, true);
                         autoNameSession(newId, text).then((name) => {
                             if (name) {
                                 window.dispatchEvent(new Event('storage'));
@@ -623,13 +635,41 @@ function App() {
                             }
                         });
                         sendMessage(newId, text, image?.data, image?.mediaType);
+                        // Send any messages that arrived while session was being created
+                        const pending = pendingMessagesRef.current.splice(0);
+                        for (const p of pending) {
+                            const queuedMsg = {
+                                id: generateId(),
+                                role: 'user' as const,
+                                content: p.text,
+                                toolCalls: [] as Message['toolCalls'],
+                                timestamp: Date.now(),
+                                queued: true,
+                                ...(p.image ? { imageData: p.image.data, imageMediaType: p.image.mediaType } : {}),
+                            };
+                            useSessionStore.getState().addMessageTo(newId, queuedMsg);
+                            useQueueStore.getState().enqueue(queuedMsg);
+                            sendMessage(newId, p.text, p.image?.data, p.image?.mediaType);
+                        }
                     })
                     .catch((err) => {
                         console.error('[App] Failed to create session:', err);
+                    })
+                    .finally(() => {
+                        pendingSessionRef.current = null;
                     });
             } else {
-                // Session exists — add message immediately
-                addMessage(userMsg);
+                // Session exists — check if agent is busy to queue
+                const storeRunning = useSessionStore.getState().running;
+                const agentBusy = storeRunning || isThinking || running;
+                if (agentBusy) {
+                    // Add to store with queued flag (hidden in main list, shown in QueuedMessagesCard)
+                    addMessage({ ...userMsg, queued: true });
+                    useQueueStore.getState().enqueue(userMsg);
+                } else {
+                    addMessage(userMsg);
+                    useSessionStore.getState().setRunningFor(sessionId, true);
+                }
                 const userMsgCount = messages.filter(m => m.role === 'user').length;
                 if (userMsgCount === 0) {
                     autoNameSession(sessionId, text).then((name) => {
@@ -641,13 +681,21 @@ function App() {
                 sendMessage(sessionId, text, image?.data, image?.mediaType);
             }
         },
-        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions, currentWorkspaceId, addToast],
+        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions, currentWorkspaceId, addToast, isThinking, running],
     );
 
     const handleStop = useCallback(() => {
         if (sessionId) stopAgent(sessionId);
         setThinking(false);
     }, [stopAgent, sessionId, setThinking]);
+
+    const queueCount = useQueueStore((s) => s.messages.length);
+    const handleCancelQueue = useCallback(() => {
+        if (sessionId) {
+            send({ action: 'cancel_queue', sessionId });
+            useQueueStore.getState().clear();
+        }
+    }, [send, sessionId]);
 
     const handleCompact = useCallback(() => {
         if (sessionId) send({ action: 'compact', sessionId });
@@ -1599,6 +1647,7 @@ ${content}
                                             atBottomThreshold={48}
                                             itemContent={(index, msg) => {
                                                 const msgObj = msg as Message;
+                                                if (msgObj.queued) return <div />;
                                                 const prevMsg = index > 0 ? (filteredMessages[index - 1] as Message) : null;
                                                 const showDateSep = prevMsg && prevMsg.timestamp && msgObj.timestamp &&
                                                     new Date(msgObj.timestamp).toDateString() !== new Date(prevMsg.timestamp).toDateString();
@@ -1761,6 +1810,11 @@ ${content}
                                     onToggleCollapse={() => setTodoPanelCollapsed((v) => !v)}
                                 />
                             )}
+                            <QueueBanner
+                                count={queueCount}
+                                messages={useQueueStore.getState().messages}
+                                onCancelAll={handleCancelQueue}
+                            />
                             <ChatInput
                                 key={sessionId ?? 'no-session'}
                                 sessionId={sessionId ?? undefined}

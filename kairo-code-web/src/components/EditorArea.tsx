@@ -75,6 +75,7 @@ export function EditorArea({ workspaceId, welcome }: EditorAreaProps) {
                         embedded
                         path={active.path}
                         gotoLine={active.gotoLine}
+                        initialShowDiff={active.showDiff}
                         onClose={() => closeFile(active.id)}
                         onSaved={() => {}}
                         workspaceId={workspaceId}

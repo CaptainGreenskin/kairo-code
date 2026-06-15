@@ -59,6 +59,8 @@ public record AgentEvent(
         SESSION_RESUMED,
         /** Keepalive signal during long model calls. Frontend updates lastEventAt but renders nothing. */
         HEARTBEAT,
+        /** Emitted when a user message is queued because the agent is busy. */
+        MESSAGE_QUEUED,
         /**
          * Emitted by a child agent (spawned via the task tool) to report its internal progress
          * to the parent session's event stream. Carries the child's tool calls and results so
@@ -81,6 +83,13 @@ public record AgentEvent(
     public static AgentEvent heartbeat(String sessionId) {
         return new AgentEvent(EventType.HEARTBEAT, sessionId, null, null, null,
                 false, null, null, null, null, null, null, null, System.currentTimeMillis());
+    }
+
+    public static AgentEvent queued(String sessionId, int position) {
+        return new AgentEvent(EventType.MESSAGE_QUEUED, sessionId,
+                "Message queued (position " + position + ")", null, null,
+                false, null, null, null, null, null, null,
+                java.util.Map.of("queuePosition", position), System.currentTimeMillis());
     }
 
     /** Streaming reasoning_content delta from thinking models (GLM-5.1, o1, Claude thinking). */

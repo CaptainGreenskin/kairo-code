@@ -112,6 +112,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                 case "unsubscribeTeam" -> handleUnsubscribeTeam(session, root);
                 case "rejectStep"      -> handleRejectStep(session, root);
                 case "compact"         -> handleCompact(session, root);
+                case "cancel_queue"    -> handleCancelQueue(root);
                 case "ping"            -> {} // keepalive — silently ignore
                 default -> sendErr(session, action, "unknown action: " + action);
             }
@@ -278,6 +279,13 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         agentService.compactSession(sid).subscribe();
         sendAck(session, "compact");
         log.info("Manual compaction requested for session {}", sid);
+    }
+
+    private void handleCancelQueue(JsonNode body) {
+        String sid = text(body, "sessionId");
+        if (sid == null) return;
+        agentService.cancelQueue(sid);
+        log.info("Message queue cancelled for session {}", sid);
     }
 
     private void handleRevert(WebSocketSession session, JsonNode body) {

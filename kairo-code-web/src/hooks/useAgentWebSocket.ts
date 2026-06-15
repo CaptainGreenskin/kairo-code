@@ -80,6 +80,13 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                     errorType: (raw.errorType as string) ?? '',
                 },
             };
+        case 'MESSAGE_QUEUED': {
+            const meta = (raw.resultMetadata as Record<string, unknown>) ?? {};
+            return {
+                type: 'MESSAGE_QUEUED', sessionId, timestamp: ts,
+                payload: { queuePosition: (meta.queuePosition as number) ?? 1 },
+            };
+        }
         case 'AGENT_THINKING':
             return {
                 type: 'AGENT_THINKING', sessionId, timestamp: ts,

@@ -7,6 +7,8 @@ import type { AgentEvent, ToolCall, PlanReadyPayload, SessionRestoredPayload, To
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
 import { useExpertTeamStore } from '@store/expertTeamStore';
 import { useLayoutStore } from '@store/layoutStore';
+import { useOpenFilesStore } from '@store/openFilesStore';
+import { useQueueStore } from '@store/queueStore';
 import type { Phase } from '@components/ThinkingIndicator';
 import type { ToastMessage } from '@components/Toast';
 import { deleteSnapshot, saveSnapshot, setLastSessionId } from '@utils/sessionSnapshot';
@@ -355,8 +357,18 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                             if (name.includes('write') || name.includes('edit') || name.includes('patch') || name.includes('create') || name.includes('replace') || name.includes('insert')) {
                                 const input = tc.input as Record<string, unknown> | undefined;
                                 const path = (input?.file_path ?? input?.path ?? input?.filePath) as string | undefined;
-                                if (path) {
-                                    useLayoutStore.getState().bumpFileTreeRefresh([path]);
+                                const paths: string[] = [];
+                                if (path) paths.push(path);
+                                const files = input?.files as Array<{path?: string}> | undefined;
+                                if (Array.isArray(files)) {
+                                    files.forEach(f => { if (f.path) paths.push(f.path); });
+                                }
+                                if (paths.length > 0) {
+                                    useLayoutStore.getState().bumpFileTreeRefresh(paths);
+                                    const codeExts = /\.(java|py|ts|tsx|js|jsx|json|md|yml|yaml|xml|html|css|sh)$/;
+                                    paths.filter(p => codeExts.test(p)).slice(0, 3).forEach(p => {
+                                        useOpenFilesStore.getState().openFile(p, undefined, true);
+                                    });
                                 }
                             }
                         }
@@ -430,6 +442,12 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                             partialOutput: existing + payload.content,
                         });
                     }
+                    break;
+                }
+
+                case 'MESSAGE_QUEUED': {
+                    // Queue count and message marking are handled client-side in handleSend.
+                    // Backend event is a confirmation — only increment if client missed it.
                     break;
                 }
 
@@ -623,6 +641,11 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                         if (isActive) {
                             setAgentPhase('thinking');
                             setCurrentToolName(undefined);
+                        }
+                        // A queued message just started executing — unhide it in chat
+                        if (useQueueStore.getState().count > 0) {
+                            useQueueStore.getState().dequeue();
+                            if (sid) useSessionStore.getState().clearFirstQueued(sid);
                         }
                     }
                     // Streaming reasoning_content delta from thinking models. We always
