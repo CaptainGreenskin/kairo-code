@@ -173,13 +173,8 @@ public final class TeamSessionPayload implements SessionPayload {
         if (preset != null) {
             switch (phase) {
                 case IDLE, FAILED_PLANNING -> {
-                    if (!preset.triageGate().shouldFanOut(request.text())) {
-                        AgentEvent demoted = AgentEvent.modeDemoted(sessionId,
-                                "Message too brief for experts mode, single-agent fallback");
-                        return Flux.concat(
-                                Flux.just(demoted),
-                                preset.demotionFallback().handleMessage(request));
-                    }
+                    // User explicitly chose Experts mode — always use expert team,
+                    // never demote based on message length/content.
                     if (narrator != null) {
                         narrator.suspend();
                     }
