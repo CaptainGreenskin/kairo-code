@@ -808,6 +808,7 @@ function App() {
         if (sessionId) clearCachedMessages(sessionId);
         disconnect();
         useBuildPhaseStore.getState().reset();
+        useExpertTeamStore.getState().reset();
         useSessionStore.setState({ todos: [] });
         setSessionId(null);
         clearMessages();
@@ -827,6 +828,7 @@ function App() {
         async (id: string) => {
             if (id === sessionId) return;
             useBuildPhaseStore.getState().reset();
+            useExpertTeamStore.getState().setCanvasTeamId(null);
             useSessionStore.setState({ todos: [] });
             setLoadingSessionId(id);
             // Already open as a tab → just switch active, leave its messages intact.
