@@ -22,38 +22,38 @@ export function SessionModeToggle({ disabled }: Props) {
         return s.sessions[activeSessionId]?.messages ?? [];
     });
 
-    // Session already has messages → mode is locked (was fixed at session creation)
     const locked = messages.length > 0 && sessionMode != null;
-
-    // Display mode: locked session mode > pending mode for new sessions
     const mode: SessionMode = sessionMode ?? pendingMode;
 
-    const toggle = () => {
-        if (disabled || locked) return;
-        const next: SessionMode = mode === 'agent' ? 'experts' : 'agent';
-        setPendingMode(next);
-    };
-
-    const current = MODES.find(m => m.value === mode) ?? MODES[0];
-    const Icon = current.icon;
-
     return (
-        <button
-            onClick={toggle}
-            disabled={disabled || locked}
-            className={`flex items-center gap-1 px-3 py-1 rounded-[10px] text-xs font-semibold transition-all
-                ${mode === 'experts'
-                    ? 'text-white shadow-md'
-                    : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}
-                disabled:opacity-40 disabled:cursor-not-allowed`}
-            style={mode === 'experts' ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' } : undefined}
-            title={locked
-                ? `Mode: ${current.label} (locked — create a new chat to change)`
-                : `Mode: ${current.label}. Click to toggle.`}
-        >
-            <Icon size={13} />
-            <span>{current.label}</span>
-            {locked && <Lock size={10} className="ml-0.5 opacity-60" />}
-        </button>
+        <div className="flex items-center gap-0.5 bg-[var(--bg-secondary)] rounded-[10px] p-0.5">
+            {MODES.map(({ value, label, icon: Icon }) => {
+                const active = mode === value;
+                return (
+                    <button
+                        key={value}
+                        onClick={() => {
+                            if (!disabled && !locked) setPendingMode(value);
+                        }}
+                        disabled={disabled || locked}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all
+                            ${active
+                                ? value === 'experts'
+                                    ? 'text-white shadow-sm'
+                                    : 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}
+                            disabled:opacity-40 disabled:cursor-not-allowed`}
+                        style={active && value === 'experts' ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' } : undefined}
+                        title={locked
+                            ? `${label} (锁定 — 新建会话可切换)`
+                            : label}
+                    >
+                        <Icon size={12} />
+                        <span>{label}</span>
+                    </button>
+                );
+            })}
+            {locked && <Lock size={9} className="text-[var(--text-muted)] ml-0.5" />}
+        </div>
     );
 }
