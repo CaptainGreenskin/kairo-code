@@ -133,7 +133,7 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
     return (
         <div
             ref={containerRef}
-            className="absolute right-0 top-0 bottom-0 w-[40px] border-l border-[var(--border)] bg-[var(--bg-secondary)]/80 z-5 cursor-pointer select-none"
+            className="absolute right-0 top-0 bottom-0 w-[40px] border-l border-[var(--border)] bg-[var(--bg-secondary)]/80 z-10 cursor-pointer select-none"
             onClick={handleClick}
             title={hoverIndex !== null ? blocks[hoverIndex]?.preview : undefined}
         >
@@ -148,9 +148,12 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
                             backgroundColor: b.color,
                             borderRadius: 1,
                             opacity: hoverIndex === b.index ? 1 : 0.6,
+                            cursor: 'pointer',
                         }}
+                        onClick={(e) => { e.stopPropagation(); onScrollToIndex(b.index); }}
                         onMouseEnter={() => setHoverIndex(b.index)}
                         onMouseLeave={() => setHoverIndex(null)}
+                        title={b.preview}
                     />
                 ))}
             </div>

@@ -1644,7 +1644,7 @@ ${content}
                                             ref={virtuosoRef}
                                             scrollerRef={(ref) => { virtuosoScrollerRef.current = ref as HTMLElement; }}
                                             className="overflow-x-hidden [scrollbar-gutter:stable]"
-                                            style={{ height: '100%' }}
+                                            style={{ height: '100%', paddingRight: filteredMessages.length >= 5 ? 40 : 0 }}
                                             defaultItemHeight={80}
                                             data={filteredMessages}
                                             followOutput={(isAtBottom) => {
