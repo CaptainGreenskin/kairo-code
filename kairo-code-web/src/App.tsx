@@ -808,6 +808,7 @@ function App() {
         if (sessionId) clearCachedMessages(sessionId);
         disconnect();
         useBuildPhaseStore.getState().reset();
+        useSessionStore.setState({ todos: [] });
         setSessionId(null);
         clearMessages();
         assistantMsgRef.current = {};
@@ -826,6 +827,7 @@ function App() {
         async (id: string) => {
             if (id === sessionId) return;
             useBuildPhaseStore.getState().reset();
+            useSessionStore.setState({ todos: [] });
             setLoadingSessionId(id);
             // Already open as a tab → just switch active, leave its messages intact.
             const alreadyOpen = useSessionStore.getState().openTabs.includes(id);
