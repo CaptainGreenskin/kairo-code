@@ -45,6 +45,10 @@ public class EvolutionConfig {
             EvolvedSkillStore skillStore,
             ServerConfig.ServerProperties props) {
         String modelName = resolveModel(props);
+        if (props.apiKey() == null || props.apiKey().isBlank()) {
+            log.warn("Evolution: no API key — using noop policy");
+            return new KairoEvolutionPolicy(null, modelName, 999, skillStore, Duration.ofSeconds(120));
+        }
         ModelProvider mp = CodeAgentFactory.buildModelProvider(
                 props.apiKey(), resolveBaseUrl(props), modelName);
         int threshold = 8;
