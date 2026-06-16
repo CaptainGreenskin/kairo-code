@@ -22,7 +22,7 @@ export function SessionModeToggle({ disabled }: Props) {
     const isExpert = mode === 'experts';
 
     const toggle = () => {
-        if (disabled || locked) return;
+        if (locked) return;
         setPendingMode(isExpert ? 'agent' : 'experts');
     };
 
@@ -32,12 +32,12 @@ export function SessionModeToggle({ disabled }: Props) {
     return (
         <button
             onClick={toggle}
-            disabled={disabled || locked}
+            disabled={locked}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-[10px] text-xs font-semibold transition-all
                 ${isExpert
                     ? 'text-white shadow-md'
                     : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}
-                ${!locked && !disabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                ${!locked ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
             style={isExpert ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' } : undefined}
             title={locked
                 ? `${label} 模式（已锁定，新建会话可切换）`

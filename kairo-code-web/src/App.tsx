@@ -815,7 +815,7 @@ function App() {
         assistantMsgRef.current = {};
         setStreamingMsgId(null);
         setThinking(false);
-        setAgentPhase('idle');
+        setAgentPhase('thinking');
         setCurrentToolName(undefined);
         setTokenUsage({ input: 0, output: 0 });
         setEstimatedCost(0);
