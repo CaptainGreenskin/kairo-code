@@ -484,29 +484,52 @@ public class AgentService implements DisposableBean, InitializingBean {
             maxTokens = io.kairo.core.model.ModelRegistry.getContextWindow(
                     entry.configOrNull().modelName());
         }
-        int usedTokens = 0;
+
+        // Real compaction: force-run the pipeline to truncate history
         SessionPayload payload = entry.payload();
-        if (payload instanceof AgentSessionPayload asp && asp.session() != null) {
-            usedTokens = asp.session().agent() instanceof io.kairo.core.agent.DefaultReActAgent dra
-                    ? (int) dra.totalTokensUsed() : 0;
+        if (payload instanceof AgentSessionPayload asp && asp.session() != null
+                && asp.session().agent() instanceof io.kairo.core.agent.DefaultReActAgent dra) {
+            int beforeTokens = (int) dra.totalTokensUsed();
+            var contextMgr = dra.contextManager();
+            if (contextMgr instanceof io.kairo.core.context.DefaultContextManager dcm) {
+                List<io.kairo.api.message.Msg> history = dra.conversationHistory();
+                int beforeSize = history.size();
+                final int fMaxTokens = maxTokens;
+                return Flux.from(
+                        dcm.compactMessages(history, true)
+                                .flatMap(compacted -> {
+                                    if (compacted != history && compacted.size() < beforeSize) {
+                                        dra.replaceHistory(compacted);
+                                        int saved = beforeSize - compacted.size();
+                                        log.info("Manual compaction: {} -> {} messages ({} removed)",
+                                                beforeSize, compacted.size(), saved);
+                                        AgentRuntimeContext.emitSerialized(sink,
+                                                AgentEvent.contextCompacted(sessionId,
+                                                        beforeTokens, fMaxTokens));
+                                        return reactor.core.publisher.Mono.just(
+                                                AgentEvent.textChunk(sessionId,
+                                                        "Context compacted: " + beforeSize
+                                                                + " → " + compacted.size()
+                                                                + " messages"));
+                                    }
+                                    log.info("Manual compaction: no reduction ({}→{})",
+                                            beforeSize, compacted.size());
+                                    AgentRuntimeContext.emitSerialized(sink,
+                                            AgentEvent.contextCompacted(sessionId,
+                                                    beforeTokens, fMaxTokens));
+                                    return reactor.core.publisher.Mono.just(
+                                            AgentEvent.textChunk(sessionId,
+                                                    "Context already compact (" + beforeSize
+                                                            + " messages, pressure low)"));
+                                }));
+            }
         }
-        int beforeTokens = usedTokens > 0 ? usedTokens : maxTokens;
+
+        // Fallback: emit event only
+        log.warn("Manual compaction: no context manager available for session {}", sessionId);
         AgentRuntimeContext.emitSerialized(sink,
-                AgentEvent.contextCompacted(sessionId, beforeTokens, maxTokens));
-        log.info("Manual compaction triggered for session {} (used={}, max={})",
-                sessionId, beforeTokens, maxTokens);
-        String compactPrompt = "The conversation context is getting large. "
-                + "Please summarize all work done so far — including what has been tried, "
-                + "what succeeded, what failed, and the current state of the task — in a "
-                + "concise summary (around 200 words). Then continue working.";
-        io.kairo.api.message.Msg compactionMsg = io.kairo.api.message.Msg.builder()
-                .role(io.kairo.api.message.MsgRole.USER)
-                .addContent(new io.kairo.api.message.Content.TextContent(compactPrompt))
-                .metadata("kairo.kind", "compaction")
-                .metadata("kairo.compaction.beforeTokens", maxTokens)
-                .metadata("kairo.compaction.maxTokens", maxTokens)
-                .build();
-        return sendMessage(sessionId, new MessageRequest(compactionMsg));
+                AgentEvent.contextCompacted(sessionId, maxTokens, maxTokens));
+        return Flux.just(AgentEvent.textChunk(sessionId, "Compaction not available"));
     }
 
     /**
