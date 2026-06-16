@@ -1634,17 +1634,12 @@ ${content}
                                         />
                                     )}
                                     <ErrorBoundary>
-                                        <div className="relative flex-1 min-h-0 overflow-hidden">
-                                        <ChatMinimap
-                                            messages={filteredMessages as Message[]}
-                                            scrollerRef={virtuosoScrollerRef}
-                                            onScrollToIndex={(idx) => virtuosoRef.current?.scrollToIndex({ index: idx, behavior: 'smooth' })}
-                                        />
+                                        <div className="flex flex-1 min-h-0 overflow-hidden">
                                         <Virtuoso
                                             ref={virtuosoRef}
                                             scrollerRef={(ref) => { virtuosoScrollerRef.current = ref as HTMLElement; }}
                                             className="overflow-x-hidden [scrollbar-gutter:stable]"
-                                            style={{ height: '100%', paddingRight: filteredMessages.length >= 5 ? 80 : 0 }}
+                                            style={{ height: '100%', flex: 1, minWidth: 0 }}
                                             defaultItemHeight={80}
                                             data={filteredMessages}
                                             followOutput={(isAtBottom) => {
@@ -1774,6 +1769,11 @@ ${content}
                                                     );
                                                 },
                                             }}
+                                        />
+                                        <ChatMinimap
+                                            messages={filteredMessages as Message[]}
+                                            scrollerRef={virtuosoScrollerRef}
+                                            onScrollToIndex={(idx) => virtuosoRef.current?.scrollToIndex({ index: idx, behavior: 'smooth' })}
                                         />
                                         </div>
                                     </ErrorBoundary>

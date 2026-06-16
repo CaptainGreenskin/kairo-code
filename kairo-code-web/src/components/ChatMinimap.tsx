@@ -81,11 +81,11 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
     return (
         <div
             ref={containerRef}
-            className="absolute right-0 top-0 bottom-0 border-l border-[var(--border)] bg-[var(--bg-secondary)]/90 z-10 select-none overflow-hidden"
+            className="shrink-0 border-l border-[var(--border)] bg-[var(--bg-secondary)]/90 select-none overflow-hidden"
             style={{ width: WIDTH }}
         >
             {/* Message markers */}
-            <div className="absolute inset-0 overflow-y-hidden flex flex-col py-1 gap-[1px]">
+            <div className="relative h-full overflow-y-hidden flex flex-col py-1 gap-[1px]">
                 {items.map((item) => (
                     <div
                         key={item.index}
