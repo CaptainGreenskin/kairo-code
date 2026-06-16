@@ -21,9 +21,16 @@ export function SessionModeToggle({ disabled }: Props) {
     const mode: SessionMode = sessionMode ?? pendingMode;
     const isExpert = mode === 'experts';
 
+    const setSessionMode = useSessionModeStore(s => s.setSessionMode);
+
     const toggle = () => {
         if (locked) return;
-        setPendingMode(isExpert ? 'agent' : 'experts');
+        const next: SessionMode = isExpert ? 'agent' : 'experts';
+        setPendingMode(next);
+        // If session already has a mode locked in, update it directly
+        if (activeSessionId && sessionMode != null) {
+            setSessionMode(activeSessionId, next);
+        }
     };
 
     const Icon = isExpert ? Users : Bot;
