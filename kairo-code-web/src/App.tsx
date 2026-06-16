@@ -814,7 +814,8 @@ function App() {
         clearMessages();
         assistantMsgRef.current = {};
         setStreamingMsgId(null);
-        setAgentPhase('thinking');
+        setThinking(false);
+        setAgentPhase('idle');
         setCurrentToolName(undefined);
         setTokenUsage({ input: 0, output: 0 });
         setEstimatedCost(0);
