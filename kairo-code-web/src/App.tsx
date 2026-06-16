@@ -1643,7 +1643,7 @@ ${content}
                                             className="overflow-x-hidden [scrollbar-gutter:stable]"
                                             style={{ height: '100%', flex: 1, minWidth: 0 }}
                                             defaultItemHeight={80}
-                                            data={filteredMessages}
+                                            data={filteredMessages.filter((m: any) => !m.queued)}
                                             followOutput={(isAtBottom) => {
                                                 if ((showSearch && searchQuery) || (showMessageSearch && messageSearchQuery)) return false;
                                                 return isAtBottom ? 'auto' : false;
@@ -1652,7 +1652,6 @@ ${content}
                                             atBottomThreshold={48}
                                             itemContent={(index, msg) => {
                                                 const msgObj = msg as Message;
-                                                if (msgObj.queued) return <div style={{ height: 0, overflow: 'hidden' }} />;
                                                 const prevMsg = index > 0 ? (filteredMessages[index - 1] as Message) : null;
                                                 const showDateSep = prevMsg && prevMsg.timestamp && msgObj.timestamp &&
                                                     new Date(msgObj.timestamp).toDateString() !== new Date(prevMsg.timestamp).toDateString();
