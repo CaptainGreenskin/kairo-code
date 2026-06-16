@@ -1638,12 +1638,13 @@ ${content}
                                         />
                                     )}
                                     <ErrorBoundary>
-                                        <div className="flex flex-1 min-h-0 overflow-hidden">
+                                        <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
+                                        <div className="flex-1 min-w-0 min-h-0 h-full">
                                         <Virtuoso
                                             ref={virtuosoRef}
                                             scrollerRef={(ref) => { virtuosoScrollerRef.current = ref as HTMLElement; }}
                                             className="overflow-x-hidden [scrollbar-gutter:stable]"
-                                            style={{ height: '100%', flex: 1, minWidth: 0 }}
+                                            style={{ height: '100%' }}
                                             defaultItemHeight={80}
                                             data={filteredMessages.filter((m: any) => !m.queued)}
                                             followOutput={(isAtBottom) => {
@@ -1773,6 +1774,7 @@ ${content}
                                                 },
                                             }}
                                         />
+                                        </div>
                                         <ChatMinimap
                                             messages={filteredMessages as Message[]}
                                             scrollerRef={virtuosoScrollerRef}
