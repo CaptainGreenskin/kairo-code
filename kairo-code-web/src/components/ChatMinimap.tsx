@@ -85,7 +85,14 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
             style={{ width: WIDTH }}
         >
             {/* Message markers */}
-            <div className="relative h-full overflow-y-hidden flex flex-col py-1 gap-[1px]">
+            <div className="relative h-full overflow-y-hidden flex flex-col py-1 gap-[1px] z-10"
+                 onClick={(e) => {
+                     const rect = containerRef.current?.getBoundingClientRect();
+                     if (!rect) return;
+                     const ratio = (e.clientY - rect.top) / rect.height;
+                     const idx = Math.round(ratio * (messages.length - 1));
+                     onScrollToIndex(Math.max(0, Math.min(messages.length - 1, idx)));
+                 }}>
                 {items.map((item) => (
                     <div
                         key={item.index}
@@ -117,16 +124,16 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
                 ))}
             </div>
 
-            {/* Viewport indicator */}
+            {/* Viewport indicator — z-20 to stay above content layer */}
             <div
-                className="absolute left-0 right-0"
+                className="absolute left-0 right-0 z-20"
                 style={{
                     top: `${viewportTop * 100}%`,
-                    height: `${Math.max(viewportHeight * 100, 8)}%`,
+                    height: `${Math.max(viewportHeight * 100, 10)}%`,
                     background: 'var(--accent)',
-                    opacity: dragging ? 0.18 : 0.08,
-                    borderTop: '1px solid var(--accent)',
-                    borderBottom: '1px solid var(--accent)',
+                    opacity: dragging ? 0.25 : 0.12,
+                    borderTop: '2px solid var(--accent)',
+                    borderBottom: '2px solid var(--accent)',
                     cursor: dragging ? 'grabbing' : 'grab',
                     transition: dragging ? 'none' : 'top 0.1s ease-out',
                 }}
