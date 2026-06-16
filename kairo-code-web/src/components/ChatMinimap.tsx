@@ -1,37 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Message } from '@/types/agent';
 
-interface MinimapBlock {
-    index: number;
-    color: string;
-    height: number;
-    y: number;
-    preview: string;
-}
-
-const COLORS: Record<string, string> = {
-    user: '#8b5cf6',
-    assistant: '#6366f1',
-    error: '#ef4444',
-    tool: '#f59e0b',
-    thinking: '#6b7280',
-};
-
-function blockHeight(msg: Message): number {
-    if (msg.role === 'user') return 4;
-    if (msg.role === 'error') return 3;
-    if (msg.role === 'assistant') {
-        const len = msg.content?.length ?? 0;
-        const toolCount = msg.toolCalls?.length ?? 0;
-        return Math.min(20, Math.max(4, Math.round(len / 200) + toolCount * 3));
-    }
-    return 3;
-}
-
-function blockColor(msg: Message): string {
-    if (msg.queued) return '#6b7280';
-    return COLORS[msg.role] ?? COLORS.assistant;
-}
+const WIDTH = 80;
 
 interface ChatMinimapProps {
     messages: Message[];
@@ -44,26 +14,7 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
     const [viewportTop, setViewportTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0.3);
     const [dragging, setDragging] = useState(false);
-    const [hoverIndex, setHoverIndex] = useState<number | null>(null);
     const dragStartRef = useRef({ y: 0, scrollTop: 0 });
-
-    const blocks = useMemo<MinimapBlock[]>(() => {
-        let y = 0;
-        return messages.map((msg, i) => {
-            const h = blockHeight(msg);
-            const block: MinimapBlock = {
-                index: i,
-                color: blockColor(msg),
-                height: h,
-                y,
-                preview: (msg.content ?? '').slice(0, 40),
-            };
-            y += h + 1;
-            return block;
-        });
-    }, [messages]);
-
-    const totalHeight = blocks.length > 0 ? blocks[blocks.length - 1].y + blocks[blocks.length - 1].height : 1;
 
     // Sync scroll position
     useEffect(() => {
@@ -79,19 +30,6 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
         el.addEventListener('scroll', onScroll, { passive: true });
         return () => el.removeEventListener('scroll', onScroll);
     }, [scrollerRef, messages.length]);
-
-    // Click to navigate
-    const handleClick = useCallback(
-        (e: React.MouseEvent) => {
-            if (dragging) return;
-            const rect = containerRef.current?.getBoundingClientRect();
-            if (!rect) return;
-            const clickRatio = (e.clientY - rect.top) / rect.height;
-            const targetIndex = Math.round(clickRatio * (messages.length - 1));
-            onScrollToIndex(Math.max(0, Math.min(messages.length - 1, targetIndex)));
-        },
-        [messages.length, onScrollToIndex, dragging],
-    );
 
     // Drag viewport
     const handleDragStart = useCallback(
@@ -128,46 +66,67 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
         };
     }, [dragging, scrollerRef]);
 
+    const items = useMemo(() => {
+        return messages.map((msg, i) => {
+            const isUser = msg.role === 'user';
+            const isError = msg.role === 'error';
+            const preview = (msg.content ?? '').replace(/\n/g, ' ').slice(0, 12);
+            const toolCount = msg.toolCalls?.length ?? 0;
+            return { index: i, isUser, isError, preview, toolCount };
+        });
+    }, [messages]);
+
     if (messages.length < 5) return null;
 
     return (
         <div
             ref={containerRef}
-            className="absolute right-0 top-0 bottom-0 w-[40px] border-l border-[var(--border)] bg-[var(--bg-secondary)]/80 z-10 cursor-pointer select-none"
-            onClick={handleClick}
-            title={hoverIndex !== null ? blocks[hoverIndex]?.preview : undefined}
+            className="absolute right-0 top-0 bottom-0 border-l border-[var(--border)] bg-[var(--bg-secondary)]/90 z-10 select-none overflow-hidden"
+            style={{ width: WIDTH }}
         >
-            {/* Blocks */}
-            <div className="absolute inset-0 flex flex-col py-1 px-[6px] gap-[1px]"
-                 style={{ transform: `scaleY(${Math.min(1, (containerRef.current?.clientHeight ?? 600) / totalHeight)})`, transformOrigin: 'top' }}>
-                {blocks.map((b) => (
+            {/* Message markers */}
+            <div className="absolute inset-0 overflow-y-hidden flex flex-col py-1 gap-[1px]">
+                {items.map((item) => (
                     <div
-                        key={b.index}
-                        style={{
-                            height: b.height,
-                            backgroundColor: b.color,
-                            borderRadius: 1,
-                            opacity: hoverIndex === b.index ? 1 : 0.6,
-                            cursor: 'pointer',
-                        }}
-                        onClick={(e) => { e.stopPropagation(); onScrollToIndex(b.index); }}
-                        onMouseEnter={() => setHoverIndex(b.index)}
-                        onMouseLeave={() => setHoverIndex(null)}
-                        title={b.preview}
-                    />
+                        key={item.index}
+                        className="shrink-0 cursor-pointer hover:opacity-100 transition-opacity"
+                        style={{ opacity: 0.8 }}
+                        onClick={() => onScrollToIndex(item.index)}
+                    >
+                        {item.isUser ? (
+                            <div className="flex items-center gap-1 px-1 py-[1px]">
+                                <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
+                                <span className="text-[8px] text-purple-400 truncate leading-tight">
+                                    {item.preview || '…'}
+                                </span>
+                            </div>
+                        ) : item.isError ? (
+                            <div className="mx-1 h-[3px] rounded-sm bg-red-500/50" />
+                        ) : (
+                            <div className="flex items-center gap-0.5 px-1 py-[1px]">
+                                <div
+                                    className="h-[3px] rounded-sm bg-indigo-500/40 flex-1"
+                                    style={{ minWidth: Math.min(60, 10 + (item.toolCount * 8)) }}
+                                />
+                                {item.toolCount > 0 && (
+                                    <span className="text-[7px] text-orange-400/60">{item.toolCount}t</span>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 ))}
             </div>
 
             {/* Viewport indicator */}
             <div
-                className="absolute left-[2px] right-[2px] rounded-sm"
+                className="absolute left-0 right-0"
                 style={{
                     top: `${viewportTop * 100}%`,
-                    height: `${Math.max(viewportHeight * 100, 5)}%`,
+                    height: `${Math.max(viewportHeight * 100, 8)}%`,
                     background: 'var(--accent)',
-                    opacity: dragging ? 0.25 : 0.12,
-                    border: '1px solid',
-                    borderColor: dragging ? 'var(--accent)' : 'transparent',
+                    opacity: dragging ? 0.18 : 0.08,
+                    borderTop: '1px solid var(--accent)',
+                    borderBottom: '1px solid var(--accent)',
                     cursor: dragging ? 'grabbing' : 'grab',
                     transition: dragging ? 'none' : 'top 0.1s ease-out',
                 }}
