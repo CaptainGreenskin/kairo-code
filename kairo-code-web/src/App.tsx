@@ -1198,23 +1198,13 @@ ${content}
         }
     }, [isConnected, switchSession, connect, clearFiles]);
 
-    /** ChatTabBar `+` button: spin up a session for the current workspace and open it. */
-    const handleNewChatTab = useCallback(async () => {
+    /** ChatTabBar `+` button: clear UI for a fresh chat. Session is created lazily
+     *  when the user sends the first message (in handleSend's !sessionId branch),
+     *  so the user can choose Agent/Experts mode before committing. */
+    const handleNewChatTab = useCallback(() => {
         if (!currentWorkspaceId) return;
-        connect();
-        try {
-            const newId = await createSession(currentWorkspaceId);
-            useSessionStore.getState().openSession(newId);
-            assistantMsgRef.current[newId] = null;
-            // A fresh chat has no experts canvas or pending plan — clear any left over from
-            // the previous session so the new one doesn't inherit a stale canvas/phase.
-            useExpertTeamStore.getState().setCanvasTeamId(null);
-            useBuildPhaseStore.getState().setPhase('idle');
-            if (isConnected) switchSession(newId);
-        } catch (e) {
-            addToast('error', e instanceof Error ? e.message : 'Failed to create session');
-        }
-    }, [currentWorkspaceId, connect, createSession, isConnected, switchSession, addToast]);
+        handleNewSession();
+    }, [currentWorkspaceId, handleNewSession]);
 
     // Command palette commands
     const commands: Command[] = useMemo(() => [

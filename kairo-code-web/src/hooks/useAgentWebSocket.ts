@@ -579,7 +579,7 @@ export function useAgentWebSocket(
                                 reject(new Error('[ws] createSession timeout'));
                             }
                         }, 10_000);
-                        const mode = useSessionModeStore.getState().getMode(workspaceId);
+                        const mode = useSessionModeStore.getState().pendingMode;
                         createPendingRef.current = { resolve, reject, timer, mode };
                         send({ action: 'create', workspaceId, mode });
                     } else if (attemptsLeft > 0) {
