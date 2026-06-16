@@ -101,7 +101,7 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
                         onClick={() => onScrollToIndex(item.index)}
                     >
                         {item.isUser ? (
-                            <div className="flex items-center gap-1 px-1 py-[1px]">
+                            <div className="flex items-center gap-1 px-1 py-[1px]" title={item.preview}>
                                 <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
                                 <span className="text-[8px] text-purple-400 truncate leading-tight">
                                     {item.preview || '…'}
@@ -110,7 +110,7 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
                         ) : item.isError ? (
                             <div className="mx-1 h-[3px] rounded-sm bg-red-500/50" />
                         ) : (
-                            <div className="flex items-center gap-0.5 px-1 py-[1px]">
+                            <div className="flex items-center gap-0.5 px-1 py-[1px]" title={item.preview}>
                                 <div
                                     className="h-[3px] rounded-sm bg-indigo-500/40 flex-1"
                                     style={{ minWidth: Math.min(60, 10 + (item.toolCount * 8)) }}

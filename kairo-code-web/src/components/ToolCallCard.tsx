@@ -235,6 +235,14 @@ interface ResultOutputProps {
 }
 
 function ResultOutput({ toolName, result, input }: ResultOutputProps) {
+    // Empty or placeholder results — show subtle hint instead of raw text
+    if (!result || result === '(no response)' || result.trim() === '') {
+        return (
+            <div className="border-t border-[var(--border)] px-3 py-2 text-xs text-[var(--text-muted)] italic">
+                No output
+            </div>
+        );
+    }
     const [resultExpanded, setResultExpanded] = useState(false);
     const { lines: visibleLines, hiddenCount } = collapseLines(result, resultExpanded);
     const totalLines = result.split('\n').length;
