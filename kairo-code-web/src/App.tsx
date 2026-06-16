@@ -1608,6 +1608,9 @@ ${content}
                             <ChatTabBar
                                 onNew={handleNewChatTab}
                                 onActivate={(sid) => {
+                                    useBuildPhaseStore.getState().reset();
+                                    useExpertTeamStore.getState().setCanvasTeamId(null);
+                                    useSessionStore.setState({ todos: [] });
                                     if (isConnected) switchSession(sid);
                                     else connect();
                                 }}
