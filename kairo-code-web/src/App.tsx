@@ -1642,7 +1642,7 @@ ${content}
                                             className="overflow-x-hidden [scrollbar-gutter:stable]"
                                             style={{ height: '100%' }}
                                             defaultItemHeight={80}
-                                            data={filteredMessages.filter((m: any) => !m.queued)}
+                                            data={filteredMessages}
                                             followOutput={(isAtBottom) => {
                                                 if ((showSearch && searchQuery) || (showMessageSearch && messageSearchQuery)) return false;
                                                 return isAtBottom ? 'auto' : false;
