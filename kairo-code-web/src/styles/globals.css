@@ -181,6 +181,15 @@ body {
     }
 }
 
+/* Prose code block — light mode uses light bg instead of dark */
+.prose pre {
+    background-color: var(--code-bg) !important;
+    border: 1px solid var(--border);
+}
+.prose code {
+    color: var(--text-primary);
+}
+
 /* Monaco editor inline diff decorations */
 .diff-added-line { background: rgba(40, 167, 69, 0.15) !important; }
 .diff-added-margin { background: rgb(40, 167, 69) !important; width: 3px !important; margin-left: 3px; }
