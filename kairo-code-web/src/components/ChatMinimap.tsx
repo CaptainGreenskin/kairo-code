@@ -81,7 +81,7 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
     return (
         <div
             ref={containerRef}
-            className="shrink-0 border-l border-[var(--border)] bg-[var(--bg-secondary)]/90 select-none overflow-hidden"
+            className="relative shrink-0 border-l border-[var(--border)] bg-[var(--bg-secondary)]/90 select-none overflow-hidden"
             style={{ width: WIDTH }}
         >
             {/* Message markers */}
