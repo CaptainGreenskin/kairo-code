@@ -34,6 +34,7 @@ import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
 import { PendingApprovalBanner } from '@components/PendingApprovalBanner';
 import { QueueBanner } from '@components/QueueBanner';
+import { ChatMinimap } from '@components/ChatMinimap';
 import { QueuedMessagesCard } from '@components/QueuedMessagesCard';
 import { useQueueStore } from '@store/queueStore';
 import { MessageSearchBar } from '@components/MessageSearchBar';
@@ -226,6 +227,7 @@ function App() {
     const persistedSessions: SnapshotMeta[] = [];
     const refreshPersistedSessions = useCallback(async () => {}, []);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
+    const virtuosoScrollerRef = useRef<HTMLElement | null>(null);
     const [atBottom, setAtBottom] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
     const prevMsgCount = useRef(messages.length);
@@ -1632,9 +1634,15 @@ ${content}
                                         />
                                     )}
                                     <ErrorBoundary>
-                                        <div className="flex-1 min-h-0 overflow-hidden">
+                                        <div className="relative flex-1 min-h-0 overflow-hidden">
+                                        <ChatMinimap
+                                            messages={filteredMessages as Message[]}
+                                            scrollerRef={virtuosoScrollerRef}
+                                            onScrollToIndex={(idx) => virtuosoRef.current?.scrollToIndex({ index: idx, behavior: 'smooth' })}
+                                        />
                                         <Virtuoso
                                             ref={virtuosoRef}
+                                            scrollerRef={(ref) => { virtuosoScrollerRef.current = ref as HTMLElement; }}
                                             className="overflow-x-hidden [scrollbar-gutter:stable]"
                                             style={{ height: '100%' }}
                                             defaultItemHeight={80}
