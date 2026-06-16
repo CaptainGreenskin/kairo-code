@@ -401,27 +401,27 @@ public class AgentService implements DisposableBean, InitializingBean {
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts, extraToolDeps);
             bridgeHook.setCostTracker(session.costTracker());
 
-            // ── Unified payload: always AgentSessionPayload + optional escalation ──
-            AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
-
-            // Auto-escalation only when the user explicitly selects mode="experts".
-            // The HeuristicTriageGate is too broad for automatic detection, but works
-            // fine as a passthrough when the user has already opted in.
-            SessionPayload payload = agentPayload;
-            if (explicitExperts && swarmCoordinator != null && triageGate != null
+            // ── Route by mode: Agent → AgentSessionPayload, Experts → TeamSessionPayload ──
+            SessionPayload payload;
+            if (explicitExperts && swarmCoordinator != null
                     && teamManager != null && messageBus != null) {
                 io.kairo.api.model.ModelProvider narratorModel =
                         CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl(), config.modelName());
-                agentPayload.setEscalationConfig(new AgentSessionPayload.EscalationConfig(
-                        swarmCoordinator,
-                        io.kairo.api.team.TeamConfig.defaults(),
-                        triageGate,
-                        eventBus,
-                        teamManager,
-                        messageBus,
-                        config,
-                        narratorModel));
-                log.info("Session {} created with experts escalation enabled", sessionId);
+                AgentSessionPayload agentFallback = new AgentSessionPayload(config, session, ctx);
+                TeamSessionPayload.ExpertsPresetConfig presetCfg =
+                        new TeamSessionPayload.ExpertsPresetConfig(
+                                swarmCoordinator,
+                                io.kairo.api.team.TeamConfig.defaults(),
+                                triageGate,
+                                agentFallback,
+                                TeamSessionPayload.NarratorSettings.defaults(),
+                                eventBus,
+                                narratorModel);
+                payload = new TeamSessionPayload(
+                        config, session, ctx, teamManager, messageBus, presetCfg);
+                log.info("Session {} created as Experts team (direct)", sessionId);
+            } else {
+                payload = new AgentSessionPayload(config, session, ctx);
             }
 
             SessionEntry entry = new SessionEntry(
