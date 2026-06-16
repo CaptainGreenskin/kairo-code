@@ -1652,7 +1652,7 @@ ${content}
                                             atBottomThreshold={48}
                                             itemContent={(index, msg) => {
                                                 const msgObj = msg as Message;
-                                                if (msgObj.queued) return <div />;
+                                                if (msgObj.queued) return <div style={{ height: 0, overflow: 'hidden' }} />;
                                                 const prevMsg = index > 0 ? (filteredMessages[index - 1] as Message) : null;
                                                 const showDateSep = prevMsg && prevMsg.timestamp && msgObj.timestamp &&
                                                     new Date(msgObj.timestamp).toDateString() !== new Date(prevMsg.timestamp).toDateString();
