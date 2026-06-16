@@ -144,9 +144,10 @@ public final class AgentSessionPayload implements SessionPayload {
         AtomicReference<SessionPhase> phaseRef = ctx.phaseRef();
         SessionPhase phase = phaseRef.get();
 
-        // ── Auto-escalate to expert team for complex code tasks ──
-        // Agent mode NEVER auto-escalates to expert team.
-        // Expert team is only used when the user explicitly selects Experts mode.
+        // ── Escalate to expert team when user explicitly chose Experts mode ──
+        if (escalationConfig != null) {
+            return escalate(request);
+        }
 
         // ── FAILED_EXECUTION: reject until revert ──
         if (phase == SessionPhase.FAILED_EXECUTION) {
