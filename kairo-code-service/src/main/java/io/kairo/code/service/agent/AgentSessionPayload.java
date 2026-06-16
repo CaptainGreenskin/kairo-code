@@ -80,6 +80,7 @@ public final class AgentSessionPayload implements SessionPayload {
     private final ConcurrentLinkedDeque<Msg> refineQueue = new ConcurrentLinkedDeque<>();
     private final ConcurrentLinkedDeque<MessageRequest> messageQueue = new ConcurrentLinkedDeque<>();
     private final AtomicReference<Disposable> currentRun = new AtomicReference<>();
+    private final AtomicBoolean firstMessageHandled = new AtomicBoolean(false);
 
     /**
      * Full constructor with runtime context for lifecycle ownership.
@@ -144,12 +145,8 @@ public final class AgentSessionPayload implements SessionPayload {
         SessionPhase phase = phaseRef.get();
 
         // ── Auto-escalate to expert team for complex code tasks ──
-        if (escalationConfig != null
-                && (phase == SessionPhase.IDLE || phase == SessionPhase.COMPLETED)
-                && escalationConfig.triageGate().shouldFanOut(request.text())
-                && isCodeRelated(request.text())) {
-            return escalate(request);
-        }
+        // Agent mode NEVER auto-escalates to expert team.
+        // Expert team is only used when the user explicitly selects Experts mode.
 
         // ── FAILED_EXECUTION: reject until revert ──
         if (phase == SessionPhase.FAILED_EXECUTION) {

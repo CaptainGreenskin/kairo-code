@@ -205,7 +205,7 @@ function ToolRiskBadge({ toolName }: { toolName: string }) {
     const config = {
         read:    { label: 'read',    cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
         write:   { label: 'write',   cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-        execute: { label: 'execute', cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
+        execute: { label: 'execute', cls: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
         other:   { label: 'tool',    cls: 'bg-[var(--bg-secondary)] text-[var(--text-muted)] border-[var(--border)]' },
     }[level];
 
