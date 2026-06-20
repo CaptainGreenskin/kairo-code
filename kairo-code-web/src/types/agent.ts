@@ -61,6 +61,7 @@ export type AgentEventPayload =
     | ToolOutputChunkPayload
     | PeerMessagePayload
     | MessageQueuedPayload
+    | SkillActivatedPayload
     | Record<string, never>;
 
 export interface TextChunkPayload {
@@ -125,6 +126,11 @@ export interface AgentThinkingPayload {
 
 export interface MessageQueuedPayload {
     queuePosition: number;
+}
+
+export interface SkillActivatedPayload {
+    skills: string[];
+    scores: number[];
 }
 
 /**

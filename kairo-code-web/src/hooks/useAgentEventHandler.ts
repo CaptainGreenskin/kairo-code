@@ -812,7 +812,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     const scores = meta?.scores ?? [];
                     if (skills.length > 0) {
                         const details = skills.map((s, i) =>
-                            `${s} (${(scores[i] ?? 0).toFixed(0)}%)`
+                            `${s} (${Math.round((scores[i] ?? 0) * 100)}%)`
                         ).join(', ');
                         addMessageTo(sid, {
                             id: generateId(),

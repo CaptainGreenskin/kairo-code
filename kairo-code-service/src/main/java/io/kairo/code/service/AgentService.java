@@ -361,12 +361,24 @@ public class AgentService implements DisposableBean, InitializingBean {
             ToolUsageTracker usageTracker = new ToolUsageTracker();
             Path memoryDir = Path.of(System.getProperty("user.home"), ".kairo-code", "memory");
             io.kairo.api.memory.MemoryStore memoryStore = new io.kairo.core.memory.FileMemoryStore(memoryDir);
+            // Load skills from filesystem into a registry for skill tools + discovery
+            Path globalSkillsDir = Path.of(System.getProperty("user.home"), ".kairo-code", "skills");
+            Path projectSkillsDir = config.workingDir() != null
+                    ? Path.of(config.workingDir()).resolve(".kairo-code").resolve("skills") : null;
+            io.kairo.code.core.skill.FsSkillLoader skillLoader =
+                    new io.kairo.code.core.skill.FsSkillLoader(globalSkillsDir, projectSkillsDir);
+            io.kairo.api.skill.SkillRegistry skillRegistry = new io.kairo.skill.DefaultSkillRegistry();
+            for (var sw : skillLoader.loadAll()) {
+                skillRegistry.register(sw.metadata().definition());
+            }
+
             SessionOptions opts = SessionOptions.empty()
                     .asReplSession()
                     .withSessionId(sessionId)
                     .withApprovalHandler(approvalHandler)
                     .withToolUsageTracker(usageTracker)
                     .withMemoryStore(memoryStore)
+                    .withSkills(skillRegistry, java.util.Set.of())
                     .withHooks(hooks);
             if (teamManager != null && messageBus != null) {
                 opts = opts.withTeamPrimitives(teamManager, messageBus);

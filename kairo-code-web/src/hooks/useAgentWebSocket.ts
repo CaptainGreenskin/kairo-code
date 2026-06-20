@@ -205,6 +205,16 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 } satisfies import('@/types/agent').ToolProgressPayload,
             };
         }
+        case 'SKILL_ACTIVATED': {
+            const meta = (raw.resultMetadata as Record<string, unknown>) ?? {};
+            return {
+                type: 'SKILL_ACTIVATED', sessionId, timestamp: ts,
+                payload: {
+                    skills: (meta.skills as string[]) ?? [],
+                    scores: (meta.scores as number[]) ?? [],
+                },
+            };
+        }
         default:
             // Silently ignore known keepalive/internal event types
             if (type === 'HEARTBEAT') {
