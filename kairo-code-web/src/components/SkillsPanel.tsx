@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Sparkles, Download, Trash2, RefreshCw, Search, Play, Square, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Sparkles, Download, Trash2, RefreshCw, Search, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface Skill {
     name: string;
@@ -10,7 +10,6 @@ interface Skill {
     triggers: string[];
     version: string;
     hasInstructions: boolean;
-    loaded?: boolean;
 }
 
 interface ManagedSkill {
@@ -34,7 +33,6 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
     const [tab, setTab] = useState<Tab>('all');
     const [skills, setSkills] = useState<Skill[]>([]);
     const [managed, setManaged] = useState<ManagedSkill[]>([]);
-    const [loadedSkills, setLoadedSkills] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
@@ -46,17 +44,12 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
 
     const fetchSkills = useCallback(async () => {
         try {
-            const [skillsRes, managedRes, loadedRes] = await Promise.all([
+            const [skillsRes, managedRes] = await Promise.all([
                 fetch('/api/skills'),
                 fetch('/api/skills/managed'),
-                fetch('/api/skills/loaded'),
             ]);
             if (skillsRes.ok) setSkills(await skillsRes.json());
             if (managedRes.ok) setManaged(await managedRes.json());
-            if (loadedRes.ok) {
-                const names: string[] = await loadedRes.json();
-                setLoadedSkills(new Set(names));
-            }
         } catch { /* ignore */ }
         setLoading(false);
     }, []);
@@ -75,24 +68,6 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
             || s.description.toLowerCase().includes(q)
             || s.triggers.some(t => t.toLowerCase().includes(q));
     });
-
-    const handleLoad = async (name: string) => {
-        try {
-            const res = await fetch(`/api/skills/${encodeURIComponent(name)}/load`, { method: 'POST' });
-            if (res.ok) {
-                setLoadedSkills(prev => new Set(prev).add(name));
-            }
-        } catch { /* ignore */ }
-    };
-
-    const handleUnload = async (name: string) => {
-        try {
-            const res = await fetch(`/api/skills/${encodeURIComponent(name)}/unload`, { method: 'POST' });
-            if (res.ok) {
-                setLoadedSkills(prev => { const next = new Set(prev); next.delete(name); return next; });
-            }
-        } catch { /* ignore */ }
-    };
 
     const handleExpand = async (name: string) => {
         if (expandedSkill === name) {
@@ -149,8 +124,6 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
         fetchSkills();
     };
 
-    const loadedCount = loadedSkills.size;
-
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center"
              style={{ background: 'rgba(0,0,0,0.5)' }}
@@ -167,12 +140,10 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
                               style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
                             {skills.length}
                         </span>
-                        {loadedCount > 0 && (
-                            <span className="text-xs px-1.5 py-0.5 rounded"
-                                  style={{ background: '#6366f120', color: '#6366f1' }}>
-                                {loadedCount} loaded
-                            </span>
-                        )}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded"
+                              style={{ background: '#10b98120', color: '#10b981' }}>
+                            auto
+                        </span>
                     </div>
                     <div className="flex items-center gap-2">
                         <button onClick={() => setShowInstall(!showInstall)}
@@ -184,6 +155,11 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
                             <X size={16} />
                         </button>
                     </div>
+                </div>
+
+                {/* Auto hint */}
+                <div className="px-4 py-2 text-[11px]" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-color)' }}>
+                    Skills are activated automatically when your message matches. Look for ✨ Skills activated in chat.
                 </div>
 
                 {/* Install Form */}
@@ -257,34 +233,19 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
                     ) : filtered.length === 0 ? (
                         <p className="text-sm text-center py-8" style={{ color: 'var(--text-secondary)' }}>No skills found.</p>
                     ) : filtered.map(s => {
-                        const isLoaded = loadedSkills.has(s.name);
                         const isExpanded = expandedSkill === s.name;
                         return (
-                            <div key={s.name} className="py-3" style={{ borderBottom: '1px solid var(--border-color)' }}>
+                            <div key={s.name} className="py-3 cursor-pointer" style={{ borderBottom: '1px solid var(--border-color)' }}
+                                 onClick={() => handleExpand(s.name)}>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => handleExpand(s.name)}
-                                            className="p-0.5" style={{ color: 'var(--text-secondary)' }}>
+                                    <span style={{ color: 'var(--text-secondary)' }}>
                                         {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                                    </button>
+                                    </span>
                                     <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{s.name}</span>
                                     <span className="text-[10px] px-1.5 py-0.5 rounded font-medium"
                                           style={{ background: `${CATEGORY_COLORS[s.category] || '#6b7280'}20`, color: CATEGORY_COLORS[s.category] || '#6b7280' }}>
                                         {s.category}
                                     </span>
-                                    <div className="flex-1" />
-                                    {isLoaded ? (
-                                        <button onClick={() => handleUnload(s.name)}
-                                                className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1"
-                                                style={{ background: '#6366f120', color: '#6366f1', border: '1px solid #6366f140' }}>
-                                            <Square size={10} />Unload
-                                        </button>
-                                    ) : (
-                                        <button onClick={() => handleLoad(s.name)}
-                                                className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1"
-                                                style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
-                                            <Play size={10} />Load
-                                        </button>
-                                    )}
                                 </div>
                                 <p className="text-xs mt-1 ml-6" style={{ color: 'var(--text-secondary)' }}>{s.description}</p>
                                 {s.triggers.length > 0 && (
@@ -299,7 +260,8 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
                                 )}
                                 {isExpanded && (
                                     <div className="mt-2 ml-6 p-3 rounded text-xs whitespace-pre-wrap"
-                                         style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', maxHeight: 200, overflowY: 'auto' }}>
+                                         style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', maxHeight: 200, overflowY: 'auto' }}
+                                         onClick={e => e.stopPropagation()}>
                                         {skillDetail}
                                     </div>
                                 )}
