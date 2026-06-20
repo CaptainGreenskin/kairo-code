@@ -261,8 +261,8 @@ public class MemoryCommand implements SlashCommand {
 
         MemoryEntry updated = new MemoryEntry(
                 existing.id(), existing.agentId(), newContent, existing.rawContent(),
-                existing.scope(), existing.importance(), existing.tags(),
-                existing.timestamp(), existing.embedding(), existing.metadata());
+                existing.scope(), existing.importance(), existing.embedding(), existing.tags(),
+                existing.timestamp(), existing.metadata());
         store.save(updated).block();
         writer.println("Updated memory: " + id);
         writer.flush();
