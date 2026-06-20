@@ -4,9 +4,13 @@ import App from './App';
 import './styles/globals.css';
 import { initMonaco } from './monaco/setup';
 import { installAuthInterceptor } from './api/auth';
+import { useAuthStore } from './store/authStore';
 
 // Inject the server auth token into all /api requests before anything fetches.
 installAuthInterceptor();
+
+// Validate stored token on startup (non-blocking — authStore.isLoading gates the UI).
+useAuthStore.getState().checkAuth();
 
 // Theme persistence: restore saved theme or default to dark (Cursor-style)
 const savedTheme = localStorage.getItem('kairo-theme');

@@ -38,6 +38,8 @@ import { ChatMinimap } from '@components/ChatMinimap';
 import { useQueueStore } from '@store/queueStore';
 import { MessageSearchBar } from '@components/MessageSearchBar';
 import { OnboardingWizard, isOnboardingDone, markOnboardingDone } from '@components/OnboardingWizard';
+import { LoginPage } from '@components/LoginPage';
+import { useAuthStore } from '@store/authStore';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
@@ -171,6 +173,8 @@ function App() {
     const [showWorkspaceSettings, setShowWorkspaceSettings] = useState<{ open: boolean; workspaceId: string | null }>({ open: false, workspaceId: null });
     const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
     const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
+    const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+    const authLoading = useAuthStore((s) => s.isLoading);
 
     const workspaces = useWorkspaceStore((s) => s.workspaces);
     const currentWorkspaceId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -1399,6 +1403,19 @@ ${content}
             action: () => { handleCopyConversation(); setShowCommandPalette(false); },
         }] : []),
     ], [handleNewSession, handleOpenSettings, handleToggleTheme, handleExport, handleCopyConversation, handleOpenMcpServers, messages.length, sortedSessions, sessionId, handleSelectSession, showSearch, showSessionSearch, showEvolution, showHookConfig, setShowToolStats, showBookmarks, showTeamPanel, selectActivity, toggleBottomPanel]);
+
+    // Auth gate: show login page when not authenticated
+    if (authLoading) {
+        return (
+            <div className="h-screen w-screen flex items-center justify-center"
+                 style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', fontSize: 13 }}>
+                Loading...
+            </div>
+        );
+    }
+    if (!isAuthenticated) {
+        return <LoginPage />;
+    }
 
     // Full-screen onboarding: covers entire screen when API key is not configured
     if (needsOnboarding) {

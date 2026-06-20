@@ -24,6 +24,10 @@ kairo-server:
     # uses ApiAuthFilter with shared bearer tokens.
     oauth:
       enabled: ${KAIRO_SERVER_OAUTH_ENABLED:false}
+  auth:
+    invite-code: ${KAIRO_SERVER_INVITE_CODE:}
+    jwt-secret: ${KAIRO_JWT_SECRET:}
+    token-expiry-hours: ${KAIRO_JWT_EXPIRY_HOURS:24}
 
 # Spring Security OAuth2 client registration. Uncomment and configure one or
 # more providers. These only take effect when kairo-server.security.oauth.enabled=true.

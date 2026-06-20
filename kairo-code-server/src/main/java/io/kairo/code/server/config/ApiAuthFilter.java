@@ -4,10 +4,12 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import io.kairo.code.server.auth.JwtService;
 import java.io.IOException;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -38,16 +40,20 @@ public class ApiAuthFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(ApiAuthFilter.class);
 
     private static final Set<String> ALLOWLIST = Set.of(
-            "/actuator/health", "/actuator/info", "/actuator/prometheus", "/api/healthz");
+            "/actuator/health", "/actuator/info", "/actuator/prometheus", "/api/healthz",
+            "/api/auth/register", "/api/auth/login", "/api/auth/status");
 
     private static final Set<String> LOOPBACK = Set.of(
             "127.0.0.1", "0:0:0:0:0:0:0:1", "::1", "localhost");
 
     private final ServerSecurityProperties props;
+    private final JwtService jwtService;
     private boolean warnedNoToken = false;
 
-    public ApiAuthFilter(ServerSecurityProperties props) {
+    public ApiAuthFilter(ServerSecurityProperties props,
+                         @Autowired(required = false) JwtService jwtService) {
         this.props = props;
+        this.jwtService = jwtService;
     }
 
     @Override
@@ -71,18 +77,29 @@ public class ApiAuthFilter extends OncePerRequestFilter {
         if (path != null && ALLOWLIST.contains(path)) {
             return true;
         }
+        // Only guard /api/* and /ws/* — let static resources (HTML/JS/CSS) through
+        // so the React login page can load without authentication.
+        if (path != null && !path.startsWith("/api/") && !path.startsWith("/ws/")) {
+            return true;
+        }
         if (props.isAllowLoopback() && isLoopback(request.getRemoteAddr())) {
             return true;
         }
-        if (!props.hasToken()) {
+        String token = extractToken(request);
+        if (props.hasToken() && constantTimeEquals(props.getAuthToken(), token)) {
+            return true;
+        }
+        if (token != null && jwtService != null && jwtService.validateToken(token).isPresent()) {
+            return true;
+        }
+        if (!props.hasToken() && (jwtService == null || token == null)) {
             if (!warnedNoToken) {
                 warnedNoToken = true;
                 log.warn("kairo-server.security.enabled=true but no auth-token set -- "
                         + "all non-loopback requests are rejected. Set KAIRO_SERVER_AUTH_TOKEN.");
             }
-            return false;
         }
-        return constantTimeEquals(props.getAuthToken(), extractToken(request));
+        return false;
     }
 
     private static boolean isLoopback(String addr) {
