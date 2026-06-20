@@ -177,6 +177,29 @@ public class AgentService implements DisposableBean, InitializingBean {
      */
     public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
                                 String sessionMode, String permissionMode) {
+        return createSession(config, workspaceId, useWorktree, sessionMode, permissionMode, null);
+    }
+
+    /**
+     * Create a session, optionally reusing an existing session ID (for rehydration after restart).
+     *
+     * @param existingSessionId if non-null, reuse this ID instead of generating a new UUID;
+     *                          allows checkpoint history to survive server restarts
+     */
+    String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
+                                String sessionMode, String permissionMode, String existingSessionId) {
+        return createSession(config, workspaceId, useWorktree, sessionMode, permissionMode, existingSessionId, 0);
+    }
+
+    /**
+     * Internal session creation with full rehydration support.
+     *
+     * @param existingSessionId reuse this ID on rehydration; null for new sessions
+     * @param originalCreatedAt original creation timestamp for rehydrated sessions; 0 for new sessions
+     */
+    private String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
+                                String sessionMode, String permissionMode,
+                                String existingSessionId, long originalCreatedAt) {
         // Unified mode: legacy modes collapse to "agent", except "experts" which
         // enables auto-escalation to multi-agent fan-out.
         boolean explicitExperts = "experts".equalsIgnoreCase(sessionMode);
@@ -189,7 +212,7 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         registry.evictLruIfFull();
 
-        String sessionId = UUID.randomUUID().toString();
+        String sessionId = existingSessionId != null ? existingSessionId : UUID.randomUUID().toString();
 
         // Resolve effective cwd via worktree manager. Falls back to workspace dir when not a git
         // repo or when useWorktree is false. Mutate config only if a different cwd was returned —
@@ -424,9 +447,11 @@ public class AgentService implements DisposableBean, InitializingBean {
                 payload = new AgentSessionPayload(config, session, ctx);
             }
 
+            long effectiveCreatedAt = originalCreatedAt > 0 ? originalCreatedAt : System.currentTimeMillis();
+
             SessionEntry entry = new SessionEntry(
                     sessionId, workspaceId, normalizedMode, payload,
-                    approvalHandler, System.currentTimeMillis());
+                    approvalHandler, effectiveCreatedAt);
 
             SessionContext sessionContext = new SessionContext(
                     sessionId, entry, sink, running, progressTracker, phaseRef);
@@ -436,13 +461,25 @@ public class AgentService implements DisposableBean, InitializingBean {
             sessionMetaPersistence.save(new SessionMetaPersistence.SessionMeta(
                     sessionId, workspaceId, config.workingDir(), config.modelName(),
                     config.baseUrl(), "", phaseRef.get().name(), normalizedMode,
-                    System.currentTimeMillis()));
+                    effectiveCreatedAt));
 
             sessionIndexService.upsert(new SessionIndexEntry(
                     sessionId, null, workspaceId, config.workingDir(),
                     config.modelName(), SessionIndexEntry.STATUS_ACTIVE,
                     System.currentTimeMillis(), System.currentTimeMillis(),
                     0, false));
+
+            // Clear workspace-level todos.json so stale todos from a previous session
+            // don't leak into this new session (the file is per-workspace, not per-session).
+            // Skip when rehydrating (existingSessionId != null) to preserve the user's todos.
+            if (config.workingDir() != null && existingSessionId == null) {
+                Path todosFile = Path.of(config.workingDir(), ".kairo", "todos.json");
+                try {
+                    java.nio.file.Files.deleteIfExists(todosFile);
+                } catch (Exception e) {
+                    log.debug("Failed to clear stale todos.json: {}", e.getMessage());
+                }
+            }
 
             log.info("Session {} created successfully", sessionId);
             return sessionId;
@@ -1423,8 +1460,8 @@ public class AgentService implements DisposableBean, InitializingBean {
                         null, 0, 0,
                         defaultConfig.thinkingBudget(),
                         defaultConfig.llmClassifier());
-                String sid = createSession(config, meta.workspaceId(), false, meta.mode(), null);
-                log.info("Rehydrated session {} (original={}, workspace={})", sid, meta.sessionId(), meta.workspaceId());
+                String sid = createSession(config, meta.workspaceId(), false, meta.mode(), null, meta.sessionId(), meta.createdAt());
+                log.info("Rehydrated session {} (workspace={})", sid, meta.workspaceId());
                 restored++;
             } catch (Exception e) {
                 log.warn("Failed to rehydrate session {}: {}", meta.sessionId(), e.getMessage());
