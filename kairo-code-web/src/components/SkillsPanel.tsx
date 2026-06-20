@@ -46,12 +46,17 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
 
     const fetchSkills = useCallback(async () => {
         try {
-            const [skillsRes, managedRes] = await Promise.all([
+            const [skillsRes, managedRes, loadedRes] = await Promise.all([
                 fetch('/api/skills'),
                 fetch('/api/skills/managed'),
+                fetch('/api/skills/loaded'),
             ]);
             if (skillsRes.ok) setSkills(await skillsRes.json());
             if (managedRes.ok) setManaged(await managedRes.json());
+            if (loadedRes.ok) {
+                const names: string[] = await loadedRes.json();
+                setLoadedSkills(new Set(names));
+            }
         } catch { /* ignore */ }
         setLoading(false);
     }, []);
@@ -71,12 +76,22 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
             || s.triggers.some(t => t.toLowerCase().includes(q));
     });
 
-    const handleLoad = (name: string) => {
-        setLoadedSkills(prev => new Set(prev).add(name));
+    const handleLoad = async (name: string) => {
+        try {
+            const res = await fetch(`/api/skills/${encodeURIComponent(name)}/load`, { method: 'POST' });
+            if (res.ok) {
+                setLoadedSkills(prev => new Set(prev).add(name));
+            }
+        } catch { /* ignore */ }
     };
 
-    const handleUnload = (name: string) => {
-        setLoadedSkills(prev => { const next = new Set(prev); next.delete(name); return next; });
+    const handleUnload = async (name: string) => {
+        try {
+            const res = await fetch(`/api/skills/${encodeURIComponent(name)}/unload`, { method: 'POST' });
+            if (res.ok) {
+                setLoadedSkills(prev => { const next = new Set(prev); next.delete(name); return next; });
+            }
+        } catch { /* ignore */ }
     };
 
     const handleExpand = async (name: string) => {

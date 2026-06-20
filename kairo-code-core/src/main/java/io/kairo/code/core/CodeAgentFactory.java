@@ -594,17 +594,24 @@ public final class CodeAgentFactory {
             io.kairo.skill.SkillSearchIndex skillSearchIndex =
                     new io.kairo.skill.SkillSearchIndex();
             skillSearchIndex.buildIndex(options.skillRegistry().list());
-            // Look for a skill activation callback in the hooks list
+            // Look for callbacks in the hooks list
             java.util.function.BiConsumer<java.util.List<String>, java.util.List<Double>> skillCallback = null;
+            java.util.function.Supplier<Set<String>> loadedSupplier = null;
             for (Object hook : hooks) {
                 if (hook instanceof io.kairo.code.core.skill.SkillDiscoveryHook.ActivationCallback cb) {
                     skillCallback = cb.callback();
                 }
+                if (hook instanceof io.kairo.code.core.skill.SkillDiscoveryHook.LoadedSkillsSupplier ls) {
+                    loadedSupplier = ls.supplier();
+                }
+            }
+            if (loadedSupplier == null) {
+                Set<String> staticLoaded = options.activeSkills() != null ? options.activeSkills() : Set.of();
+                loadedSupplier = () -> staticLoaded;
             }
             builder.hook(new io.kairo.code.core.skill.SkillDiscoveryHook(
                     skillSearchIndex, options.skillRegistry(),
-                    options.activeSkills() != null ? options.activeSkills() : Set.of(),
-                    skillCallback));
+                    loadedSupplier, skillCallback));
         }
 
         // Auto-register StaleReadDetectorHook: warns when the agent re-reads the same file

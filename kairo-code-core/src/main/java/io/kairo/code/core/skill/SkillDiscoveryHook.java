@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,21 +31,21 @@ public class SkillDiscoveryHook {
 
     private final SkillSearchIndex searchIndex;
     private final SkillRegistry registry;
-    private final Set<String> alreadyLoadedSkills;
+    private final Supplier<Set<String>> loadedSkillsSupplier;
     private final Set<String> injectedSkills = new HashSet<>();
     private final BiConsumer<List<String>, List<Double>> onActivated;
 
     public SkillDiscoveryHook(SkillSearchIndex searchIndex, SkillRegistry registry,
                               Set<String> alreadyLoadedSkills) {
-        this(searchIndex, registry, alreadyLoadedSkills, null);
+        this(searchIndex, registry, () -> alreadyLoadedSkills, null);
     }
 
     public SkillDiscoveryHook(SkillSearchIndex searchIndex, SkillRegistry registry,
-                              Set<String> alreadyLoadedSkills,
+                              Supplier<Set<String>> loadedSkillsSupplier,
                               BiConsumer<List<String>, List<Double>> onActivated) {
         this.searchIndex = searchIndex;
         this.registry = registry;
-        this.alreadyLoadedSkills = alreadyLoadedSkills;
+        this.loadedSkillsSupplier = loadedSkillsSupplier;
         this.onActivated = onActivated;
     }
 
@@ -55,14 +56,30 @@ public class SkillDiscoveryHook {
             return HookResult.proceed(event);
         }
 
-        List<SkillSearchIndex.SearchResult> results = searchIndex.search(userInput, 3);
+        Set<String> loaded = loadedSkillsSupplier.get();
         List<SkillDefinition> toInject = new ArrayList<>();
         List<String> activatedNames = new ArrayList<>();
         List<Double> activatedScores = new ArrayList<>();
 
+        // 1. Always inject explicitly loaded skills (from UI Load button)
+        for (String name : loaded) {
+            if (injectedSkills.contains(name)) continue;
+            registry.get(name).ifPresent(skill -> {
+                if (skill.hasInstructions()) {
+                    toInject.add(skill);
+                    injectedSkills.add(name);
+                    activatedNames.add(name);
+                    activatedScores.add(1.0);
+                    log.info("Skill loaded (explicit): '{}'", name);
+                }
+            });
+        }
+
+        // 2. Auto-discover from user input via TF-IDF
+        List<SkillSearchIndex.SearchResult> results = searchIndex.search(userInput, 3);
         for (SkillSearchIndex.SearchResult result : results) {
             if (result.score() < SkillSearchIndex.AUTO_LOAD_THRESHOLD) continue;
-            if (alreadyLoadedSkills.contains(result.name())) continue;
+            if (loaded.contains(result.name())) continue;
             if (injectedSkills.contains(result.name())) continue;
 
             registry.get(result.name()).ifPresent(skill -> {
@@ -105,6 +122,12 @@ public class SkillDiscoveryHook {
      * skill activation callback without changing SessionOptions.
      */
     public record ActivationCallback(BiConsumer<List<String>, List<Double>> callback) {}
+
+    /**
+     * Marker object placed in the hooks list so CodeAgentFactory can wire
+     * a dynamic loaded-skills supplier from the session context.
+     */
+    public record LoadedSkillsSupplier(Supplier<Set<String>> supplier) {}
 
     private static String extractLastUserInput(List<Msg> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {

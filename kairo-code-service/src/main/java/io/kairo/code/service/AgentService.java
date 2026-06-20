@@ -310,6 +310,11 @@ public class AgentService implements DisposableBean, InitializingBean {
             hooks.add(bridgeHook);
             hooks.add(compactionBridge);
             hooks.add(planHook);
+            // Shared loaded-skills set: written by SkillController.load/unload,
+            // read by SkillDiscoveryHook to inject explicitly loaded skills.
+            final java.util.Set<String> sharedLoadedSkills =
+                    java.util.concurrent.ConcurrentHashMap.newKeySet();
+
             // Skill activation callback: emits SKILL_ACTIVATED event to frontend
             final String skillSid = sessionId;
             hooks.add(new io.kairo.code.core.skill.SkillDiscoveryHook.ActivationCallback(
@@ -317,6 +322,8 @@ public class AgentService implements DisposableBean, InitializingBean {
                         AgentRuntimeContext.emitSerialized(sink,
                                 AgentEvent.skillActivated(skillSid, names, scores));
                     }));
+            hooks.add(new io.kairo.code.core.skill.SkillDiscoveryHook.LoadedSkillsSupplier(
+                    () -> sharedLoadedSkills));
             if (finalWorkingDir != null) {
                 final CodeAgentConfig effectiveCfg = config;
                 final Path kairoDir = Path.of(finalWorkingDir, ".kairo-code");
@@ -475,6 +482,7 @@ public class AgentService implements DisposableBean, InitializingBean {
             SessionContext sessionContext = new SessionContext(
                     sessionId, entry, sink, running, progressTracker, phaseRef);
             sessionContext.setDiagnosticsTracker(diagTracker);
+            sessionContext.setLoadedSkills(sharedLoadedSkills);
             registry.register(sessionContext);
 
             sessionMetaPersistence.save(new SessionMetaPersistence.SessionMeta(

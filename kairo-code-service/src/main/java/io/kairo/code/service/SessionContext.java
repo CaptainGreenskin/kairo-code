@@ -28,6 +28,7 @@ public final class SessionContext {
     private final AtomicReference<SessionPhase> phase;
     private volatile SessionDiagnosticsTracker diagnostics;
     private volatile String planOverview;
+    private volatile java.util.Set<String> loadedSkills;
 
     public SessionContext(
             String sessionId,
@@ -56,6 +57,8 @@ public final class SessionContext {
     public SessionDiagnosticsTracker diagnostics() { return diagnostics; }
     public String planOverview() { return planOverview; }
     public void setPlanOverview(String overview) { this.planOverview = overview; }
+    public java.util.Set<String> loadedSkills() { return loadedSkills; }
+    public void setLoadedSkills(java.util.Set<String> skills) { this.loadedSkills = skills; }
     public void setDiagnosticsTracker(SessionDiagnosticsTracker tracker) { this.diagnostics = tracker; }
     public void setEntry(SessionEntry entry) { this.entry = entry; }
 

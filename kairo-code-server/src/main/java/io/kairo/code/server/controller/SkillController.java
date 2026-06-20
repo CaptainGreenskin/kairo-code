@@ -2,12 +2,15 @@ package io.kairo.code.server.controller;
 
 import io.kairo.code.core.skill.FsSkillLoader;
 import io.kairo.code.core.skill.SkillInstaller;
+import io.kairo.code.service.SessionContext;
+import io.kairo.code.service.SessionRegistry;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -25,6 +29,9 @@ public class SkillController {
 
     @Autowired
     private io.kairo.code.server.config.ServerConfig.ServerProperties props;
+
+    @Autowired
+    private SessionRegistry sessionRegistry;
 
     private final SkillInstaller installer = new SkillInstaller();
 
@@ -47,6 +54,42 @@ public class SkillController {
             result.add(entry);
         }
         return result;
+    }
+
+    @PostMapping("/{name}/load")
+    public ResponseEntity<?> loadSkill(@PathVariable String name,
+                                       @RequestParam(required = false) String sessionId) {
+        SessionContext ctx = findSession(sessionId);
+        if (ctx == null) return ResponseEntity.badRequest().body(Map.of("error", "no_session"));
+        ctx.loadedSkills().add(name);
+        return ResponseEntity.ok(Map.of("name", name, "loaded", true,
+                "totalLoaded", ctx.loadedSkills().size()));
+    }
+
+    @PostMapping("/{name}/unload")
+    public ResponseEntity<?> unloadSkill(@PathVariable String name,
+                                         @RequestParam(required = false) String sessionId) {
+        SessionContext ctx = findSession(sessionId);
+        if (ctx == null) return ResponseEntity.badRequest().body(Map.of("error", "no_session"));
+        ctx.loadedSkills().remove(name);
+        return ResponseEntity.ok(Map.of("name", name, "loaded", false,
+                "totalLoaded", ctx.loadedSkills().size()));
+    }
+
+    @GetMapping("/loaded")
+    public ResponseEntity<?> getLoadedSkills(@RequestParam(required = false) String sessionId) {
+        SessionContext ctx = findSession(sessionId);
+        if (ctx == null) return ResponseEntity.ok(List.of());
+        return ResponseEntity.ok(ctx.loadedSkills());
+    }
+
+    private SessionContext findSession(String sessionId) {
+        if (sessionId != null && !sessionId.isBlank()) {
+            return sessionRegistry.get(sessionId);
+        }
+        // Fallback: use the first active session
+        var sessions = sessionRegistry.list();
+        return sessions.isEmpty() ? null : sessions.get(0);
     }
 
     @GetMapping("/{name}/detail")
