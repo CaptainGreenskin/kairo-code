@@ -115,6 +115,8 @@ public final class TeamSessionPayload implements SessionPayload {
     private final AtomicReference<Disposable> currentRun = new AtomicReference<>();
     private final AtomicReference<Disposable> peerPoller = new AtomicReference<>();
     private final AtomicBoolean doneEmitted = new AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicLong accumulatedTokens = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong accumulatedCostMicros = new java.util.concurrent.atomic.AtomicLong(0);
 
     /**
      * Default Team-mode constructor. Preserved bit-for-bit for the M-Team call sites at
@@ -176,6 +178,8 @@ public final class TeamSessionPayload implements SessionPayload {
                     // User explicitly chose Experts mode — always use expert team,
                     // never demote based on message length/content.
                     doneEmitted.set(false);
+                    accumulatedTokens.set(0);
+                    accumulatedCostMicros.set(0);
                     if (narrator != null) {
                         narrator.suspend();
                     }
@@ -502,8 +506,15 @@ public final class TeamSessionPayload implements SessionPayload {
 
     private void emitDoneOnce(String sessionId) {
         if (doneEmitted.compareAndSet(false, true)) {
-            ctx.emit(AgentEvent.done(sessionId, 0, 0));
+            long tokens = accumulatedTokens.get();
+            double cost = accumulatedCostMicros.get() / 1_000_000.0;
+            ctx.emit(AgentEvent.done(sessionId, tokens, cost));
         }
+    }
+
+    void addTokenUsage(long tokens, double cost) {
+        accumulatedTokens.addAndGet(tokens);
+        accumulatedCostMicros.addAndGet((long) (cost * 1_000_000));
     }
 
     // ── Swarm-event bridge (experts preset) ──────────────────────────────────────
@@ -532,6 +543,10 @@ public final class TeamSessionPayload implements SessionPayload {
                     String activeTeamId = pendingTeamId;
                     if (activeTeamId == null || !activeTeamId.equals(te.teamId())) {
                         return;
+                    }
+                    // Accumulate token estimate from worker tool calls (before filter)
+                    if (te.type() == TeamEventType.STEP_TOOL_CALL) {
+                        accumulatedTokens.addAndGet(2000);
                     }
                     if (HIGH_FREQ_TYPES.contains(te.type())) {
                         return;
