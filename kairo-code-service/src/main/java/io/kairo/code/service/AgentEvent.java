@@ -59,6 +59,8 @@ public record AgentEvent(
         SESSION_RESUMED,
         /** Keepalive signal during long model calls. Frontend updates lastEventAt but renders nothing. */
         HEARTBEAT,
+        /** Emitted when skills are auto-discovered and injected from user input. */
+        SKILL_ACTIVATED,
         /** Emitted when a user message is queued because the agent is busy. */
         MESSAGE_QUEUED,
         /**
@@ -286,6 +288,17 @@ public record AgentEvent(
         String summary = childEventType + (childToolName != null ? ": " + childToolName : "");
         return new AgentEvent(EventType.SUBAGENT_EVENT, parentSessionId, summary,
                 childToolName, null, false, null, null, null, null, null, null, meta,
+                System.currentTimeMillis());
+    }
+
+    public static AgentEvent skillActivated(String sessionId, List<String> skillNames,
+                                               List<Double> scores) {
+        Map<String, Object> meta = new java.util.LinkedHashMap<>();
+        meta.put("skills", skillNames);
+        meta.put("scores", scores);
+        String summary = String.join(", ", skillNames);
+        return new AgentEvent(EventType.SKILL_ACTIVATED, sessionId, summary,
+                null, null, false, null, null, null, null, null, null, meta,
                 System.currentTimeMillis());
     }
 

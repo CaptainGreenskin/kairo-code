@@ -310,6 +310,13 @@ public class AgentService implements DisposableBean, InitializingBean {
             hooks.add(bridgeHook);
             hooks.add(compactionBridge);
             hooks.add(planHook);
+            // Skill activation callback: emits SKILL_ACTIVATED event to frontend
+            final String skillSid = sessionId;
+            hooks.add(new io.kairo.code.core.skill.SkillDiscoveryHook.ActivationCallback(
+                    (names, scores) -> {
+                        AgentRuntimeContext.emitSerialized(sink,
+                                AgentEvent.skillActivated(skillSid, names, scores));
+                    }));
             if (finalWorkingDir != null) {
                 final CodeAgentConfig effectiveCfg = config;
                 final Path kairoDir = Path.of(finalWorkingDir, ".kairo-code");

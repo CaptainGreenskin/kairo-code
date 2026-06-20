@@ -4,7 +4,6 @@ import io.kairo.api.hook.HookHandler;
 import io.kairo.api.hook.HookPhase;
 import io.kairo.api.hook.HookResult;
 import io.kairo.api.hook.PreReasoningEvent;
-import io.kairo.api.message.Content;
 import io.kairo.api.message.Msg;
 import io.kairo.api.message.MsgRole;
 import io.kairo.api.skill.SkillDefinition;
@@ -14,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,12 +32,20 @@ public class SkillDiscoveryHook {
     private final SkillRegistry registry;
     private final Set<String> alreadyLoadedSkills;
     private final Set<String> injectedSkills = new HashSet<>();
+    private final BiConsumer<List<String>, List<Double>> onActivated;
 
     public SkillDiscoveryHook(SkillSearchIndex searchIndex, SkillRegistry registry,
                               Set<String> alreadyLoadedSkills) {
+        this(searchIndex, registry, alreadyLoadedSkills, null);
+    }
+
+    public SkillDiscoveryHook(SkillSearchIndex searchIndex, SkillRegistry registry,
+                              Set<String> alreadyLoadedSkills,
+                              BiConsumer<List<String>, List<Double>> onActivated) {
         this.searchIndex = searchIndex;
         this.registry = registry;
         this.alreadyLoadedSkills = alreadyLoadedSkills;
+        this.onActivated = onActivated;
     }
 
     @HookHandler(HookPhase.PRE_REASONING)
@@ -49,6 +57,8 @@ public class SkillDiscoveryHook {
 
         List<SkillSearchIndex.SearchResult> results = searchIndex.search(userInput, 3);
         List<SkillDefinition> toInject = new ArrayList<>();
+        List<String> activatedNames = new ArrayList<>();
+        List<Double> activatedScores = new ArrayList<>();
 
         for (SkillSearchIndex.SearchResult result : results) {
             if (result.score() < SkillSearchIndex.AUTO_LOAD_THRESHOLD) continue;
@@ -59,14 +69,20 @@ public class SkillDiscoveryHook {
                 if (skill.hasInstructions()) {
                     toInject.add(skill);
                     injectedSkills.add(result.name());
-                    log.info("Skill discovery: auto-injecting '{}' (score={:.2f})",
-                            result.name(), result.score());
+                    activatedNames.add(result.name());
+                    activatedScores.add(result.score());
+                    log.info("Skill discovery: auto-injecting '{}' (score={})",
+                            result.name(), String.format("%.2f", result.score()));
                 }
             });
         }
 
         if (toInject.isEmpty()) {
             return HookResult.proceed(event);
+        }
+
+        if (onActivated != null) {
+            onActivated.accept(activatedNames, activatedScores);
         }
 
         StringBuilder section = new StringBuilder();
@@ -83,6 +99,12 @@ public class SkillDiscoveryHook {
         return HookResult.modify(new PreReasoningEvent(modified, event.config(), event.cancelled()),
                 null);
     }
+
+    /**
+     * Marker object placed in the hooks list so CodeAgentFactory can wire the
+     * skill activation callback without changing SessionOptions.
+     */
+    public record ActivationCallback(BiConsumer<List<String>, List<Double>> callback) {}
 
     private static String extractLastUserInput(List<Msg> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {

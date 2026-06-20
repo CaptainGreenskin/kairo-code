@@ -806,6 +806,25 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     break;
                 }
 
+                case 'SKILL_ACTIVATED': {
+                    const meta = event.payload as { skills?: string[]; scores?: number[] };
+                    const skills = meta?.skills ?? [];
+                    const scores = meta?.scores ?? [];
+                    if (skills.length > 0) {
+                        const details = skills.map((s, i) =>
+                            `${s} (${(scores[i] ?? 0).toFixed(0)}%)`
+                        ).join(', ');
+                        addMessageTo(sid, {
+                            id: generateId(),
+                            role: 'assistant',
+                            content: `✨ **Skills activated**: ${details}`,
+                            toolCalls: [],
+                            timestamp: Date.now(),
+                        });
+                    }
+                    break;
+                }
+
                 case 'SESSION_RESUMED': {
                     useBuildPhaseStore.getState().setPhase('idle');
                     setRunningFor(sid, false);

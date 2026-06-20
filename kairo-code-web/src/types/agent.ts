@@ -21,7 +21,8 @@ export type AgentEventType =
     | 'PEER_MESSAGE'
     | 'SESSION_RESUMED'
     | 'CLEAR_EXECUTION_MESSAGES'
-    | 'MESSAGE_QUEUED';
+    | 'MESSAGE_QUEUED'
+    | 'SKILL_ACTIVATED';
 
 /**
  * Mirrors {@code io.kairo.api.tool.FailureReason}. Carried on TOOL_RESULT payloads under
