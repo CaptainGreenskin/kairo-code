@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuthStore } from '../store/authStore';
 
 export function LoginPage() {
@@ -9,6 +10,7 @@ export function LoginPage() {
     const [inviteCode, setInviteCode] = useState('');
     const [requiresInvite, setRequiresInvite] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [showQr, setShowQr] = useState(false);
 
     const { login, register, error } = useAuthStore();
 
@@ -39,6 +41,8 @@ export function LoginPage() {
         }
         setSubmitting(false);
     };
+
+    const currentUrl = window.location.origin;
 
     return (
         <div className="h-screen w-screen flex items-center justify-center"
@@ -148,6 +152,27 @@ export function LoginPage() {
                         {submitting ? 'Please wait...' : (tab === 'login' ? 'Sign In' : 'Create Account')}
                     </button>
                 </form>
+
+                {/* QR Code for mobile access */}
+                <div className="mt-6 text-center">
+                    <button
+                        onClick={() => setShowQr(!showQr)}
+                        className="text-xs transition-colors"
+                        style={{ color: 'var(--text-secondary)' }}
+                    >
+                        {showQr ? 'Hide QR Code' : 'Scan to access on mobile'}
+                    </button>
+                    {showQr && (
+                        <div className="mt-3 flex flex-col items-center gap-2">
+                            <div className="p-3 rounded-lg" style={{ background: '#fff' }}>
+                                <QRCodeSVG value={currentUrl} size={160} />
+                            </div>
+                            <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+                                {currentUrl}
+                            </span>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );
