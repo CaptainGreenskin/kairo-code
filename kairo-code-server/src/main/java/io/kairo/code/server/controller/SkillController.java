@@ -1,10 +1,14 @@
 package io.kairo.code.server.controller;
 
+import io.kairo.code.core.skill.FsSkillLoader;
 import io.kairo.code.core.skill.SkillInstaller;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -17,18 +21,44 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/skills")
-public class SkillStoreController {
+public class SkillController {
 
-    private static final Logger log = LoggerFactory.getLogger(SkillStoreController.class);
+    @Autowired
+    private io.kairo.code.server.config.ServerConfig.ServerProperties props;
+
     private final SkillInstaller installer = new SkillInstaller();
+
+    @GetMapping
+    public List<Map<String, Object>> listAll() {
+        FsSkillLoader loader = new FsSkillLoader(globalSkillsDir(), projectSkillsDir());
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (var s : loader.loadAll()) {
+            var def = s.metadata().definition();
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", def.name());
+            entry.put("description", def.description() != null ? def.description() : "");
+            entry.put("category", def.category().name());
+            entry.put("priority", s.priority().name());
+            entry.put("visibility", s.metadata().visibility().name());
+            entry.put("triggers", def.triggerConditions() != null ? def.triggerConditions() : List.of());
+            entry.put("version", def.version());
+            entry.put("hasInstructions", def.hasInstructions());
+            result.add(entry);
+        }
+        return result;
+    }
 
     @GetMapping("/managed")
     public List<Map<String, Object>> listManaged() {
         return installer.list().stream()
-                .map(s -> Map.<String, Object>of(
-                        "name", s.name(),
-                        "gitUrl", s.gitUrl() != null ? s.gitUrl() : "",
-                        "path", s.path().toString()))
+                .map(s -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("name", s.name());
+                    m.put("gitUrl", s.gitUrl() != null ? s.gitUrl() : "");
+                    m.put("path", s.path().toString());
+                    return m;
+                })
                 .toList();
     }
 
@@ -40,7 +70,7 @@ public class SkillStoreController {
                     .body(Map.of("error", "invalid_request", "message", "source is required"));
         }
         try {
-            SkillInstaller.InstalledSkill result = installer.install(source);
+            var result = installer.install(source);
             return ResponseEntity.ok(Map.of(
                     "name", result.name(),
                     "gitUrl", result.gitUrl() != null ? result.gitUrl() : "",
@@ -49,7 +79,6 @@ public class SkillStoreController {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(Map.of("error", "already_installed", "message", e.getMessage()));
         } catch (Exception e) {
-            log.warn("Skill install failed: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "install_failed", "message", e.getMessage()));
         }
@@ -59,9 +88,7 @@ public class SkillStoreController {
     public ResponseEntity<?> uninstall(@PathVariable String name) {
         try {
             boolean removed = installer.uninstall(name);
-            if (!removed) {
-                return ResponseEntity.notFound().build();
-            }
+            if (!removed) return ResponseEntity.notFound().build();
             return ResponseEntity.ok(Map.of("name", name, "status", "uninstalled"));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -73,13 +100,22 @@ public class SkillStoreController {
     public ResponseEntity<?> update(@PathVariable String name) {
         try {
             boolean updated = installer.update(name);
-            if (!updated) {
-                return ResponseEntity.notFound().build();
-            }
+            if (!updated) return ResponseEntity.notFound().build();
             return ResponseEntity.ok(Map.of("name", name, "status", "updated"));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "update_failed", "message", e.getMessage()));
         }
+    }
+
+    private Path globalSkillsDir() {
+        return Paths.get(System.getProperty("user.home"), ".kairo-code", "skills");
+    }
+
+    private Path projectSkillsDir() {
+        String workingDir = props.workingDir();
+        return workingDir != null
+                ? Paths.get(workingDir).resolve(".kairo-code").resolve("skills")
+                : null;
     }
 }

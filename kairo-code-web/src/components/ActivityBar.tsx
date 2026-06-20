@@ -1,4 +1,4 @@
-import { Files, Search, GitBranch, Brain, Zap } from 'lucide-react';
+import { Files, Search, GitBranch, Brain, Zap, Sparkles } from 'lucide-react';
 import { useLayoutStore } from '@store/layoutStore';
 import type { ActivityView } from '@utils/userPrefs';
 
@@ -22,15 +22,17 @@ interface QuickAction {
     onClick: () => void;
 }
 
-export function ActivityBar({ onOpenEvolution, onOpenHooks }: {
+export function ActivityBar({ onOpenEvolution, onOpenHooks, onOpenSkills }: {
     onOpenEvolution?: () => void;
     onOpenHooks?: () => void;
+    onOpenSkills?: () => void;
 }) {
     const activeView = useLayoutStore((s) => s.activityView);
     const sidebarOpen = useLayoutStore((s) => s.primarySidebarOpen);
     const selectActivity = useLayoutStore((s) => s.selectActivity);
 
     const quickActions: QuickAction[] = [
+        { id: 'skills', label: 'Skills', icon: Sparkles, onClick: () => onOpenSkills?.() },
         { id: 'evolution', label: 'Self-Evolution Lessons', icon: Brain, onClick: () => onOpenEvolution?.() },
         { id: 'hooks', label: 'Hook Configuration', icon: Zap, onClick: () => onOpenHooks?.() },
     ];

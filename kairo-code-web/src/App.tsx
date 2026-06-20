@@ -40,6 +40,7 @@ import { MessageSearchBar } from '@components/MessageSearchBar';
 import { OnboardingWizard, isOnboardingDone, markOnboardingDone } from '@components/OnboardingWizard';
 import { LoginPage } from '@components/LoginPage';
 import { useAuthStore } from '@store/authStore';
+import { SkillsPanel } from '@components/SkillsPanel';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
@@ -1007,6 +1008,7 @@ function App() {
     const [showTimeline, setShowTimeline] = useState(false);
     const [showBookmarks, setShowBookmarks] = useState(false);
     const [showTeamPanel, setShowTeamPanel] = useState(false);
+    const [showSkillsPanel, setShowSkillsPanel] = useState(false);
     const [expertTeamId, setExpertTeamId] = useState<string | null>(null);
     const [expertTeamReplayId, setExpertTeamReplayId] = useState<string | null>(null);
 
@@ -1523,6 +1525,7 @@ ${content}
                 ) : (
                     <>
                     <ActivityBar
+                        onOpenSkills={() => setShowSkillsPanel(true)}
                         onOpenEvolution={() => setShowEvolution(true)}
                         onOpenHooks={() => setShowHookConfig(true)}
                     />
@@ -2083,6 +2086,9 @@ ${content}
                 </div>
             )}
             <DevDiagnosticsPanel />
+            {showSkillsPanel && (
+                <SkillsPanel onClose={() => setShowSkillsPanel(false)} />
+            )}
         </div>
     );
 }
