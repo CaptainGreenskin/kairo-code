@@ -584,6 +584,21 @@ public final class CodeAgentFactory {
         // PRE_REASONING hook is needed — the framework's 6-stage pipeline handles
         // snip → micro → collapse → auto → partial compaction automatically.
 
+        // Skill learning: observe tool invocations for pattern detection.
+        // Active in both REPL and non-REPL mode.
+        builder.hook(new io.kairo.code.core.skill.learning.SessionObserverHook());
+
+        // Skill discovery: auto-match skills to user input via TF-IDF search.
+        // Active in both REPL and non-REPL mode.
+        if (options.skillRegistry() != null) {
+            io.kairo.skill.SkillSearchIndex skillSearchIndex =
+                    new io.kairo.skill.SkillSearchIndex();
+            skillSearchIndex.buildIndex(options.skillRegistry().list());
+            builder.hook(new io.kairo.code.core.skill.SkillDiscoveryHook(
+                    skillSearchIndex, options.skillRegistry(),
+                    options.activeSkills() != null ? options.activeSkills() : Set.of()));
+        }
+
         // Auto-register StaleReadDetectorHook: warns when the agent re-reads the same file
         // multiple times, to improve token efficiency. Active in both REPL and one-shot mode.
         builder.hook(new StaleReadDetectorHook());
@@ -634,19 +649,6 @@ public final class CodeAgentFactory {
             // Auto-register FullTestSuiteHook: detects partial test runs (single test class)
             // and reminds the agent to run the full mvn test suite. Non-REPL only.
             builder.hook(new FullTestSuiteHook());
-
-            // Skill learning: observe tool invocations for pattern detection
-            builder.hook(new io.kairo.code.core.skill.learning.SessionObserverHook());
-
-            // Skill discovery: auto-match skills to user input via TF-IDF search
-            if (options.skillRegistry() != null) {
-                io.kairo.skill.SkillSearchIndex skillSearchIndex =
-                        new io.kairo.skill.SkillSearchIndex();
-                skillSearchIndex.buildIndex(options.skillRegistry().list());
-                builder.hook(new io.kairo.code.core.skill.SkillDiscoveryHook(
-                        skillSearchIndex, options.skillRegistry(),
-                        options.activeSkills() != null ? options.activeSkills() : Set.of()));
-            }
 
             // Loop detection is handled by the framework's LoopDetector (6-layer:
             // hash + frequency + tool-repeat + alternating + no-progress + context-explosion).
