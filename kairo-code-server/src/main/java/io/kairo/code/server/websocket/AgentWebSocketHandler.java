@@ -165,7 +165,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         WorkspaceConfig workspace = wsOpt.get();
 
         String apiKey = nonBlank(text(body, "apiKey"), serverProperties.apiKey());
-        String provider = text(body, "provider");
+        String provider = nonBlank(text(body, "provider"), serverProperties.provider());
         String baseUrl = resolveBaseUrl(provider);
         String model = nonBlank(text(body, "model"), serverProperties.model());
         String mode = nonBlank(text(body, "mode"), "agent");

@@ -3,7 +3,7 @@ import { useSessionModeStore } from './sessionModeStore';
 
 describe('sessionModeStore', () => {
   beforeEach(() => {
-    useSessionModeStore.setState({ modes: {} });
+    useSessionModeStore.setState({ sessionModes: {}, pendingMode: 'agent' });
   });
 
   it('default mode is always agent', () => {
@@ -21,7 +21,7 @@ describe('sessionModeStore', () => {
     expect(useSessionModeStore.getState().getSessionMode('sid-1')).toBe('agent');
   });
 
-  it('modes map is initially empty', () => {
-    expect(useSessionModeStore.getState().modes).toEqual({});
+  it('sessionModes map is initially empty', () => {
+    expect(useSessionModeStore.getState().sessionModes).toEqual({});
   });
 });

@@ -96,10 +96,12 @@ export interface ExpertTeamStore {
    * flow uses) so the Canvas doesn't fight the modal panel for the same slot.
    */
   canvasTeamId: string | null;
+  /** Per-session canvas team mapping so switching sessions can restore the Canvas. */
+  canvasTeamBySession: Record<string, string>;
 
   // Actions
   setActiveTeam: (teamId: string | null) => void;
-  setCanvasTeamId: (teamId: string | null) => void;
+  setCanvasTeamId: (teamId: string | null, sessionId?: string) => void;
   handleTeamEvent: (event: TeamWsEvent) => void;
   /**
    * Applies multiple high-frequency events (STEP_THINKING / STEP_ARTIFACT_CHUNK)
@@ -109,6 +111,10 @@ export interface ExpertTeamStore {
   getActiveTeam: () => TeamState | null;
   setTeamForMessage: (messageId: string, teamId: string) => void;
   getTeamByMessageId: (messageId: string) => TeamState | null;
+  /** Save current canvasTeamId for the given session, then clear it. */
+  saveCanvasForSession: (sessionId: string) => void;
+  /** Restore canvasTeamId from a previously saved session mapping. */
+  restoreCanvasForSession: (sessionId: string) => void;
   reset: () => void;
 }
 
@@ -185,10 +191,15 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
   activeTeamId: null,
   teamByMessageId: {},
   canvasTeamId: null,
+  canvasTeamBySession: {},
 
   setActiveTeam: (teamId) => set({ activeTeamId: teamId }),
-  setCanvasTeamId: (teamId) => {
-    set({ canvasTeamId: teamId });
+  setCanvasTeamId: (teamId, sessionId?) => {
+    const update: Partial<ExpertTeamStore> = { canvasTeamId: teamId };
+    if (teamId && sessionId) {
+      update.canvasTeamBySession = { ...get().canvasTeamBySession, [sessionId]: teamId };
+    }
+    set(update);
     if (teamId) {
       sessionStorage.setItem('kairo-canvas-team-id', teamId);
     } else {
@@ -212,8 +223,30 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
     return teamId ? teams[teamId] ?? null : null;
   },
 
+  saveCanvasForSession: (sessionId) => {
+    const { canvasTeamId, canvasTeamBySession } = get();
+    if (canvasTeamId && sessionId) {
+      set({
+        canvasTeamBySession: { ...canvasTeamBySession, [sessionId]: canvasTeamId },
+        canvasTeamId: null,
+      });
+    } else {
+      set({ canvasTeamId: null });
+    }
+    sessionStorage.removeItem('kairo-canvas-team-id');
+  },
+
+  restoreCanvasForSession: (sessionId) => {
+    const { canvasTeamBySession, teams } = get();
+    const savedTeamId = sessionId ? canvasTeamBySession[sessionId] : null;
+    if (savedTeamId && teams[savedTeamId]) {
+      set({ canvasTeamId: savedTeamId });
+      sessionStorage.setItem('kairo-canvas-team-id', savedTeamId);
+    }
+  },
+
   reset: () => {
-    set({ teams: {}, activeTeamId: null, teamByMessageId: {}, canvasTeamId: null });
+    set({ teams: {}, activeTeamId: null, teamByMessageId: {}, canvasTeamId: null, canvasTeamBySession: {} });
     sessionStorage.removeItem('kairo-canvas-team-id');
   },
 

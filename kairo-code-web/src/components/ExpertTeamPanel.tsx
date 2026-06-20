@@ -244,7 +244,7 @@ function ReportSection({ finalOutput }: { finalOutput: string }) {
   );
 }
 
-export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendAction, onReplay }: ExpertTeamPanelProps) {
+export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendAction, onReplay: _onReplay }: ExpertTeamPanelProps) {
   const team = useExpertTeamStore(state => state.teams[teamId]);
   const openExpertStepTab = useOpenFilesStore(s => s.openExpertStepTab);
   const [rejectModal, setRejectModal] = useState<{ visible: boolean; stepId: string; roleName: string }>({

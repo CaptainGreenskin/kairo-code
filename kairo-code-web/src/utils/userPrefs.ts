@@ -25,6 +25,7 @@ export interface UserPrefs {
     chatSessionsOpen?: boolean;
     /** Whether the sticky TodoListPanel is collapsed (only progress bar visible). */
     todoPanelCollapsed?: boolean;
+    canvasWidth?: number;
 }
 
 export function loadPrefs(): UserPrefs {

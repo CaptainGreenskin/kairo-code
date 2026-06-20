@@ -59,6 +59,7 @@ export type AgentEventPayload =
     | ModeEscalatedPayload
     | ToolOutputChunkPayload
     | PeerMessagePayload
+    | MessageQueuedPayload
     | Record<string, never>;
 
 export interface TextChunkPayload {
@@ -119,6 +120,10 @@ export interface AgentErrorPayload {
 
 export interface AgentThinkingPayload {
     isThinking: boolean;
+}
+
+export interface MessageQueuedPayload {
+    queuePosition: number;
 }
 
 /**

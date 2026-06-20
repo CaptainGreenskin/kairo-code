@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Shield, ShieldAlert, ShieldOff, Check, ChevronDown } from 'lucide-react';
+import { Shield, ShieldOff, Check, ChevronDown } from 'lucide-react';
 import { usePreferencesStore, type ApprovalMode } from '@store/preferencesStore';
 
 interface ModeMeta {

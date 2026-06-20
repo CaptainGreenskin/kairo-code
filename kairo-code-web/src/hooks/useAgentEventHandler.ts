@@ -84,7 +84,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
             if (sid) {
                 recordEventFor(sid, event.timestamp ?? Date.now());
                 if (event.type !== 'AGENT_DONE' && event.type !== 'AGENT_ERROR'
-                    && event.type !== 'HEARTBEAT') {
+                    && (event.type as string) !== 'HEARTBEAT') {
                     setRunningFor(sid, true);
                 }
             }
@@ -683,7 +683,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     const savedCanvasTeamId = sessionStorage.getItem('kairo-canvas-team-id');
                     if (savedCanvasTeamId) {
                         const store = useExpertTeamStore.getState();
-                        store.setCanvasTeamId(savedCanvasTeamId);
+                        store.setCanvasTeamId(savedCanvasTeamId, sid);
                         const snapshotJson = sessionStorage.getItem('kairo-canvas-team-snapshot');
                         if (snapshotJson) {
                             try {
@@ -729,7 +729,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     useBuildPhaseStore.getState().setPhase('PLAN_PENDING');
                     const planPayload = event.payload as PlanReadyPayload;
                     if (planPayload.teamId) {
-                        useExpertTeamStore.getState().setCanvasTeamId(planPayload.teamId);
+                        useExpertTeamStore.getState().setCanvasTeamId(planPayload.teamId, sid);
                         // Populate DAG immediately from embedded plan data — bypasses the
                         // TeamEventBridge subscription timing issue where the TEAM_EVENT
                         // PLAN_READY fires before the frontend subscribes to that teamId.

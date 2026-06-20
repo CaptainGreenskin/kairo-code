@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, Loader2, Eye, Pencil, ChevronRight, FileWarning, Diff } from 'lucide-react';
 import { getFileContent, putFileContent } from '@api/config';
 import * as monaco from 'monaco-editor';

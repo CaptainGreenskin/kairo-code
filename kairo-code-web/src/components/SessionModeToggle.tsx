@@ -6,7 +6,7 @@ interface Props {
     disabled?: boolean;
 }
 
-export function SessionModeToggle({ disabled }: Props) {
+export function SessionModeToggle({ disabled: _disabled }: Props) {
     const activeSessionId = useSessionStore(s => s.activeSessionId);
     const sessionMode = useSessionModeStore(s => activeSessionId ? s.getSessionMode(activeSessionId) : null);
     const pendingMode = useSessionModeStore(s => s.pendingMode);

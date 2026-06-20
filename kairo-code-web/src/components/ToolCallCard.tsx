@@ -603,7 +603,7 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     }
 
     return (
-        <div className={`my-2 border ${RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}>
+        <div className={`my-2 border ${isComplete ? 'border-[var(--border)]' : RISK_COLORS[risk]} rounded-lg overflow-hidden bg-[var(--bg-secondary)]`}>
             <div
                 className={`px-3 py-2 flex items-center justify-between ${isComplete ? 'cursor-pointer hover:bg-[var(--bg-hover)] transition-colors' : ''}`}
                 onClick={() => { if (isComplete) setCardCollapsed(prev => !prev); }}

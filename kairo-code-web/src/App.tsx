@@ -35,7 +35,6 @@ import { ShortcutsModal } from '@components/ShortcutsModal';
 import { PendingApprovalBanner } from '@components/PendingApprovalBanner';
 import { QueueBanner } from '@components/QueueBanner';
 import { ChatMinimap } from '@components/ChatMinimap';
-import { QueuedMessagesCard } from '@components/QueuedMessagesCard';
 import { useQueueStore } from '@store/queueStore';
 import { MessageSearchBar } from '@components/MessageSearchBar';
 import { OnboardingWizard, isOnboardingDone, markOnboardingDone } from '@components/OnboardingWizard';
@@ -91,6 +90,7 @@ import { useGlobalShortcuts } from '@hooks/useGlobalShortcuts';
 import { ConfirmBuildChip } from '@components/ConfirmBuildChip';
 import { RevertButton } from '@components/RevertButton';
 import { useBuildPhaseStore } from '@store/buildPhaseStore';
+import { usePlanModeStore } from '@store/planModeStore';
 
 import { useExpertTeamStore } from '@store/expertTeamStore';
 import { FileTrackerBadge } from '@components/FileTrackerBadge';
@@ -198,6 +198,12 @@ function App() {
     const openFileInEditor = useOpenFilesStore((s) => s.openFile);
     const hasOpenTabs = useOpenFilesStore((s) => s.tabs.length > 0);
     const canvasTeamId = useExpertTeamStore((s) => s.canvasTeamId);
+    const canvasTeamStatus = useExpertTeamStore((s) =>
+        s.canvasTeamId ? s.teams[s.canvasTeamId]?.status ?? null : null
+    );
+    const canvasTeamFinalOutput = useExpertTeamStore((s) =>
+        s.canvasTeamId ? s.teams[s.canvasTeamId]?.finalOutput ?? null : null
+    );
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -360,12 +366,12 @@ function App() {
     // The full output is available in the Canvas; the chat message is kept short.
     const prevTeamStatusRef = useRef<string | null>(null);
     useEffect(() => {
-        if (!canvasTeamId) return;
-        const team = useExpertTeamStore.getState().teams[canvasTeamId];
-        if (!team) return;
+        if (!canvasTeamId || !canvasTeamStatus) return;
         const prev = prevTeamStatusRef.current;
-        prevTeamStatusRef.current = team.status;
-        if (prev && prev !== 'completed' && team.status === 'completed' && team.finalOutput) {
+        prevTeamStatusRef.current = canvasTeamStatus;
+        if (prev && prev !== 'completed' && canvasTeamStatus === 'completed') {
+            const team = useExpertTeamStore.getState().teams[canvasTeamId];
+            if (!team) return;
             const steps = Object.values(team.steps);
             const done = steps.filter(s => s.status === 'done').length;
             const total = steps.length;
@@ -376,23 +382,28 @@ function App() {
                 .map(p => p.split('/').slice(-2).join('/'))
             );
             const uniqueFiles = [...new Set(files)];
-            const summary = [
+            const summaryParts = [
                 `✅ **Expert Team Completed** (${done}/${total} steps)`,
-                '',
-                uniqueFiles.length > 0
-                    ? `**Files created:** ${uniqueFiles.map(f => '`' + f + '`').join(', ')}`
-                    : '',
-                '',
-                '_Full details available in the Experts Canvas panel →_',
-            ].filter(Boolean).join('\n');
+            ];
+            if (uniqueFiles.length > 0) {
+                summaryParts.push('');
+                summaryParts.push(`**Files created:** ${uniqueFiles.map(f => '`' + f + '`').join(', ')}`);
+            }
+            if (canvasTeamFinalOutput) {
+                summaryParts.push('');
+                summaryParts.push(canvasTeamFinalOutput);
+            }
+            summaryParts.push('');
+            summaryParts.push('_Full details available in the Experts Canvas panel →_');
             addMessage({
                 id: `expert-summary-${canvasTeamId}`,
                 role: 'assistant',
-                content: summary,
-                timestamp: new Date().toISOString(),
+                content: summaryParts.join('\n'),
+                toolCalls: [],
+                timestamp: Date.now(),
             });
         }
-    });
+    }, [canvasTeamId, canvasTeamStatus, canvasTeamFinalOutput, addMessage]);
 
     useEffect(() => {
         approveToolRef.current = approveTool;
@@ -461,13 +472,14 @@ function App() {
             .catch(() => {});
     }, [refreshWorkspaces]);
 
-    // Load config on mount; determine whether onboarding is needed
+    // Load config on mount; determine whether onboarding is needed.
+    // Show onboarding when EITHER localStorage flag is unset OR the server has no API key.
     useEffect(() => {
         getConfig()
             .then((config) => {
                 setCurrentModel(config.defaultModel);
                 setServerConfig(config);
-                setNeedsOnboarding(!isOnboardingDone());
+                setNeedsOnboarding(!isOnboardingDone() || !config.apiKeySet);
             })
             .catch(() => {
                 setNeedsOnboarding(!isOnboardingDone());
@@ -809,6 +821,7 @@ function App() {
         disconnect();
         useBuildPhaseStore.getState().reset();
         useExpertTeamStore.getState().reset();
+        usePlanModeStore.getState().reset();
         useSessionStore.setState({ todos: [] });
         setSessionId(null);
         clearMessages();
@@ -829,7 +842,14 @@ function App() {
         async (id: string) => {
             if (id === sessionId) return;
             useBuildPhaseStore.getState().reset();
-            useExpertTeamStore.getState().setCanvasTeamId(null);
+            // Save canvas for the old session and restore for the new one
+            if (sessionId) {
+                useExpertTeamStore.getState().saveCanvasForSession(sessionId);
+            } else {
+                useExpertTeamStore.getState().setCanvasTeamId(null);
+            }
+            useExpertTeamStore.getState().restoreCanvasForSession(id);
+            usePlanModeStore.getState().reset();
             useSessionStore.setState({ todos: [] });
             setLoadingSessionId(id);
             // Already open as a tab → just switch active, leave its messages intact.
@@ -1609,7 +1629,12 @@ ${content}
                                 onNew={handleNewChatTab}
                                 onActivate={(sid) => {
                                     useBuildPhaseStore.getState().reset();
-                                    useExpertTeamStore.getState().setCanvasTeamId(null);
+                                    if (sessionId) {
+                                        useExpertTeamStore.getState().saveCanvasForSession(sessionId);
+                                    } else {
+                                        useExpertTeamStore.getState().setCanvasTeamId(null);
+                                    }
+                                    useExpertTeamStore.getState().restoreCanvasForSession(sid);
                                     useSessionStore.setState({ todos: [] });
                                     if (isConnected) switchSession(sid);
                                     else connect();

@@ -9,6 +9,7 @@ const PrismLightWithStyle = lazy(async () => {
         import('react-syntax-highlighter'),
         import('react-syntax-highlighter/dist/esm/styles/prism'),
         import('react-syntax-highlighter/dist/esm/styles/prism/one-light').catch(() =>
+            // @ts-expect-error no type declarations for this style module
             import('react-syntax-highlighter/dist/esm/styles/prism/a11y-one-light')),
     ]);
 
