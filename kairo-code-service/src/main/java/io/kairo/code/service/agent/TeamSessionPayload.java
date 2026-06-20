@@ -544,9 +544,12 @@ public final class TeamSessionPayload implements SessionPayload {
                     if (activeTeamId == null || !activeTeamId.equals(te.teamId())) {
                         return;
                     }
-                    // Accumulate token estimate from worker tool calls (before filter)
-                    if (te.type() == TeamEventType.STEP_TOOL_CALL) {
-                        accumulatedTokens.addAndGet(2000);
+                    // Accumulate real token usage from STEP_COMPLETED events
+                    if (te.type() == TeamEventType.STEP_COMPLETED) {
+                        Object tokensAttr = te.attributes().get("tokensUsed");
+                        if (tokensAttr instanceof Number n) {
+                            accumulatedTokens.accumulateAndGet(n.longValue(), Math::max);
+                        }
                     }
                     if (HIGH_FREQ_TYPES.contains(te.type())) {
                         return;

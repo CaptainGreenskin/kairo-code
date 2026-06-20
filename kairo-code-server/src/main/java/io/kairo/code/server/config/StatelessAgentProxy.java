@@ -26,6 +26,7 @@ final class StatelessAgentProxy implements Agent {
     private final Supplier<Agent> factory;
     private final String name;
     private final Set<Agent> activeDelegates = ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.atomic.AtomicLong cumulativeTokens = new java.util.concurrent.atomic.AtomicLong(0);
 
     StatelessAgentProxy(String name, Supplier<Agent> factory) {
         this.name = name;
@@ -37,7 +38,10 @@ final class StatelessAgentProxy implements Agent {
         Agent fresh = factory.get();
         activeDelegates.add(fresh);
         return fresh.call(input)
-                .doFinally(sig -> activeDelegates.remove(fresh));
+                .doFinally(sig -> {
+                    cumulativeTokens.addAndGet(fresh.totalTokensUsed());
+                    activeDelegates.remove(fresh);
+                });
     }
 
     @Override
@@ -57,6 +61,15 @@ final class StatelessAgentProxy implements Agent {
             if (s != AgentState.IDLE && s != AgentState.COMPLETED) return s;
         }
         return AgentState.IDLE;
+    }
+
+    @Override
+    public long totalTokensUsed() {
+        long sum = cumulativeTokens.get();
+        for (Agent d : activeDelegates) {
+            sum += d.totalTokensUsed();
+        }
+        return sum;
     }
 
     @Override
