@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Sparkles, Download, Trash2, RefreshCw, Search } from 'lucide-react';
+import { X, Sparkles, Download, Trash2, RefreshCw, Search, Play, Square, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface Skill {
     name: string;
@@ -10,6 +10,7 @@ interface Skill {
     triggers: string[];
     version: string;
     hasInstructions: boolean;
+    loaded?: boolean;
 }
 
 interface ManagedSkill {
@@ -18,7 +19,7 @@ interface ManagedSkill {
     path: string;
 }
 
-type Tab = 'all' | 'loaded' | 'managed';
+type Tab = 'all' | 'managed';
 
 const CATEGORY_COLORS: Record<string, string> = {
     CODE: '#6366f1',
@@ -33,8 +34,11 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
     const [tab, setTab] = useState<Tab>('all');
     const [skills, setSkills] = useState<Skill[]>([]);
     const [managed, setManaged] = useState<ManagedSkill[]>([]);
+    const [loadedSkills, setLoadedSkills] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
+    const [skillDetail, setSkillDetail] = useState<string>('');
     const [showInstall, setShowInstall] = useState(false);
     const [installSource, setInstallSource] = useState('');
     const [installError, setInstallError] = useState('');
@@ -62,9 +66,39 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
 
     const filtered = skills.filter(s => {
         const q = search.toLowerCase();
-        if (q && !s.name.toLowerCase().includes(q) && !s.description.toLowerCase().includes(q)) return false;
-        return true;
+        return !q || s.name.toLowerCase().includes(q)
+            || s.description.toLowerCase().includes(q)
+            || s.triggers.some(t => t.toLowerCase().includes(q));
     });
+
+    const handleLoad = (name: string) => {
+        setLoadedSkills(prev => new Set(prev).add(name));
+    };
+
+    const handleUnload = (name: string) => {
+        setLoadedSkills(prev => { const next = new Set(prev); next.delete(name); return next; });
+    };
+
+    const handleExpand = async (name: string) => {
+        if (expandedSkill === name) {
+            setExpandedSkill(null);
+            return;
+        }
+        setExpandedSkill(name);
+        setSkillDetail('Loading...');
+        try {
+            const res = await fetch(`/api/skills/${encodeURIComponent(name)}/detail`);
+            if (res.ok) {
+                const data = await res.json();
+                setSkillDetail(data.instructions || 'No instructions available.');
+            } else {
+                const skill = skills.find(s => s.name === name);
+                setSkillDetail(skill?.description || 'No details available.');
+            }
+        } catch {
+            setSkillDetail('Failed to load details.');
+        }
+    };
 
     const handleInstall = async () => {
         if (!installSource.trim()) return;
@@ -91,22 +125,21 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
     };
 
     const handleUninstall = async (name: string) => {
-        try {
-            await fetch(`/api/skills/${name}`, { method: 'DELETE' });
-            fetchSkills();
-        } catch { /* ignore */ }
+        await fetch(`/api/skills/${name}`, { method: 'DELETE' });
+        fetchSkills();
     };
 
     const handleUpdate = async (name: string) => {
-        try {
-            await fetch(`/api/skills/${name}/update`, { method: 'POST' });
-            fetchSkills();
-        } catch { /* ignore */ }
+        await fetch(`/api/skills/${name}/update`, { method: 'POST' });
+        fetchSkills();
     };
+
+    const loadedCount = loadedSkills.size;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center"
-             style={{ background: 'rgba(0,0,0,0.5)' }}>
+             style={{ background: 'rgba(0,0,0,0.5)' }}
+             onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
             <div className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-lg overflow-hidden"
                  style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
                 {/* Header */}
@@ -119,12 +152,18 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
                               style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
                             {skills.length}
                         </span>
+                        {loadedCount > 0 && (
+                            <span className="text-xs px-1.5 py-0.5 rounded"
+                                  style={{ background: '#6366f120', color: '#6366f1' }}>
+                                {loadedCount} loaded
+                            </span>
+                        )}
                     </div>
                     <div className="flex items-center gap-2">
                         <button onClick={() => setShowInstall(!showInstall)}
-                                className="text-xs px-2 py-1 rounded"
+                                className="text-xs px-2 py-1 rounded flex items-center gap-1"
                                 style={{ background: 'var(--accent-color)', color: '#fff' }}>
-                            <Download size={12} className="inline mr-1" />Install
+                            <Download size={12} />Install
                         </button>
                         <button onClick={onClose} style={{ color: 'var(--text-secondary)' }}>
                             <X size={16} />
@@ -153,14 +192,14 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
 
                 {/* Tabs + Search */}
                 <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    {(['all', 'loaded', 'managed'] as Tab[]).map(t => (
+                    {(['all', 'managed'] as Tab[]).map(t => (
                         <button key={t} onClick={() => setTab(t)}
                                 className="text-xs px-2 py-1 rounded capitalize"
                                 style={{
                                     background: tab === t ? 'var(--accent-color)' : 'transparent',
                                     color: tab === t ? '#fff' : 'var(--text-secondary)',
                                 }}>
-                            {t === 'all' ? `All (${skills.length})` : t === 'managed' ? `Managed (${managed.length})` : 'Loaded'}
+                            {t === 'all' ? `All (${skills.length})` : `Managed (${managed.length})`}
                         </button>
                     ))}
                     <div className="flex-1" />
@@ -180,60 +219,78 @@ export function SkillsPanel({ onClose }: { onClose: () => void }) {
                     ) : tab === 'managed' ? (
                         managed.length === 0 ? (
                             <p className="text-sm text-center py-8" style={{ color: 'var(--text-secondary)' }}>
-                                No managed skills installed. Use Install to add from git.
+                                No managed skills. Click Install to add from git.
                             </p>
-                        ) : (
-                            managed.map(s => (
-                                <div key={s.name} className="py-3" style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{s.name}</span>
-                                        <div className="flex gap-1">
-                                            <button onClick={() => handleUpdate(s.name)} className="p-1 rounded hover:opacity-80"
-                                                    style={{ color: 'var(--text-secondary)' }} title="Update">
-                                                <RefreshCw size={14} />
-                                            </button>
-                                            <button onClick={() => handleUninstall(s.name)} className="p-1 rounded hover:opacity-80"
-                                                    style={{ color: '#ef4444' }} title="Remove">
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
+                        ) : managed.map(s => (
+                            <div key={s.name} className="py-3" style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <div className="flex items-center justify-between">
+                                    <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{s.name}</span>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => handleUpdate(s.name)} className="p-1 rounded hover:opacity-80"
+                                                style={{ color: 'var(--text-secondary)' }} title="Update">
+                                            <RefreshCw size={14} />
+                                        </button>
+                                        <button onClick={() => handleUninstall(s.name)} className="p-1 rounded hover:opacity-80"
+                                                style={{ color: '#ef4444' }} title="Remove">
+                                            <Trash2 size={14} />
+                                        </button>
                                     </div>
-                                    <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{s.gitUrl}</p>
                                 </div>
-                            ))
-                        )
-                    ) : (
-                        filtered.length === 0 ? (
-                            <p className="text-sm text-center py-8" style={{ color: 'var(--text-secondary)' }}>No skills found.</p>
-                        ) : (
-                            filtered.map(s => (
-                                <div key={s.name} className="py-3" style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{s.name}</span>
-                                        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                                              style={{ background: `${CATEGORY_COLORS[s.category] || '#6b7280'}20`, color: CATEGORY_COLORS[s.category] || '#6b7280' }}>
-                                            {s.category}
-                                        </span>
-                                        <span className="text-[10px] px-1 py-0.5 rounded"
-                                              style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
-                                            {s.priority}
-                                        </span>
-                                    </div>
-                                    <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{s.description}</p>
-                                    {s.triggers.length > 0 && (
-                                        <div className="flex gap-1 mt-1 flex-wrap">
-                                            {s.triggers.map(t => (
-                                                <span key={t} className="text-[10px] px-1.5 py-0.5 rounded"
-                                                      style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
-                                                    {t}
-                                                </span>
-                                            ))}
-                                        </div>
+                                <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{s.gitUrl}</p>
+                            </div>
+                        ))
+                    ) : filtered.length === 0 ? (
+                        <p className="text-sm text-center py-8" style={{ color: 'var(--text-secondary)' }}>No skills found.</p>
+                    ) : filtered.map(s => {
+                        const isLoaded = loadedSkills.has(s.name);
+                        const isExpanded = expandedSkill === s.name;
+                        return (
+                            <div key={s.name} className="py-3" style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => handleExpand(s.name)}
+                                            className="p-0.5" style={{ color: 'var(--text-secondary)' }}>
+                                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                    </button>
+                                    <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{s.name}</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                                          style={{ background: `${CATEGORY_COLORS[s.category] || '#6b7280'}20`, color: CATEGORY_COLORS[s.category] || '#6b7280' }}>
+                                        {s.category}
+                                    </span>
+                                    <div className="flex-1" />
+                                    {isLoaded ? (
+                                        <button onClick={() => handleUnload(s.name)}
+                                                className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1"
+                                                style={{ background: '#6366f120', color: '#6366f1', border: '1px solid #6366f140' }}>
+                                            <Square size={10} />Unload
+                                        </button>
+                                    ) : (
+                                        <button onClick={() => handleLoad(s.name)}
+                                                className="text-[11px] px-2 py-0.5 rounded flex items-center gap-1"
+                                                style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+                                            <Play size={10} />Load
+                                        </button>
                                     )}
                                 </div>
-                            ))
-                        )
-                    )}
+                                <p className="text-xs mt-1 ml-6" style={{ color: 'var(--text-secondary)' }}>{s.description}</p>
+                                {s.triggers.length > 0 && (
+                                    <div className="flex gap-1 mt-1 ml-6 flex-wrap">
+                                        {s.triggers.map(t => (
+                                            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded"
+                                                  style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+                                                {t}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                                {isExpanded && (
+                                    <div className="mt-2 ml-6 p-3 rounded text-xs whitespace-pre-wrap"
+                                         style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', maxHeight: 200, overflowY: 'auto' }}>
+                                        {skillDetail}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
         </div>

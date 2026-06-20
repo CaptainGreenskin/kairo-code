@@ -41,7 +41,7 @@ public class ApiAuthFilter extends OncePerRequestFilter {
 
     private static final Set<String> ALLOWLIST = Set.of(
             "/actuator/health", "/actuator/info", "/actuator/prometheus", "/api/healthz",
-            "/api/auth/register", "/api/auth/login", "/api/auth/status");
+            "/api/auth/register", "/api/auth/login", "/api/auth/status", "/api/auth/refresh");
 
     private static final Set<String> LOOPBACK = Set.of(
             "127.0.0.1", "0:0:0:0:0:0:0:1", "::1", "localhost");

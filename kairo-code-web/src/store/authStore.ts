@@ -17,6 +17,31 @@ interface AuthState {
     checkAuth: () => Promise<void>;
 }
 
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+function startRefreshTimer() {
+    if (refreshTimer) return;
+    // Refresh token every 20 hours (token expires at 24h)
+    refreshTimer = setInterval(async () => {
+        const token = getAuthToken();
+        if (!token) return;
+        try {
+            const res = await fetch('/api/auth/refresh', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setAuthToken(data.token);
+            }
+        } catch { /* ignore */ }
+    }, 20 * 60 * 60 * 1000);
+}
+
+function stopRefreshTimer() {
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+}
+
 export const useAuthStore = create<AuthState>()((set) => ({
     user: null,
     isAuthenticated: false,
@@ -38,8 +63,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
             }
             setAuthToken(data.token);
             set({ user: data.user, isAuthenticated: true, error: null });
+            startRefreshTimer();
             return true;
-        } catch (e) {
+        } catch {
             set({ error: 'Network error' });
             return false;
         }
@@ -60,8 +86,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
             }
             setAuthToken(data.token);
             set({ user: data.user, isAuthenticated: true, error: null });
+            startRefreshTimer();
             return true;
-        } catch (e) {
+        } catch {
             set({ error: 'Network error' });
             return false;
         }
@@ -69,6 +96,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
 
     logout: () => {
         setAuthToken('');
+        stopRefreshTimer();
         set({ user: null, isAuthenticated: false, error: null });
     },
 
@@ -85,6 +113,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
             if (res.ok) {
                 const user = await res.json();
                 set({ user, isAuthenticated: true, isLoading: false });
+                startRefreshTimer();
             } else {
                 setAuthToken('');
                 set({ isAuthenticated: false, isLoading: false });

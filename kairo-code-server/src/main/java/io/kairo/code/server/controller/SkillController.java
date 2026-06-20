@@ -49,6 +49,25 @@ public class SkillController {
         return result;
     }
 
+    @GetMapping("/{name}/detail")
+    public ResponseEntity<?> getDetail(@PathVariable String name) {
+        FsSkillLoader loader = new FsSkillLoader(globalSkillsDir(), projectSkillsDir());
+        for (var sw : loader.loadAll()) {
+            if (sw.metadata().name().equals(name)) {
+                var def = sw.metadata().definition();
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("name", def.name());
+                result.put("description", def.description() != null ? def.description() : "");
+                result.put("instructions", def.instructions() != null ? def.instructions() : "");
+                result.put("category", def.category().name());
+                result.put("version", def.version());
+                result.put("triggers", def.triggerConditions() != null ? def.triggerConditions() : List.of());
+                return ResponseEntity.ok(result);
+            }
+        }
+        return ResponseEntity.notFound().build();
+    }
+
     @GetMapping("/managed")
     public List<Map<String, Object>> listManaged() {
         return installer.list().stream()

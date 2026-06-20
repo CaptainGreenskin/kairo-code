@@ -6,6 +6,9 @@ triggers:
   - "write tests"
   - "add tests"
   - "/test"
+  - "写测试"
+  - "写单测"
+  - "添加测试"
 ---
 # Test Writer
 

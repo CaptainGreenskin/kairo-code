@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Settings, Github, FileText, HelpCircle, Moon, Sun, Terminal, Bookmark, Clock, Download, Plug } from 'lucide-react';
+import { Settings, Github, FileText, HelpCircle, Moon, Sun, Terminal, Bookmark, Clock, Download, Plug, LogOut } from 'lucide-react';
 import type { ConnectionStatus } from '@/types/agent';
+import { useAuthStore } from '@store/authStore';
 
 interface StatusBarProps {
     connectionStatus?: ConnectionStatus;
@@ -133,6 +134,16 @@ export function StatusBar({
                 >
                     <Settings size={13} />
                 </button>
+                {useAuthStore.getState().isAuthenticated && (
+                    <button
+                        onClick={() => useAuthStore.getState().logout()}
+                        className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                        title={`Logout (${useAuthStore.getState().user?.username ?? ''})`}
+                        aria-label="Logout"
+                    >
+                        <LogOut size={13} />
+                    </button>
+                )}
                 <a
                     href="https://github.com/CaptainGreenskin/kairo-code"
                     target="_blank"

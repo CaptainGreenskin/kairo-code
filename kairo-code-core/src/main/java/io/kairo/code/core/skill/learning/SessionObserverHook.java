@@ -3,6 +3,7 @@ package io.kairo.code.core.skill.learning;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kairo.api.hook.PostActing;
 import io.kairo.api.hook.PostActingEvent;
+import io.kairo.api.hook.PreCompleteEvent;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -56,6 +57,23 @@ public class SessionObserverHook {
 
     public List<ToolObservation> getSessionObservations() {
         return List.copyOf(sessionObservations);
+    }
+
+    @io.kairo.api.hook.HookHandler(io.kairo.api.hook.HookPhase.PRE_COMPLETE)
+    public io.kairo.api.hook.HookResult<PreCompleteEvent> onPreComplete(PreCompleteEvent event) {
+        if (sessionObservations.size() >= 5) {
+            try {
+                InstinctExtractor extractor = new InstinctExtractor();
+                List<Instinct> instincts = extractor.extract(sessionObservations);
+                if (!instincts.isEmpty()) {
+                    log.info("Session end: extracted {} instinct(s) from {} observations",
+                            instincts.size(), sessionObservations.size());
+                }
+            } catch (Exception e) {
+                log.debug("Instinct extraction failed: {}", e.getMessage());
+            }
+        }
+        return io.kairo.api.hook.HookResult.proceed(event);
     }
 
     private static String truncateStr(String s, int max) {

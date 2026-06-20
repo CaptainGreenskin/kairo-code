@@ -6,6 +6,8 @@ triggers:
   - "review code"
   - "code review"
   - "/review"
+  - "代码审查"
+  - "代码review"
 ---
 # Code Review
 

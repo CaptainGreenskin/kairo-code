@@ -104,6 +104,20 @@ public class AuthController {
                 "createdAt", user.createdAt()));
     }
 
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refresh(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String token = extractBearer(authHeader);
+        if (token == null) {
+            return error(HttpStatus.UNAUTHORIZED, "unauthorized", "Missing token");
+        }
+        var usernameOpt = jwtService.validateToken(token);
+        if (usernameOpt.isEmpty()) {
+            return error(HttpStatus.UNAUTHORIZED, "token_expired", "Token is invalid or expired");
+        }
+        String newToken = jwtService.generateToken(usernameOpt.get());
+        return ResponseEntity.ok(Map.of("token", newToken));
+    }
+
     @GetMapping("/status")
     public ResponseEntity<?> status() {
         return ResponseEntity.ok(Map.of(
