@@ -95,12 +95,20 @@ public class SwarmCoordinator {
      * @param planOnly if true, only generate the plan without executing it
      * @return team execution result (plan-ready if planOnly)
      */
+    public record TeamStartResult(String teamId, Mono<TeamResult> result) {}
+
     public Mono<TeamResult> startExpertTeam(String goal, TeamConfig config, List<String> roleIds, boolean planOnly) {
+        TeamStartResult r = startExpertTeamWithId(goal, config, roleIds, planOnly);
+        return r.result();
+    }
+
+    public TeamStartResult startExpertTeamWithId(String goal, TeamConfig config, List<String> roleIds, boolean planOnly) {
         io.kairo.api.team.Team team = buildTeam(roleIds);
         TeamExecutionRequest request = new TeamExecutionRequest(
                 UUID.randomUUID().toString(), goal, Map.of(), config);
-        lastTeamId = team.name();
-        return coordinator.execute(request, team, planOnly);
+        String teamId = team.name();
+        lastTeamId = teamId;
+        return new TeamStartResult(teamId, coordinator.execute(request, team, planOnly));
     }
 
     /**

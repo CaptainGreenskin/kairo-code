@@ -175,6 +175,7 @@ public final class TeamSessionPayload implements SessionPayload {
                 case IDLE, FAILED_PLANNING -> {
                     // User explicitly chose Experts mode — always use expert team,
                     // never demote based on message length/content.
+                    doneEmitted.set(false);
                     if (narrator != null) {
                         narrator.suspend();
                     }
@@ -199,9 +200,11 @@ public final class TeamSessionPayload implements SessionPayload {
                 case COMPLETED -> {
                     phaseRef.set(SessionPhase.IDLE);
                     ctx.persistPhase().accept(SessionPhase.IDLE);
+                    doneEmitted.set(false);
                     return handleMessage(request);
                 }
                 case FAILED_EXECUTION -> {
+                    doneEmitted.set(false);
                     return Flux.just(AgentEvent.error(sessionId,
                             "Execution failed. Please revert the workspace before retrying.",
                             "REVERT_REQUIRED"));
@@ -441,13 +444,13 @@ public final class TeamSessionPayload implements SessionPayload {
         Sinks.Many<AgentEvent> sink = ctx.sharedSink();
         ctx.emit(AgentEvent.thinking(sessionId));
 
-        Mono<TeamResult> resultMono = preset.coordinator()
-                .startExpertTeam(goal, preset.teamConfig(), List.<String>of(), true);
+        var startResult = preset.coordinator()
+                .startExpertTeamWithId(goal, preset.teamConfig(), List.<String>of(), true);
+        pendingTeamId = startResult.teamId();
 
-        Disposable disposable = Mono.zip(resultMono, planAttrsMono)
+        Disposable disposable = Mono.zip(startResult.result(), planAttrsMono)
                 .doOnSuccess(tuple -> {
                     ctx.runningState().set(false);
-                    pendingTeamId = preset.coordinator().lastTeamId();
                     ctx.phaseRef().set(SessionPhase.PLAN_PENDING);
                     ctx.persistPhase().accept(SessionPhase.PLAN_PENDING);
                     TeamResult result = tuple.getT1();

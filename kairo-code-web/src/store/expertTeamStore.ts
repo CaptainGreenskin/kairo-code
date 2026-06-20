@@ -205,6 +205,20 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
     } else {
       sessionStorage.removeItem('kairo-canvas-team-id');
     }
+
+    // Evict old teams to prevent unbounded memory growth.
+    // Keep only the 5 most recent teams (by key insertion order).
+    const MAX_TEAMS = 5;
+    const teams = get().teams;
+    const teamIds = Object.keys(teams);
+    if (teamIds.length > MAX_TEAMS) {
+      const toRemove = teamIds.slice(0, teamIds.length - MAX_TEAMS);
+      const trimmed = { ...teams };
+      for (const id of toRemove) {
+        delete trimmed[id];
+      }
+      set({ teams: trimmed });
+    }
   },
 
   getActiveTeam: () => {
