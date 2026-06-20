@@ -7,6 +7,8 @@ export interface FileTab {
     path: string;
     /** 1-based line to scroll to on next focus, then cleared. */
     gotoLine?: number;
+    /** When true, auto-enable inline git diff highlighting on open. */
+    showDiff?: boolean;
 }
 
 /** A non-file tab showing one expert/step's full execution trace. */
@@ -29,7 +31,7 @@ interface OpenFilesState {
     /** Identity of the active tab (a path for file tabs, `expert:…` for expert tabs). */
     activePath: string | null;
 
-    openFile: (path: string, gotoLine?: number) => void;
+    openFile: (path: string, gotoLine?: number, showDiff?: boolean) => void;
     openExpertStepTab: (args: { teamId: string; stepId: string; title: string }) => void;
     closeFile: (id: string) => void;
     setActive: (id: string) => void;
@@ -42,10 +44,10 @@ export const useOpenFilesStore = create<OpenFilesState>()((set, get) => ({
     tabs: [],
     activePath: null,
 
-    openFile: (path, gotoLine) => {
+    openFile: (path, gotoLine, showDiff) => {
         const { tabs } = get();
         const idx = tabs.findIndex((t) => t.id === path);
-        const tab: FileTab = { kind: 'file', id: path, path, gotoLine };
+        const tab: FileTab = { kind: 'file', id: path, path, gotoLine, showDiff };
         if (idx >= 0) {
             const next = tabs.slice();
             next[idx] = tab;

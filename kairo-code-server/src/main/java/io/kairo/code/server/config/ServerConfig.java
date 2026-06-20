@@ -104,6 +104,33 @@ public class ServerConfig {
     @Bean
     public io.kairo.api.model.ModelProvider modelProvider() {
         ServerProperties props = serverProperties();
+        if (!org.springframework.util.StringUtils.hasText(props.apiKey())) {
+            log.warn("No API key configured — server starts in onboarding mode. "
+                    + "Configure via web UI or --kairo.code.api-key=...");
+            return new io.kairo.api.model.ModelProvider() {
+                @Override
+                public reactor.core.publisher.Mono<io.kairo.api.model.ModelResponse> call(
+                        java.util.List<io.kairo.api.message.Msg> messages,
+                        io.kairo.api.model.ModelConfig config) {
+                    return reactor.core.publisher.Mono.error(
+                            new IllegalStateException("API key not configured. "
+                                    + "Please configure via Settings."));
+                }
+
+                @Override
+                public reactor.core.publisher.Flux<io.kairo.api.model.ModelResponse> stream(
+                        java.util.List<io.kairo.api.message.Msg> messages,
+                        io.kairo.api.model.ModelConfig config) {
+                    return reactor.core.publisher.Flux.error(
+                            new IllegalStateException("API key not configured."));
+                }
+
+                @Override
+                public String name() {
+                    return "unconfigured";
+                }
+            };
+        }
         return io.kairo.code.core.CodeAgentFactory.buildModelProvider(
                 props.apiKey(), props.baseUrl(), props.model());
     }

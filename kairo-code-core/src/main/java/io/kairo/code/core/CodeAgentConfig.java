@@ -51,8 +51,8 @@ public record CodeAgentConfig(
     }
 
     public CodeAgentConfig {
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalArgumentException("apiKey is required");
+        if (apiKey == null) {
+            apiKey = "";
         }
         if (modelName == null || modelName.isBlank()) {
             modelName = "gpt-4o";

@@ -5,9 +5,11 @@ import type { PrismLight } from 'react-syntax-highlighter';
 type PrismLightProps = ComponentProps<typeof PrismLight>;
 
 const PrismLightWithStyle = lazy(async () => {
-    const [{ PrismLight }, styles] = await Promise.all([
+    const [{ PrismLight }, styles, lightStyles] = await Promise.all([
         import('react-syntax-highlighter'),
         import('react-syntax-highlighter/dist/esm/styles/prism'),
+        import('react-syntax-highlighter/dist/esm/styles/prism/one-light').catch(() =>
+            import('react-syntax-highlighter/dist/esm/styles/prism/a11y-one-light')),
     ]);
 
     // 注册 ChatMessage 实际使用的语言
@@ -70,9 +72,12 @@ const PrismLightWithStyle = lazy(async () => {
     PrismLight.registerLanguage('rust', rust);
     PrismLight.registerLanguage('cpp', cpp);
 
-    const Wrapped: ComponentType<LazySyntaxHighlighterProps> = (props) => (
-        <PrismLight style={styles.vscDarkPlus as never} {...(props as PrismLightProps)} />
-    );
+    const lightTheme = lightStyles.default ?? lightStyles;
+    const Wrapped: ComponentType<LazySyntaxHighlighterProps> = (props) => {
+        const isDark = document.documentElement.classList.contains('dark');
+        const theme = isDark ? styles.vscDarkPlus : lightTheme;
+        return <PrismLight style={theme as never} {...(props as PrismLightProps)} />;
+    };
     return { default: Wrapped };
 });
 

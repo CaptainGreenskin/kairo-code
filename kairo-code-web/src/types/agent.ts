@@ -20,7 +20,8 @@ export type AgentEventType =
     | 'TOOL_OUTPUT_CHUNK'
     | 'PEER_MESSAGE'
     | 'SESSION_RESUMED'
-    | 'CLEAR_EXECUTION_MESSAGES';
+    | 'CLEAR_EXECUTION_MESSAGES'
+    | 'MESSAGE_QUEUED';
 
 /**
  * Mirrors {@code io.kairo.api.tool.FailureReason}. Carried on TOOL_RESULT payloads under
@@ -198,6 +199,8 @@ export interface Message {
         durationMs: number;
         result: string;
     };
+    /** When true, this user message is queued and awaiting execution. */
+    queued?: boolean;
     /** Reasoning_content captured during AGENT_THINKING events. Pinned onto the
      *  message so users can expand it in the chat after the response completes,
      *  mirroring Claude Code's collapsible 思考过程 box. */

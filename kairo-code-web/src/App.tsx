@@ -33,6 +33,10 @@ import { SearchPanel } from '@components/SearchPanel';
 import { CommandPalette } from '@components/CommandPalette';
 import { ShortcutsModal } from '@components/ShortcutsModal';
 import { PendingApprovalBanner } from '@components/PendingApprovalBanner';
+import { QueueBanner } from '@components/QueueBanner';
+import { ChatMinimap } from '@components/ChatMinimap';
+import { QueuedMessagesCard } from '@components/QueuedMessagesCard';
+import { useQueueStore } from '@store/queueStore';
 import { MessageSearchBar } from '@components/MessageSearchBar';
 import { OnboardingWizard, isOnboardingDone, markOnboardingDone } from '@components/OnboardingWizard';
 import { ErrorBoundary } from '@components/ErrorBoundary';
@@ -126,6 +130,8 @@ function App() {
     // user switches tabs mid-stream.
     const assistantMsgRef = useRef<Record<string, string | null>>({});
     const hasErrorRef = useRef(false);
+    const pendingSessionRef = useRef<Promise<string> | null>(null);
+    const pendingMessagesRef = useRef<Array<{text: string; image: AttachedImage | null}>>([]);
     const wasConnectedRef = useRef(false);
     const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
     const [agentPhase, setAgentPhase] = useState<Phase>('thinking');
@@ -221,6 +227,7 @@ function App() {
     const persistedSessions: SnapshotMeta[] = [];
     const refreshPersistedSessions = useCallback(async () => {}, []);
     const virtuosoRef = useRef<import('react-virtuoso').VirtuosoHandle>(null);
+    const virtuosoScrollerRef = useRef<HTMLElement | null>(null);
     const [atBottom, setAtBottom] = useState(true);
     const [unreadCount, setUnreadCount] = useState(0);
     const prevMsgCount = useRef(messages.length);
@@ -610,12 +617,19 @@ function App() {
                     setShowWorkspaceSettings({ open: true, workspaceId: null });
                     return;
                 }
+                // If session creation is already in-flight, queue this message
+                if (pendingSessionRef.current) {
+                    pendingMessagesRef.current.push({ text, image });
+                    return;
+                }
                 connect();
-                createSession(currentWorkspaceId)
+                const sessionPromise = createSession(currentWorkspaceId);
+                pendingSessionRef.current = sessionPromise;
+                sessionPromise
                     .then((newId) => {
                         setSessionId(newId);
-                        // Add user message AFTER session exists so it's stored correctly
                         addMessage(userMsg);
+                        useSessionStore.getState().setRunningFor(newId, true);
                         autoNameSession(newId, text).then((name) => {
                             if (name) {
                                 window.dispatchEvent(new Event('storage'));
@@ -623,13 +637,41 @@ function App() {
                             }
                         });
                         sendMessage(newId, text, image?.data, image?.mediaType);
+                        // Send any messages that arrived while session was being created
+                        const pending = pendingMessagesRef.current.splice(0);
+                        for (const p of pending) {
+                            const queuedMsg = {
+                                id: generateId(),
+                                role: 'user' as const,
+                                content: p.text,
+                                toolCalls: [] as Message['toolCalls'],
+                                timestamp: Date.now(),
+                                queued: true,
+                                ...(p.image ? { imageData: p.image.data, imageMediaType: p.image.mediaType } : {}),
+                            };
+                            useSessionStore.getState().addMessageTo(newId, queuedMsg);
+                            useQueueStore.getState().enqueue(queuedMsg);
+                            sendMessage(newId, p.text, p.image?.data, p.image?.mediaType);
+                        }
                     })
                     .catch((err) => {
                         console.error('[App] Failed to create session:', err);
+                    })
+                    .finally(() => {
+                        pendingSessionRef.current = null;
                     });
             } else {
-                // Session exists — add message immediately
-                addMessage(userMsg);
+                // Session exists — check if agent is busy to queue
+                const storeRunning = useSessionStore.getState().running;
+                const agentBusy = storeRunning || isThinking || running;
+                if (agentBusy) {
+                    // Add to store with queued flag (hidden in main list, shown in QueuedMessagesCard)
+                    addMessage({ ...userMsg, queued: true });
+                    useQueueStore.getState().enqueue(userMsg);
+                } else {
+                    addMessage(userMsg);
+                    useSessionStore.getState().setRunningFor(sessionId, true);
+                }
                 const userMsgCount = messages.filter(m => m.role === 'user').length;
                 if (userMsgCount === 0) {
                     autoNameSession(sessionId, text).then((name) => {
@@ -641,13 +683,21 @@ function App() {
                 sendMessage(sessionId, text, image?.data, image?.mediaType);
             }
         },
-        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions, currentWorkspaceId, addToast],
+        [sessionId, messages, currentModel, addMessage, setSessionId, connect, createSession, sendMessage, isMobile, refreshPersistedSessions, currentWorkspaceId, addToast, isThinking, running],
     );
 
     const handleStop = useCallback(() => {
         if (sessionId) stopAgent(sessionId);
         setThinking(false);
     }, [stopAgent, sessionId, setThinking]);
+
+    const queueCount = useQueueStore((s) => s.messages.length);
+    const handleCancelQueue = useCallback(() => {
+        if (sessionId) {
+            send({ action: 'cancel_queue', sessionId });
+            useQueueStore.getState().clear();
+        }
+    }, [send, sessionId]);
 
     const handleCompact = useCallback(() => {
         if (sessionId) send({ action: 'compact', sessionId });
@@ -757,10 +807,14 @@ function App() {
     const handleNewSession = useCallback(() => {
         if (sessionId) clearCachedMessages(sessionId);
         disconnect();
+        useBuildPhaseStore.getState().reset();
+        useExpertTeamStore.getState().reset();
+        useSessionStore.setState({ todos: [] });
         setSessionId(null);
         clearMessages();
         assistantMsgRef.current = {};
         setStreamingMsgId(null);
+        setThinking(false);
         setAgentPhase('thinking');
         setCurrentToolName(undefined);
         setTokenUsage({ input: 0, output: 0 });
@@ -774,6 +828,9 @@ function App() {
     const handleSelectSession = useCallback(
         async (id: string) => {
             if (id === sessionId) return;
+            useBuildPhaseStore.getState().reset();
+            useExpertTeamStore.getState().setCanvasTeamId(null);
+            useSessionStore.setState({ todos: [] });
             setLoadingSessionId(id);
             // Already open as a tab → just switch active, leave its messages intact.
             const alreadyOpen = useSessionStore.getState().openTabs.includes(id);
@@ -1141,23 +1198,13 @@ ${content}
         }
     }, [isConnected, switchSession, connect, clearFiles]);
 
-    /** ChatTabBar `+` button: spin up a session for the current workspace and open it. */
-    const handleNewChatTab = useCallback(async () => {
+    /** ChatTabBar `+` button: clear UI for a fresh chat. Session is created lazily
+     *  when the user sends the first message (in handleSend's !sessionId branch),
+     *  so the user can choose Agent/Experts mode before committing. */
+    const handleNewChatTab = useCallback(() => {
         if (!currentWorkspaceId) return;
-        connect();
-        try {
-            const newId = await createSession(currentWorkspaceId);
-            useSessionStore.getState().openSession(newId);
-            assistantMsgRef.current[newId] = null;
-            // A fresh chat has no experts canvas or pending plan — clear any left over from
-            // the previous session so the new one doesn't inherit a stale canvas/phase.
-            useExpertTeamStore.getState().setCanvasTeamId(null);
-            useBuildPhaseStore.getState().setPhase('idle');
-            if (isConnected) switchSession(newId);
-        } catch (e) {
-            addToast('error', e instanceof Error ? e.message : 'Failed to create session');
-        }
-    }, [currentWorkspaceId, connect, createSession, isConnected, switchSession, addToast]);
+        handleNewSession();
+    }, [currentWorkspaceId, handleNewSession]);
 
     // Command palette commands
     const commands: Command[] = useMemo(() => [
@@ -1561,6 +1608,9 @@ ${content}
                             <ChatTabBar
                                 onNew={handleNewChatTab}
                                 onActivate={(sid) => {
+                                    useBuildPhaseStore.getState().reset();
+                                    useExpertTeamStore.getState().setCanvasTeamId(null);
+                                    useSessionStore.setState({ todos: [] });
                                     if (isConnected) switchSession(sid);
                                     else connect();
                                 }}
@@ -1584,9 +1634,11 @@ ${content}
                                         />
                                     )}
                                     <ErrorBoundary>
-                                        <div className="flex-1 min-h-0 overflow-hidden">
+                                        <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
+                                        <div className="flex-1 min-w-0 min-h-0 h-full">
                                         <Virtuoso
                                             ref={virtuosoRef}
+                                            scrollerRef={(ref) => { virtuosoScrollerRef.current = ref as HTMLElement; }}
                                             className="overflow-x-hidden [scrollbar-gutter:stable]"
                                             style={{ height: '100%' }}
                                             defaultItemHeight={80}
@@ -1719,6 +1771,12 @@ ${content}
                                             }}
                                         />
                                         </div>
+                                        <ChatMinimap
+                                            messages={filteredMessages as Message[]}
+                                            scrollerRef={virtuosoScrollerRef}
+                                            onScrollToIndex={(idx) => virtuosoRef.current?.scrollToIndex({ index: idx, behavior: 'smooth' })}
+                                        />
+                                        </div>
                                     </ErrorBoundary>
 
                                     {!atBottom && (
@@ -1761,6 +1819,11 @@ ${content}
                                     onToggleCollapse={() => setTodoPanelCollapsed((v) => !v)}
                                 />
                             )}
+                            <QueueBanner
+                                count={queueCount}
+                                messages={useQueueStore.getState().messages}
+                                onCancelAll={handleCancelQueue}
+                            />
                             <ChatInput
                                 key={sessionId ?? 'no-session'}
                                 sessionId={sessionId ?? undefined}

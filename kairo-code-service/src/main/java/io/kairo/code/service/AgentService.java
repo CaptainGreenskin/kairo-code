@@ -177,6 +177,29 @@ public class AgentService implements DisposableBean, InitializingBean {
      */
     public String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
                                 String sessionMode, String permissionMode) {
+        return createSession(config, workspaceId, useWorktree, sessionMode, permissionMode, null);
+    }
+
+    /**
+     * Create a session, optionally reusing an existing session ID (for rehydration after restart).
+     *
+     * @param existingSessionId if non-null, reuse this ID instead of generating a new UUID;
+     *                          allows checkpoint history to survive server restarts
+     */
+    String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
+                                String sessionMode, String permissionMode, String existingSessionId) {
+        return createSession(config, workspaceId, useWorktree, sessionMode, permissionMode, existingSessionId, 0);
+    }
+
+    /**
+     * Internal session creation with full rehydration support.
+     *
+     * @param existingSessionId reuse this ID on rehydration; null for new sessions
+     * @param originalCreatedAt original creation timestamp for rehydrated sessions; 0 for new sessions
+     */
+    private String createSession(CodeAgentConfig config, String workspaceId, boolean useWorktree,
+                                String sessionMode, String permissionMode,
+                                String existingSessionId, long originalCreatedAt) {
         // Unified mode: legacy modes collapse to "agent", except "experts" which
         // enables auto-escalation to multi-agent fan-out.
         boolean explicitExperts = "experts".equalsIgnoreCase(sessionMode);
@@ -189,7 +212,7 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         registry.evictLruIfFull();
 
-        String sessionId = UUID.randomUUID().toString();
+        String sessionId = existingSessionId != null ? existingSessionId : UUID.randomUUID().toString();
 
         // Resolve effective cwd via worktree manager. Falls back to workspace dir when not a git
         // repo or when useWorktree is false. Mutate config only if a different cwd was returned —
@@ -401,32 +424,34 @@ public class AgentService implements DisposableBean, InitializingBean {
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts, extraToolDeps);
             bridgeHook.setCostTracker(session.costTracker());
 
-            // ── Unified payload: always AgentSessionPayload + optional escalation ──
-            AgentSessionPayload agentPayload = new AgentSessionPayload(config, session, ctx);
-
-            // Auto-escalation only when the user explicitly selects mode="experts".
-            // The HeuristicTriageGate is too broad for automatic detection, but works
-            // fine as a passthrough when the user has already opted in.
-            SessionPayload payload = agentPayload;
-            if (explicitExperts && swarmCoordinator != null && triageGate != null
+            // ── Route by mode: Agent → AgentSessionPayload, Experts → TeamSessionPayload ──
+            SessionPayload payload;
+            if (explicitExperts && swarmCoordinator != null
                     && teamManager != null && messageBus != null) {
                 io.kairo.api.model.ModelProvider narratorModel =
                         CodeAgentFactory.buildModelProvider(config.apiKey(), config.baseUrl(), config.modelName());
-                agentPayload.setEscalationConfig(new AgentSessionPayload.EscalationConfig(
-                        swarmCoordinator,
-                        io.kairo.api.team.TeamConfig.defaults(),
-                        triageGate,
-                        eventBus,
-                        teamManager,
-                        messageBus,
-                        config,
-                        narratorModel));
-                log.info("Session {} created with experts escalation enabled", sessionId);
+                AgentSessionPayload agentFallback = new AgentSessionPayload(config, session, ctx);
+                TeamSessionPayload.ExpertsPresetConfig presetCfg =
+                        new TeamSessionPayload.ExpertsPresetConfig(
+                                swarmCoordinator,
+                                io.kairo.api.team.TeamConfig.defaults(),
+                                triageGate,
+                                agentFallback,
+                                TeamSessionPayload.NarratorSettings.defaults(),
+                                eventBus,
+                                narratorModel);
+                payload = new TeamSessionPayload(
+                        config, session, ctx, teamManager, messageBus, presetCfg);
+                log.info("Session {} created as Experts team (direct)", sessionId);
+            } else {
+                payload = new AgentSessionPayload(config, session, ctx);
             }
+
+            long effectiveCreatedAt = originalCreatedAt > 0 ? originalCreatedAt : System.currentTimeMillis();
 
             SessionEntry entry = new SessionEntry(
                     sessionId, workspaceId, normalizedMode, payload,
-                    approvalHandler, System.currentTimeMillis());
+                    approvalHandler, effectiveCreatedAt);
 
             SessionContext sessionContext = new SessionContext(
                     sessionId, entry, sink, running, progressTracker, phaseRef);
@@ -436,13 +461,25 @@ public class AgentService implements DisposableBean, InitializingBean {
             sessionMetaPersistence.save(new SessionMetaPersistence.SessionMeta(
                     sessionId, workspaceId, config.workingDir(), config.modelName(),
                     config.baseUrl(), "", phaseRef.get().name(), normalizedMode,
-                    System.currentTimeMillis()));
+                    effectiveCreatedAt));
 
             sessionIndexService.upsert(new SessionIndexEntry(
                     sessionId, null, workspaceId, config.workingDir(),
                     config.modelName(), SessionIndexEntry.STATUS_ACTIVE,
                     System.currentTimeMillis(), System.currentTimeMillis(),
                     0, false));
+
+            // Clear workspace-level todos.json so stale todos from a previous session
+            // don't leak into this new session (the file is per-workspace, not per-session).
+            // Skip when rehydrating (existingSessionId != null) to preserve the user's todos.
+            if (config.workingDir() != null && existingSessionId == null) {
+                Path todosFile = Path.of(config.workingDir(), ".kairo", "todos.json");
+                try {
+                    java.nio.file.Files.deleteIfExists(todosFile);
+                } catch (Exception e) {
+                    log.debug("Failed to clear stale todos.json: {}", e.getMessage());
+                }
+            }
 
             log.info("Session {} created successfully", sessionId);
             return sessionId;
@@ -484,21 +521,52 @@ public class AgentService implements DisposableBean, InitializingBean {
             maxTokens = io.kairo.core.model.ModelRegistry.getContextWindow(
                     entry.configOrNull().modelName());
         }
+
+        // Real compaction: force-run the pipeline to truncate history
+        SessionPayload payload = entry.payload();
+        if (payload instanceof AgentSessionPayload asp && asp.session() != null
+                && asp.session().agent() instanceof io.kairo.core.agent.DefaultReActAgent dra) {
+            int beforeTokens = (int) dra.totalTokensUsed();
+            var contextMgr = dra.contextManager();
+            if (contextMgr instanceof io.kairo.core.context.DefaultContextManager dcm) {
+                List<io.kairo.api.message.Msg> history = dra.conversationHistory();
+                int beforeSize = history.size();
+                final int fMaxTokens = maxTokens;
+                return Flux.from(
+                        dcm.compactMessages(history, true)
+                                .flatMap(compacted -> {
+                                    if (compacted != history && compacted.size() < beforeSize) {
+                                        dra.replaceHistory(compacted);
+                                        int saved = beforeSize - compacted.size();
+                                        log.info("Manual compaction: {} -> {} messages ({} removed)",
+                                                beforeSize, compacted.size(), saved);
+                                        AgentRuntimeContext.emitSerialized(sink,
+                                                AgentEvent.contextCompacted(sessionId,
+                                                        beforeTokens, fMaxTokens));
+                                        return reactor.core.publisher.Mono.just(
+                                                AgentEvent.textChunk(sessionId,
+                                                        "Context compacted: " + beforeSize
+                                                                + " → " + compacted.size()
+                                                                + " messages"));
+                                    }
+                                    log.info("Manual compaction: no reduction ({}→{})",
+                                            beforeSize, compacted.size());
+                                    AgentRuntimeContext.emitSerialized(sink,
+                                            AgentEvent.contextCompacted(sessionId,
+                                                    beforeTokens, fMaxTokens));
+                                    return reactor.core.publisher.Mono.just(
+                                            AgentEvent.textChunk(sessionId,
+                                                    "Context already compact (" + beforeSize
+                                                            + " messages, pressure low)"));
+                                }));
+            }
+        }
+
+        // Fallback: emit event only
+        log.warn("Manual compaction: no context manager available for session {}", sessionId);
         AgentRuntimeContext.emitSerialized(sink,
                 AgentEvent.contextCompacted(sessionId, maxTokens, maxTokens));
-        log.info("Manual compaction triggered for session {}", sessionId);
-        String compactPrompt = "The conversation context is getting large. "
-                + "Please summarize all work done so far — including what has been tried, "
-                + "what succeeded, what failed, and the current state of the task — in a "
-                + "concise summary (around 200 words). Then continue working.";
-        io.kairo.api.message.Msg compactionMsg = io.kairo.api.message.Msg.builder()
-                .role(io.kairo.api.message.MsgRole.USER)
-                .addContent(new io.kairo.api.message.Content.TextContent(compactPrompt))
-                .metadata("kairo.kind", "compaction")
-                .metadata("kairo.compaction.beforeTokens", maxTokens)
-                .metadata("kairo.compaction.maxTokens", maxTokens)
-                .build();
-        return sendMessage(sessionId, new MessageRequest(compactionMsg));
+        return Flux.just(AgentEvent.textChunk(sessionId, "Compaction not available"));
     }
 
     /**
@@ -644,6 +712,15 @@ public class AgentService implements DisposableBean, InitializingBean {
     /**
      * Interrupt the current agent execution.
      */
+    public void cancelQueue(String sessionId) {
+        SessionContext ctx = registry.get(sessionId);
+        if (ctx == null) return;
+        SessionPayload payload = ctx.entry().payload();
+        if (payload instanceof AgentSessionPayload asp) {
+            asp.clearMessageQueue();
+        }
+    }
+
     public void stopAgent(String sessionId) {
         SessionContext stopCtx = registry.get(sessionId);
         if (stopCtx == null) {
@@ -1383,8 +1460,8 @@ public class AgentService implements DisposableBean, InitializingBean {
                         null, 0, 0,
                         defaultConfig.thinkingBudget(),
                         defaultConfig.llmClassifier());
-                String sid = createSession(config, meta.workspaceId(), false, meta.mode(), null);
-                log.info("Rehydrated session {} (original={}, workspace={})", sid, meta.sessionId(), meta.workspaceId());
+                String sid = createSession(config, meta.workspaceId(), false, meta.mode(), null, meta.sessionId(), meta.createdAt());
+                log.info("Rehydrated session {} (workspace={})", sid, meta.workspaceId());
                 restored++;
             } catch (Exception e) {
                 log.warn("Failed to rehydrate session {}: {}", meta.sessionId(), e.getMessage());

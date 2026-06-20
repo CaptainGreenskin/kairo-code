@@ -205,7 +205,7 @@ function ToolRiskBadge({ toolName }: { toolName: string }) {
     const config = {
         read:    { label: 'read',    cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
         write:   { label: 'write',   cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-        execute: { label: 'execute', cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
+        execute: { label: 'execute', cls: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
         other:   { label: 'tool',    cls: 'bg-[var(--bg-secondary)] text-[var(--text-muted)] border-[var(--border)]' },
     }[level];
 
@@ -235,6 +235,14 @@ interface ResultOutputProps {
 }
 
 function ResultOutput({ toolName, result, input }: ResultOutputProps) {
+    // Empty or placeholder results — show subtle hint instead of raw text
+    if (!result || result === '(no response)' || result.trim() === '') {
+        return (
+            <div className="border-t border-[var(--border)] px-3 py-2 text-xs text-[var(--text-muted)] italic">
+                No output
+            </div>
+        );
+    }
     const [resultExpanded, setResultExpanded] = useState(false);
     const { lines: visibleLines, hiddenCount } = collapseLines(result, resultExpanded);
     const totalLines = result.split('\n').length;

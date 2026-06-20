@@ -85,6 +85,8 @@ interface SessionsState {
     appendChunkTo: (sid: string, mid: string, text: string) => void;
     addToolCallTo: (sid: string, mid: string, tc: ToolCall) => void;
     updateToolCallIn: (sid: string, mid: string, tcid: string, upd: Partial<ToolCall>) => void;
+    markLastUserQueued: (sid: string) => void;
+    clearFirstQueued: (sid: string) => void;
     setThinkingFor: (sid: string, b: boolean) => void;
     appendThinkingTextTo: (sid: string, text: string) => void;
     clearThinkingTextFor: (sid: string) => void;
@@ -301,6 +303,34 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
                         : m,
                 ),
             })),
+        ),
+
+    markLastUserQueued: (sid) =>
+        set((state) =>
+            patchSession(state, sid, (s) => {
+                const msgs = [...s.messages];
+                for (let i = msgs.length - 1; i >= 0; i--) {
+                    if (msgs[i].role === 'user' && !msgs[i].queued) {
+                        msgs[i] = { ...msgs[i], queued: true };
+                        break;
+                    }
+                }
+                return { ...s, messages: msgs };
+            }),
+        ),
+
+    clearFirstQueued: (sid) =>
+        set((state) =>
+            patchSession(state, sid, (s) => {
+                const msgs = [...s.messages];
+                for (let i = 0; i < msgs.length; i++) {
+                    if (msgs[i].role === 'user' && msgs[i].queued) {
+                        msgs[i] = { ...msgs[i], queued: false };
+                        break;
+                    }
+                }
+                return { ...s, messages: msgs };
+            }),
         ),
 
     setThinkingFor: (sid, isThinking) =>

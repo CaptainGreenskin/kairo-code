@@ -457,15 +457,24 @@ public final class CodeAgentFactory {
                         // → partial@0.98 of effective budget (context − maxOutput − 13K buffer).
                         .compactionThresholds(CompactionThresholds.DEFAULTS);
 
-        // Generic smart continuation (PendingTodoNudge + RecentToolActivity) is disabled:
-        // was causing "一直不停止" (infinite nudge loop) in web sessions.
-        // Only PendingBackgroundTaskStrategy is wired — it blocks (not nudge-loops)
-        // on the notification queue when background subagents are active.
-        if (taskDeps != null && taskDeps.subagentRegistry() != null
-                && taskDeps.notificationQueue() != null) {
+        // Continuation strategies: compose IncompleteTodo (plan/todo-aware nudge with
+        // per-session budget) + FinishReasonRecovery (MAX_TOKENS resume) +
+        // PendingBackgroundTask (block-wait on subagents). The generic RecentToolActivity
+        // strategy is deliberately excluded — it caused infinite nudge loops in web sessions.
+        {
+            var strategies = new java.util.ArrayList<io.kairo.core.agent.continuation.AgentContinuationStrategy>();
+            strategies.add(new io.kairo.core.agent.continuation.FinishReasonRecoveryStrategy(3));
+            if (config.workingDir() != null && !config.workingDir().isBlank()) {
+                strategies.add(new io.kairo.code.core.task.IncompleteTodoContinuationStrategy(
+                        Path.of(config.workingDir())));
+            }
+            if (taskDeps != null && taskDeps.subagentRegistry() != null
+                    && taskDeps.notificationQueue() != null) {
+                strategies.add(new io.kairo.code.core.task.PendingBackgroundTaskStrategy(
+                        taskDeps.subagentRegistry(), taskDeps.notificationQueue()));
+            }
             builder.continuationStrategy(
-                    new io.kairo.code.core.task.PendingBackgroundTaskStrategy(
-                            taskDeps.subagentRegistry(), taskDeps.notificationQueue()));
+                    new io.kairo.core.agent.continuation.CompositeContinuationStrategy(strategies));
         }
 
         // Bind the session workspace so file tools resolve relative paths against workingDir (not
@@ -500,6 +509,7 @@ public final class CodeAgentFactory {
         toolDeps.put(io.kairo.code.core.team.SharedTaskList.class.getName(),
                 GlobalSharedTaskList.INSTANCE);
         toolDeps.put("toolRegistry", registry);
+        toolDeps.put("toolExecutor", executor);
         if (!toolDeps.isEmpty()) {
             builder.toolDependencies(toolDeps);
         }

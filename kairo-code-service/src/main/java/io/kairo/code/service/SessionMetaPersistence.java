@@ -108,7 +108,7 @@ public class SessionMetaPersistence {
                 .filter(m -> {
                     try {
                         SessionPhase p = SessionPhase.valueOf(m.phase());
-                        return p != SessionPhase.COMPLETED && p != SessionPhase.IDLE;
+                        return p != SessionPhase.COMPLETED;
                     } catch (Exception e) {
                         return false;
                     }

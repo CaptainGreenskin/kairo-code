@@ -77,9 +77,9 @@ export function StatusBar({
                 )}
                 {currentModel && <span className="font-mono">{currentModel}</span>}
                 {evolutionReviewing && (
-                    <span className="flex items-center gap-1 text-purple-400 animate-pulse" title="Self-evolution review in progress">
+                    <span className="flex items-center gap-1 text-purple-400 animate-pulse" title="自进化回顾：分析本次对话经验，提炼可复用技能">
                         <span>🧬</span>
-                        <span>Evolving...</span>
+                        <span>经验提炼中...</span>
                     </span>
                 )}
                 {!evolutionReviewing && evolvedSkillCount != null && evolvedSkillCount > 0 && (
