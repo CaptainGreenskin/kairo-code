@@ -83,7 +83,7 @@ public class HookExecutor {
 
         CompletableFuture.runAsync(() -> {
             try {
-                Process process = new ProcessBuilder("/bin/sh", "-c", resolved)
+                Process process = new ProcessBuilder(io.kairo.core.util.ShellCommand.buildCommand(resolved))
                         .redirectErrorStream(true)
                         .start();
 

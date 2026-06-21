@@ -152,8 +152,31 @@ public final class WebSocketApprovalHandler implements UserApprovalHandler {
 
     /**
      * Cancel all pending approvals (e.g., when a session is destroyed).
+     * Plan approvals ({@code exit_plan_mode}) are preserved so the user can
+     * still approve after reconnecting — auto-rejecting a plan the user hasn't
+     * seen yet is a poor UX.
      */
     public void cancelAll() {
+        var iter = pendingApprovals.entrySet().iterator();
+        while (iter.hasNext()) {
+            var entry = iter.next();
+            String toolCallId = entry.getKey();
+            ToolCallRequest req = pendingRequests.get(toolCallId);
+            if (req != null && "exit_plan_mode".equals(req.toolName())) {
+                continue;
+            }
+            entry.getValue().tryEmitValue(ApprovalResult.denied("Session terminated"));
+            iter.remove();
+            pendingRequests.remove(toolCallId);
+        }
+        announcedToolCallIds.clear();
+    }
+
+    /**
+     * Force-cancel ALL pending approvals including plan approvals.
+     * Used only when the session is permanently destroyed (not just disconnected).
+     */
+    public void cancelAllForce() {
         pendingApprovals.forEach((id, sink) ->
                 sink.tryEmitValue(ApprovalResult.denied("Session terminated")));
         pendingApprovals.clear();

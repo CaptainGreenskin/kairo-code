@@ -946,7 +946,7 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         log.info("Destroying session {}", sessionId);
         SessionEntry entry = sctx.entry();
-        entry.approvalHandler().cancelAll();
+        entry.approvalHandler().cancelAllForce();
         sctx.progressTracker().clear();
         sctx.eventSink().tryEmitComplete();
 

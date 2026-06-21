@@ -104,6 +104,13 @@ body {
     outline-offset: 2px;
 }
 
+/* Firefox scrollbar styling */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+/* Chromium / WebKit scrollbar styling */
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;

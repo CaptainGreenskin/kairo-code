@@ -55,11 +55,11 @@ public class ShellWebSocketHandler extends AbstractWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         String workingDir = resolveWorkingDir(session);
 
-        // Allocate a PTY via /usr/bin/script. Using bash -i so it acts as an interactive shell.
-        // BSD (macOS):  script -q /dev/null bash -i
-        // Linux:        script -qfc "bash -i" /dev/null
+        // Allocate a PTY via /usr/bin/script (Unix) or cmd.exe (Windows).
         ProcessBuilder pb;
-        if (IS_MAC) {
+        if (io.kairo.core.util.ShellCommand.isWindows()) {
+            pb = new ProcessBuilder("cmd.exe");
+        } else if (IS_MAC) {
             pb = new ProcessBuilder("/usr/bin/script", "-q", "/dev/null", "/bin/bash", "-i");
         } else {
             pb = new ProcessBuilder("/usr/bin/script", "-qfc", "/bin/bash -i", "/dev/null");

@@ -1644,7 +1644,7 @@ ${content}
                                     />
                                 </>
                             )}
-                            <div className="relative flex flex-col h-full flex-1 min-w-0">
+                            <div className="relative flex flex-col flex-1 min-w-0 min-h-0">
                             {/* Multi-session tab bar (Cursor-style) — always rendered so the
                                 Sessions-panel toggle stays reachable even with no open tabs. */}
                             <ChatTabBar
@@ -1682,7 +1682,7 @@ ${content}
                                     )}
                                     <ErrorBoundary>
                                         <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
-                                        <div className="flex-1 min-w-0 min-h-0 h-full">
+                                        <div className="flex-1 min-w-0 min-h-0">
                                         <Virtuoso
                                             ref={virtuosoRef}
                                             scrollerRef={(ref) => { virtuosoScrollerRef.current = ref as HTMLElement; }}

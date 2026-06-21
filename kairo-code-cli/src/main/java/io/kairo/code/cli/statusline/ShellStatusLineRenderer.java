@@ -74,7 +74,7 @@ public final class ShellStatusLineRenderer {
 
         Process proc;
         try {
-            proc = new ProcessBuilder("/bin/sh", "-c", config.command()).redirectErrorStream(false).start();
+            proc = new ProcessBuilder(io.kairo.core.util.ShellCommand.buildCommand(config.command())).redirectErrorStream(false).start();
         } catch (IOException e) {
             log.warn("Failed to spawn status-line command '{}': {}", config.command(), e.getMessage());
             return "";

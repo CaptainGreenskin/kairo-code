@@ -108,9 +108,9 @@ public class GitController {
         Path workingDir = resolveWorkingDir(workspaceId);
         String[] cmd;
         if (untracked && !path.isBlank()) {
-            // /dev/null is portable on macOS/Linux; on Windows use NUL — we target POSIX backends only.
             // --no-index returns exit 1 on differences, which runGit treats as non-fatal.
-            cmd = new String[]{"git", "diff", "--no-index", "--", "/dev/null", path};
+            String nullDev = io.kairo.core.util.ShellCommand.nullDevice();
+            cmd = new String[]{"git", "diff", "--no-index", "--", nullDev, path};
         } else if (path.isBlank()) {
             cmd = new String[]{"git", "diff", "HEAD"};
         } else {
