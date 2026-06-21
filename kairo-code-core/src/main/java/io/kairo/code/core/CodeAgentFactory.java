@@ -270,8 +270,11 @@ public final class CodeAgentFactory {
         // and important decisions. memory_read retrieves them. This is the ChatGPT-style
         // "model decides what to remember" approach — far more accurate than regex extraction.
         registry.registerTool(io.kairo.tools.memory.MemoryReadTool.class);
+        registry.registerInstance("memory_read", new io.kairo.tools.memory.MemoryReadTool());
         registry.registerTool(io.kairo.tools.memory.MemoryWriteTool.class);
+        registry.registerInstance("memory_write", new io.kairo.tools.memory.MemoryWriteTool());
         registry.registerTool(io.kairo.tools.memory.MemoryDeleteTool.class);
+        registry.registerInstance("memory_delete", new io.kairo.tools.memory.MemoryDeleteTool());
 
         // Register the task tool when dependencies are wired.
         // Recursion depth is controlled by the spawner: child sessions get TaskTool with a
