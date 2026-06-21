@@ -18,7 +18,7 @@ import { appendTokenToWsUrl } from '@/api/auth';
 const WS_PATH = '/ws/agent';
 const SESSION_STORAGE_KEY = 'kairo-code-session-id';
 const RECONNECT_MAX_DELAY = 30_000;
-const STALLED_RUNNING_TIMEOUT_MS = 10_000;
+const STALLED_RUNNING_TIMEOUT_MS = 30_000;
 
 function buildWsUrl(): string {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -303,6 +303,13 @@ export function useAgentWebSocket(
             const expertsActive = teamStatus != null
                 && teamStatus !== 'completed' && teamStatus !== 'failed' && teamStatus !== 'timeout';
             if (expertsActive) {
+                return;
+            }
+            // Never auto-cancel during plan mode: the model can think for minutes
+            // while composing a plan, producing no events. 10s is far too short.
+            const planActive = useBuildPhaseStore.getState().phase === 'PLAN_PENDING'
+                || useBuildPhaseStore.getState().phase === 'PLANNING';
+            if (planActive) {
                 return;
             }
             console.warn('[ws] SESSION_RESTORED running=true with no activity for 10s — cancelling');
