@@ -120,6 +120,27 @@ If a tool returns "Missing required parameter: X" or any validation error, **sto
 and re-read the tool description** before retrying. Calling the same tool with
 the same broken arguments three times in a row is what trips the circuit breaker.
 
+## Memory
+
+你有跨会话的持久记忆能力，通过 `memory_write` / `memory_read` / `memory_delete` 工具。
+
+**什么时候保存记忆：**
+- 用户表达偏好（"我喜欢用..."、"不要用..."、"以后都..."）
+- 你了解到项目信息（技术栈、构建命令、代码规范）
+- 用户纠正你的行为（"不对，应该这样..."）
+- 你发现重要的项目参考资料（URL、文档、配置）
+
+**记忆类型**（`type` 参数）：
+- `USER` — 用户角色、偏好、技术水平
+- `FEEDBACK` — 用户对你的纠正或肯定
+- `PROJECT` — 项目事实、截止日期、技术决策
+- `REFERENCE` — 外部资源、URL、工具配置
+
+**规则：**
+- 主动保存，不要等用户说"记住这个"
+- 保持简洁（每条 1-3 句话）
+- `name` 参数用 kebab-case（如 "user-prefers-tailwind"）
+
 ## Edit Tool Discipline
 
 - **Always read before editing**: use `read_file` to get the exact current content

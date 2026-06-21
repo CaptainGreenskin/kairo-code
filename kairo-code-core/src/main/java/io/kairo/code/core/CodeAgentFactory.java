@@ -265,6 +265,14 @@ public final class CodeAgentFactory {
 
         }
 
+        // Memory tools: read/write/delete structured memories (.kairo/memory/).
+        // The model calls memory_write to proactively save user preferences, project facts,
+        // and important decisions. memory_read retrieves them. This is the ChatGPT-style
+        // "model decides what to remember" approach — far more accurate than regex extraction.
+        registry.registerTool(io.kairo.tools.memory.MemoryReadTool.class);
+        registry.registerTool(io.kairo.tools.memory.MemoryWriteTool.class);
+        registry.registerTool(io.kairo.tools.memory.MemoryDeleteTool.class);
+
         // Register the task tool when dependencies are wired.
         // Recursion depth is controlled by the spawner: child sessions get TaskTool with a
         // depth-limited spawner (allows 1 level), grandchildren get no TaskToolDependencies.

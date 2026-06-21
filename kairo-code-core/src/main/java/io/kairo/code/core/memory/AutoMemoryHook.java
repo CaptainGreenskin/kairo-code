@@ -72,7 +72,10 @@ public final class AutoMemoryHook {
     static final List<Pattern> PREFERENCE_PATTERNS = List.of(
             Pattern.compile("(?i)(?:i |the user )?prefer(?:s|red)?\\s+(.{10,100})"),
             Pattern.compile("(?i)(?:i |the user )?(?:always |usually )?(?:want|like|need)s?\\s+(.{10,100})"),
-            Pattern.compile("(?i)(?:the )?(?:coding style|naming convention|formatting) (?:is|should be) (.{10,100})")
+            Pattern.compile("(?i)(?:the )?(?:coding style|naming convention|formatting) (?:is|should be) (.{10,100})"),
+            Pattern.compile("(?:用户|我)(?:偏好|喜欢|习惯|倾向于)(.{5,80})"),
+            Pattern.compile("(?:项目|代码库|仓库)(?:使用|基于|依赖)(.{5,80})"),
+            Pattern.compile("(?:以后|今后|一直|总是|每次)(?:都)?(?:要|用|不要|不用)(.{5,80})")
     );
 
     /** Tags to auto-generate based on content keywords. */
