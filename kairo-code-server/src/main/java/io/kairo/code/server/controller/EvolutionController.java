@@ -33,6 +33,9 @@ public class EvolutionController {
     @Autowired(required = false)
     private io.kairo.evolution.curator.CuratorActionExecutor curatorExecutor;
 
+    @Autowired(required = false)
+    private io.kairo.evolution.EvolutionPipelineOrchestrator orchestrator;
+
     public EvolutionController(ServerProperties props) {
         this.props = props;
     }
@@ -84,6 +87,21 @@ public class EvolutionController {
                         "instructions", s.instructions() != null ? s.instructions() : ""))
                 .collectList()
                 .block();
+    }
+
+    @PostMapping("/evolved-skills/{name}/approve")
+    public ResponseEntity<?> approveSkill(@PathVariable String name) {
+        if (orchestrator == null) return ResponseEntity.badRequest().body(Map.of("error", "no orchestrator"));
+        orchestrator.approveSkill(name).block();
+        io.kairo.code.server.config.EvolutionConfig.syncSkillsToFilesystem(evolvedSkillStore);
+        return ResponseEntity.ok(Map.of("name", name, "status", "VALIDATED"));
+    }
+
+    @PostMapping("/evolved-skills/{name}/reject")
+    public ResponseEntity<?> rejectSkill(@PathVariable String name) {
+        if (orchestrator == null) return ResponseEntity.badRequest().body(Map.of("error", "no orchestrator"));
+        orchestrator.rejectSkill(name).block();
+        return ResponseEntity.ok(Map.of("name", name, "status", "REJECTED"));
     }
 
     @PostMapping("/curator/review")

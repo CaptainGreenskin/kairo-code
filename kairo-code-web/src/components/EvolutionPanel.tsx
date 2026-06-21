@@ -213,8 +213,18 @@ function LessonsTab() {
     );
 }
 
+interface EvolvedSkillEntry {
+    name: string;
+    description: string;
+    trustLevel: string;
+    category: string;
+    instructions: string;
+    version: string;
+}
+
 function SkillsTab() {
     const [skills, setSkills] = useState<SkillEntry[]>([]);
+    const [evolved, setEvolved] = useState<EvolvedSkillEntry[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -222,13 +232,34 @@ function SkillsTab() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch('/api/evolution/skills');
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            setSkills(await res.json());
+            const [skillsRes, evolvedRes] = await Promise.all([
+                fetch('/api/evolution/skills'),
+                fetch('/api/evolution/evolved-skills'),
+            ]);
+            if (skillsRes.ok) setSkills(await skillsRes.json());
+            if (evolvedRes.ok) setEvolved(await evolvedRes.json());
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to load skills');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const approveSkill = async (name: string) => {
+        try {
+            await fetch(`/api/evolution/evolved-skills/${encodeURIComponent(name)}/approve`, { method: 'POST' });
+            refresh();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to approve');
+        }
+    };
+
+    const rejectSkill = async (name: string) => {
+        try {
+            await fetch(`/api/evolution/evolved-skills/${encodeURIComponent(name)}/reject`, { method: 'POST' });
+            refresh();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to reject');
         }
     };
 
@@ -271,7 +302,54 @@ function SkillsTab() {
                 </div>
             )}
 
-            {/* Skills list */}
+            {/* Pending approval */}
+            {evolved.filter(e => e.trustLevel === 'DRAFT').length > 0 && (
+                <div className="px-4 py-2 border-b border-[var(--border)]">
+                    <div className="text-xs font-semibold text-amber-400 mb-2">
+                        Pending Approval ({evolved.filter(e => e.trustLevel === 'DRAFT').length})
+                    </div>
+                    {evolved.filter(e => e.trustLevel === 'DRAFT').map(s => (
+                        <div key={s.name} className="mb-3 p-3 rounded border border-amber-500/30 bg-amber-500/5">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-semibold text-[var(--text-primary)]">{s.name}</span>
+                                <div className="flex gap-1">
+                                    <button onClick={() => approveSkill(s.name)}
+                                        className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30">
+                                        Approve
+                                    </button>
+                                    <button onClick={() => rejectSkill(s.name)}
+                                        className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30">
+                                        Reject
+                                    </button>
+                                </div>
+                            </div>
+                            <p className="text-[11px] text-[var(--text-secondary)] mb-1">{s.description}</p>
+                            <details className="text-[10px] text-[var(--text-muted)]">
+                                <summary className="cursor-pointer">Show instructions</summary>
+                                <pre className="mt-1 p-2 rounded bg-[var(--bg-primary)] whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                    {s.instructions}
+                                </pre>
+                            </details>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Approved evolved skills */}
+            {evolved.filter(e => e.trustLevel === 'VALIDATED').length > 0 && (
+                <div className="px-4 py-2 border-b border-[var(--border)]">
+                    <div className="text-xs font-semibold text-emerald-400 mb-1">
+                        Active Evolved Skills ({evolved.filter(e => e.trustLevel === 'VALIDATED').length})
+                    </div>
+                    {evolved.filter(e => e.trustLevel === 'VALIDATED').map(s => (
+                        <div key={s.name} className="text-xs text-[var(--text-secondary)] py-1">
+                            <span className="text-[var(--text-primary)]">{s.name}</span> — {s.description}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Filesystem skills list */}
             <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]">
                 {skills.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
