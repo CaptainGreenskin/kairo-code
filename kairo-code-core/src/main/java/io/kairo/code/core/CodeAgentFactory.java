@@ -571,6 +571,13 @@ public final class CodeAgentFactory {
         // WRITE side that was previously never registered. Active in both modes.
         builder.hook(new AutoMemoryHook(options.memoryStore()));
 
+        // LLM-based memory extraction: at session end, calls the model to intelligently
+        // extract durable memories (preferences, decisions, learnings) that regex misses.
+        if (options.memoryStore() != null && options.modelProvider() != null) {
+            builder.hook(new io.kairo.code.core.memory.LlmMemoryExtractionHook(
+                    options.modelProvider(), options.memoryStore(), config.modelName()));
+        }
+
         // Auto-register the self-reflection write path: when the same tool fails 3 times in
         // a row, FailurePatternTracker fires and ReflectionPipeline asks the LLM (async, off
         // the agent thread) to distill a one-line lesson, saved as PENDING in the global
