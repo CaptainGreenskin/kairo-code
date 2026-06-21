@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings, Github, FileText, HelpCircle, Moon, Sun, Terminal, Bookmark, Clock, Download, Plug, LogOut, QrCode } from 'lucide-react';
+import { Settings, Github, HelpCircle, Moon, Sun, Terminal, Bookmark, Clock, Download, Plug, LogOut, QrCode, Zap } from 'lucide-react';
 import type { ConnectionStatus } from '@/types/agent';
 import { useAuthStore } from '@store/authStore';
 import { getAuthToken } from '@/api/auth';
@@ -9,7 +9,7 @@ interface StatusBarProps {
     connectionStatus?: ConnectionStatus;
     currentModel?: string;
     onOpenSettings: () => void;
-    onOpenMemory?: () => void;
+    onOpenHooks?: () => void;
     onOpenShortcuts?: () => void;
     onToggleTheme: () => void;
     onOpenShell?: () => void;
@@ -39,7 +39,7 @@ export function StatusBar({
     connectionStatus,
     currentModel,
     onOpenSettings,
-    onOpenMemory,
+    onOpenHooks,
     onOpenShortcuts,
     onToggleTheme,
     onOpenShell,
@@ -93,14 +93,14 @@ export function StatusBar({
                 )}
             </div>
             <div className="flex items-center gap-2">
-                {onOpenMemory && (
+                {onOpenHooks && (
                     <button
-                        onClick={onOpenMemory}
+                        onClick={onOpenHooks}
                         className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                        title="Memory (CLAUDE.md)"
-                        aria-label="Memory"
+                        title="Hook Configuration"
+                        aria-label="Hooks"
                     >
-                        <FileText size={13} />
+                        <Zap size={13} />
                     </button>
                 )}
                 {onOpenShell && (

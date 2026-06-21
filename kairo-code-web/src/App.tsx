@@ -1527,9 +1527,9 @@ ${content}
                 ) : (
                     <>
                     <ActivityBar
+                        onOpenMemory={handleOpenMemory}
                         onOpenSkills={() => setShowSkillsPanel(true)}
                         onOpenEvolution={() => setShowEvolution(true)}
-                        onOpenHooks={() => setShowHookConfig(true)}
                     />
                     {primarySidebarOpen && (
                         <>
@@ -1944,7 +1944,7 @@ ${content}
                 connectionStatus={sessionId ? connectionStatus : undefined}
                 currentModel={currentModel ?? undefined}
                 onOpenSettings={handleOpenSettings}
-                onOpenMemory={handleOpenMemory}
+                onOpenHooks={() => setShowHookConfig(true)}
                 onOpenShortcuts={handleOpenShortcuts}
                 onToggleTheme={handleToggleTheme}
                 onOpenShell={() => { if (!useLayoutStore.getState().bottomPanelOpen) toggleBottomPanel(); }}
