@@ -571,6 +571,8 @@ function App() {
         clearLastSessionId();
         useBuildPhaseStore.getState().setPhase('idle');
         useExpertTeamStore.getState().setCanvasTeamId(null);
+        // Clear file tabs from previous workspace — paths are workspace-relative
+        useOpenFilesStore.getState().closeAll?.();
         connect();
     }, [currentWorkspaceId, disconnect, connect, setSessionId, clearMessages, stopAgent]);
 
