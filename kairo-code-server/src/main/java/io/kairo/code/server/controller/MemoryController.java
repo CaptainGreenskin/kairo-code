@@ -4,17 +4,13 @@ import io.kairo.api.memory.MemoryEntry;
 import io.kairo.api.memory.MemoryScope;
 import io.kairo.api.memory.MemoryStore;
 import io.kairo.core.memory.FileMemoryStore;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Stream;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -33,9 +29,6 @@ public class MemoryController {
 
     private final MemoryStore store;
 
-    @org.springframework.beans.factory.annotation.Autowired
-    private io.kairo.code.server.config.ServerConfig.ServerProperties props;
-
     public MemoryController() {
         Path memoryDir = Path.of(System.getProperty("user.home"), ".kairo-code", "memory");
         this.store = new FileMemoryStore(memoryDir);
@@ -45,78 +38,13 @@ public class MemoryController {
     public List<Map<String, Object>> list(
             @RequestParam(defaultValue = "AGENT") String scope,
             @RequestParam(required = false) String search) {
-        List<Map<String, Object>> result = new ArrayList<>();
-
-        // Source 1: FileMemoryStore (auto-extracted JSON memories)
         MemoryScope ms = parseScope(scope);
         var flux = (search != null && !search.isBlank())
                 ? store.search(search, ms)
                 : store.list(ms);
         List<MemoryEntry> entries = flux.collectList().block();
-        if (entries != null) {
-            result.addAll(entries.stream().map(this::toMap).toList());
-        }
-
-        // Source 2: Structured .md memories (memory_write tool output)
-        result.addAll(loadStructuredMemories(search));
-
-        return result;
-    }
-
-    private List<Map<String, Object>> loadStructuredMemories(String search) {
-        String workingDir = props.workingDir();
-        if (workingDir == null) return List.of();
-        Path memDir = Path.of(workingDir, ".kairo", "memory");
-        if (!Files.isDirectory(memDir)) return List.of();
-
-        List<Map<String, Object>> result = new ArrayList<>();
-        try (Stream<Path> files = Files.list(memDir)) {
-            files.filter(p -> p.toString().endsWith(".md") && !p.getFileName().toString().equals("MEMORY.md"))
-                 .forEach(p -> {
-                     try {
-                         String content = Files.readString(p);
-                         String name = p.getFileName().toString().replace(".md", "");
-                         String body = extractBody(content);
-                         String type = extractFrontmatter(content, "type");
-                         String desc = extractFrontmatter(content, "description");
-
-                         if (search != null && !search.isBlank()) {
-                             String q = search.toLowerCase();
-                             if (!body.toLowerCase().contains(q) && !name.toLowerCase().contains(q)) return;
-                         }
-
-                         Map<String, Object> m = new LinkedHashMap<>();
-                         m.put("id", "md:" + name);
-                         m.put("content", body.isBlank() ? desc : body);
-                         m.put("scope", type != null ? type.toUpperCase() : "AGENT");
-                         m.put("importance", 0.8);
-                         m.put("tags", List.of("structured", type != null ? type : "memory"));
-                         m.put("timestamp", Files.getLastModifiedTime(p).toInstant().toString());
-                         m.put("agentId", "kairo-code");
-                         m.put("source", "memory_write");
-                         result.add(m);
-                     } catch (IOException ignored) {}
-                 });
-        } catch (IOException ignored) {}
-        return result;
-    }
-
-    private static String extractBody(String markdown) {
-        int end = markdown.indexOf("---", 3);
-        if (end < 0) return markdown;
-        return markdown.substring(end + 3).trim();
-    }
-
-    private static String extractFrontmatter(String markdown, String key) {
-        int end = markdown.indexOf("---", 3);
-        if (end < 0) return null;
-        String fm = markdown.substring(0, end);
-        for (String line : fm.split("\n")) {
-            if (line.trim().startsWith(key + ":")) {
-                return line.substring(line.indexOf(':') + 1).trim();
-            }
-        }
-        return null;
+        if (entries == null) return List.of();
+        return entries.stream().map(this::toMap).toList();
     }
 
     @GetMapping("/{id}")
