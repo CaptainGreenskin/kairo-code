@@ -89,3 +89,8 @@ kairo-code-web/pnpm-workspace.yaml
 # VitePress build output
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+
+# Frontend build output (rebuilt by CI / vite build)
+kairo-code-server/src/main/resources/static/assets/
+kairo-code-server/src/main/resources/static/index.html
+
