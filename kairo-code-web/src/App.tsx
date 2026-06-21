@@ -44,7 +44,7 @@ import { SkillsPanel } from '@components/SkillsPanel';
 import { ErrorBoundary } from '@components/ErrorBoundary';
 import { ToastContainer, type ToastMessage } from '@components/Toast';
 import type { Command } from '@components/CommandPalette';
-import { MemoryEditorPanel } from '@components/MemoryEditorPanel';
+import { MemoryPanel } from '@components/MemoryPanel';
 import { PromptTemplatesPanel } from '@components/PromptTemplatesPanel';
 import { GitStatusPanel } from '@components/GitStatusPanel';
 import { McpServersPanel } from '@components/McpServersPanel';
@@ -1990,9 +1990,8 @@ ${content}
 
             <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-            {showMemoryEditor && currentWorkspace && (
-                <MemoryEditorPanel
-                    workingDir={currentWorkspace.workingDir}
+            {showMemoryEditor && (
+                <MemoryPanel
                     onClose={() => setShowMemoryEditor(false)}
                 />
             )}
