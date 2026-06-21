@@ -89,6 +89,32 @@ public class ConfigController {
      * and could rate-limit real chat. Use this for liveness + readiness probes; use
      * {@code /actuator/health} for the lower-level "JVM up?" check.
      */
+    @GetMapping("/server-info")
+    public Map<String, Object> serverInfo(jakarta.servlet.http.HttpServletRequest request) {
+        java.util.List<String> ips = new java.util.ArrayList<>();
+        try {
+            var interfaces = java.net.NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                var iface = interfaces.nextElement();
+                if (iface.isLoopback() || !iface.isUp()) continue;
+                var addrs = iface.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    var addr = addrs.nextElement();
+                    if (addr instanceof java.net.Inet4Address) {
+                        ips.add(addr.getHostAddress());
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        int port = request.getServerPort();
+        String lanUrl = ips.isEmpty() ? null : "http://" + ips.get(0) + ":" + port;
+        return Map.of(
+                "lanIps", ips,
+                "port", port,
+                "lanUrl", lanUrl != null ? lanUrl : "",
+                "hostname", java.net.InetAddress.getLoopbackAddress().getHostName());
+    }
+
     @GetMapping("/healthz")
     public ResponseEntity<HealthResponse> healthz() {
         boolean apiKeySet = serverProperties.apiKey() != null && !serverProperties.apiKey().isBlank();

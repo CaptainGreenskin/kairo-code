@@ -11,6 +11,7 @@ export function LoginPage() {
     const [requiresInvite, setRequiresInvite] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [showQr, setShowQr] = useState(false);
+    const [lanUrl, setLanUrl] = useState('');
 
     const { login, register, error } = useAuthStore();
 
@@ -20,6 +21,12 @@ export function LoginPage() {
             .then(data => {
                 setRequiresInvite(data.requiresInviteCode ?? false);
                 if (!data.hasUsers) setTab('register');
+            })
+            .catch(() => {});
+        fetch('/api/server-info')
+            .then(r => r.json())
+            .then(data => {
+                if (data.lanUrl) setLanUrl(data.lanUrl);
             })
             .catch(() => {});
     }, []);
@@ -42,7 +49,7 @@ export function LoginPage() {
         setSubmitting(false);
     };
 
-    const currentUrl = window.location.origin;
+    const qrUrl = lanUrl || window.location.origin;
 
     return (
         <div className="h-screen w-screen flex items-center justify-center"
@@ -165,10 +172,10 @@ export function LoginPage() {
                     {showQr && (
                         <div className="mt-3 flex flex-col items-center gap-2">
                             <div className="p-3 rounded-lg" style={{ background: '#fff' }}>
-                                <QRCodeSVG value={currentUrl} size={160} />
+                                <QRCodeSVG value={qrUrl} size={160} />
                             </div>
                             <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
-                                {currentUrl}
+                                {qrUrl}
                             </span>
                         </div>
                     )}
