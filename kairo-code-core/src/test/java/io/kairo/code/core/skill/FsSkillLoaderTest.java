@@ -143,6 +143,67 @@ class FsSkillLoaderTest {
     }
 
     @Test
+    void loadAll_parsesBundleDirectoryWithSkillMd() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+        Path bundleDir = Files.createDirectory(globalDir.resolve("mt5-bundle"));
+        Files.createDirectory(bundleDir.resolve("scripts"));
+        writeFile(bundleDir, "SKILL.md", """
+                ---
+                name: mt5-bundle
+                description: A skill in bundle form
+                ---
+
+                # MT5 Bundle
+
+                Body inside SKILL.md.
+                """);
+        Files.writeString(bundleDir.resolve("scripts").resolve("helper.py"), "# helper");
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, null);
+        List<SkillWithSource> result = loader.loadAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).skill().name()).isEqualTo("mt5-bundle");
+        assertThat(result.get(0).skill().description()).isEqualTo("Body inside SKILL.md.");
+        assertThat(result.get(0).priority()).isEqualTo(SkillPriority.USER);
+    }
+
+    @Test
+    void loadAll_bundleAndFlatCoexist() throws Exception {
+        Path globalDir = Files.createDirectory(tempDir.resolve("global"));
+
+        Path bundleDir = Files.createDirectory(globalDir.resolve("bundle-one"));
+        writeFile(bundleDir, "SKILL.md", """
+                ---
+                name: bundle-one
+                description: Bundle skill
+                ---
+
+                # Bundle One
+                """);
+
+        writeFile(globalDir, "flat-one.md", """
+                ---
+                name: flat-one
+                description: Flat skill
+                ---
+
+                # Flat One
+                """);
+
+        FsSkillLoader loader = new FsSkillLoader(globalDir, null);
+        List<SkillWithSource> result = loader.loadAll();
+
+        assertThat(result).hasSize(2);
+        Map<String, SkillPriority> byName = new java.util.LinkedHashMap<>();
+        for (SkillWithSource ws : result) {
+            byName.put(ws.skill().name(), ws.priority());
+        }
+        assertThat(byName).containsEntry("bundle-one", SkillPriority.USER);
+        assertThat(byName).containsEntry("flat-one", SkillPriority.USER);
+    }
+
+    @Test
     void loadAll_ignoresNonMdFiles() throws Exception {
         Path globalDir = Files.createDirectory(tempDir.resolve("global"));
         Files.writeString(globalDir.resolve("notes.txt"), "Not a skill");

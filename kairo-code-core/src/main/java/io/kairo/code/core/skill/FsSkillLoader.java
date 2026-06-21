@@ -17,9 +17,10 @@ import org.slf4j.LoggerFactory;
 /**
  * Loads skills from filesystem directories with 6-level priority support.
  *
- * <p>Scans {@code *.md} files in order of ascending priority so that higher-priority
- * skills override lower-priority ones by name. Current active levels (lowest first):
- * USER ({@code ~/.kairo-code/skills/}), MANAGED ({@code ~/.kairo-code/skills/managed/}),
+ * <p>Scans {@code *.md} files (flat form) and {@code <name>/SKILL.md} subdirectories (bundle form,
+ * which may also contain {@code scripts/}, {@code references/}, etc.) in order of ascending priority
+ * so that higher-priority skills override lower-priority ones by name. Current active levels
+ * (lowest first): USER ({@code ~/.kairo-code/skills/}), MANAGED ({@code ~/.kairo-code/skills/managed/}),
  * PROJECT ({@code <workingDir>/.kairo-code/skills/}).
  *
  * <p>Reserved levels (not yet loaded): MCP, BUNDLED, PLUGIN.
@@ -114,10 +115,25 @@ public class FsSkillLoader {
     private void loadDir(Path dir, SkillPriority priority,
                          Map<String, SkillWithSource> out, boolean skipManaged) {
         try (var stream = Files.list(dir)) {
-            stream.filter(p -> skipManaged ? !p.getFileName().toString().equals("managed") : true)
-                    .filter(Files::isRegularFile)
-                    .filter(p -> p.toString().endsWith(".md"))
-                    .forEach(p -> parseAndRegister(p, priority, out));
+            stream.forEach(p -> {
+                String fileName = p.getFileName().toString();
+                // USER-level scan skips the reserved managed/ subdir — it is loaded
+                // separately under MANAGED priority.
+                if (skipManaged && fileName.equals("managed")) {
+                    return;
+                }
+                if (Files.isRegularFile(p) && fileName.endsWith(".md")) {
+                    parseAndRegister(p, priority, out);
+                    return;
+                }
+                // Bundle form: <dir>/<bundle-name>/SKILL.md (with optional scripts/, references/)
+                if (Files.isDirectory(p)) {
+                    Path skillMd = p.resolve("SKILL.md");
+                    if (Files.isRegularFile(skillMd)) {
+                        parseAndRegister(skillMd, priority, out);
+                    }
+                }
+            });
         } catch (IOException e) {
             log.warn("Failed to scan skills directory {}: {}", dir, e.getMessage());
         }
