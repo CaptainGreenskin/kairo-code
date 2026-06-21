@@ -18,7 +18,6 @@ import '@codingame/monaco-vscode-css-default-extension';
 import '@codingame/monaco-vscode-yaml-default-extension';
 
 import { initialize } from '@codingame/monaco-vscode-api';
-import getModelServiceOverride from '@codingame/monaco-vscode-model-service-override';
 import getConfigurationServiceOverride from '@codingame/monaco-vscode-configuration-service-override';
 import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-override';
 import getTextmateServiceOverride from '@codingame/monaco-vscode-textmate-service-override';
@@ -64,8 +63,10 @@ let initPromise: Promise<void> | null = null;
 
 export function initMonaco(): Promise<void> {
     if (initPromise) return initPromise;
+    // NOTE: getModelServiceOverride() intentionally omitted — it takes ownership
+    // of model lifecycle and can externally dispose models (causing blank editors).
+    // Plain Monaco model management is sufficient for FileEditorPanel.
     initPromise = initialize({
-        ...getModelServiceOverride(),
         ...getConfigurationServiceOverride(),
         ...getThemeServiceOverride(),
         ...getTextmateServiceOverride(),

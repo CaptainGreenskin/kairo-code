@@ -153,13 +153,15 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
     const modelRef = useRef<monaco.editor.ITextModel | null>(null);
 
     // Mount editor when container is ready and content has loaded.
+    const [editorGeneration, setEditorGeneration] = useState(0);
     useEffect(() => {
         if (loading || binary || oversize) return;
         if (isMarkdown && viewMode === 'preview') return;
         if (!editorContainerRef.current) return;
-        if (editorRef.current) return;  // already mounted
+        if (editorRef.current) return;
 
-        const model = monaco.editor.createModel(content, language);
+        const lang = language || 'plaintext';
+        const model = monaco.editor.createModel(content, lang);
         modelRef.current = model;
 
         const editor = monaco.editor.create(editorContainerRef.current, {
@@ -177,6 +179,18 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
             setContent(model.getValue());
         });
 
+        // Guard against external model disposal (e.g. by monaco-vscode-api model service).
+        // When the model is disposed externally, the editor goes blank. Detect this and
+        // trigger a re-creation by bumping a generation counter.
+        const watchdog = setInterval(() => {
+            if (modelRef.current && modelRef.current.isDisposed()) {
+                clearInterval(watchdog);
+                editorRef.current = null;
+                modelRef.current = null;
+                setEditorGeneration(g => g + 1);
+            }
+        }, 500);
+
         // ⌘S / Ctrl+S → save
         editor.addCommand(
             monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
@@ -189,6 +203,7 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
         }
 
         return () => {
+            clearInterval(watchdog);
             sub.dispose();
             editor.dispose();
             model.dispose();
@@ -198,7 +213,7 @@ export function FileEditorPanel({ path, onClose, onSaved, workspaceId, gotoLine,
         // Only depend on loading/binary/oversize/viewMode/language transitions that
         // require a remount. `content` changes are pushed via model.setValue below.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [loading, binary, oversize, isMarkdown, viewMode, language]);
+    }, [loading, binary, oversize, isMarkdown, viewMode, language, editorGeneration]);
 
     // Sync Monaco theme with system dark/light mode.
     useEffect(() => {
