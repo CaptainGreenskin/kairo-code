@@ -264,7 +264,7 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
     };
 
     return (
-        <div className="flex justify-start mb-4 animate-slide-up group">
+        <div className="flex justify-start mb-4 animate-slide-up group" style={isStreaming ? { contain: 'content' } : undefined}>
             <div className="w-full">
                 <div className={`relative pl-4 pr-3 py-3 rounded-lg border-l-[3px] border-l-[var(--accent)] bg-gradient-to-r from-[var(--accent)]/[0.03] to-transparent ${searchHighlight ? 'ring-1 ring-[var(--accent)]/40' : ''} ${isCurrentMatch ? 'ring-2 ring-[var(--accent)]' : ''}`}>
                     {/* Prefer message.thinking (from AGENT_THINKING events) over <think> blocks

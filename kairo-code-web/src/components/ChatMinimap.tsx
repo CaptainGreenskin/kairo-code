@@ -66,15 +66,28 @@ export function ChatMinimap({ messages, scrollerRef, onScrollToIndex }: ChatMini
         };
     }, [dragging, scrollerRef]);
 
+    // Throttle minimap updates to avoid re-rendering on every streaming chunk.
+    // On Windows, sub-pixel rendering at 7-8px font sizes causes visual corruption
+    // when the minimap re-renders too frequently.
+    const [throttledMessages, setThrottledMessages] = useState(messages);
+    const throttleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        if (throttleRef.current) clearTimeout(throttleRef.current);
+        throttleRef.current = setTimeout(() => {
+            setThrottledMessages(messages);
+        }, 500);
+        return () => { if (throttleRef.current) clearTimeout(throttleRef.current); };
+    }, [messages]);
+
     const items = useMemo(() => {
-        return messages.map((msg, i) => {
+        return throttledMessages.map((msg, i) => {
             const isUser = msg.role === 'user';
             const isError = msg.role === 'error';
             const preview = (msg.content ?? '').replace(/\n/g, ' ').slice(0, 12);
             const toolCount = msg.toolCalls?.length ?? 0;
             return { index: i, isUser, isError, preview, toolCount };
         });
-    }, [messages]);
+    }, [throttledMessages]);
 
     if (messages.length < 5) return null;
 
