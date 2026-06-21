@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kairo.api.hook.PostActing;
 import io.kairo.api.hook.PostActingEvent;
 import io.kairo.api.hook.PreCompleteEvent;
+import io.kairo.api.tool.ToolOutput;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,9 +44,9 @@ public class SessionObserverHook {
     public void onPostActing(PostActingEvent event) {
         String toolName = event.toolName();
         boolean success = event.result() != null && !event.result().isError();
-        String inputSummary = event.result() != null ? truncateStr(event.result().output(), MAX_INPUT_SUMMARY_CHARS) : "";
+        String inputSummary = event.result() != null ? truncateStr(outputAsText(event.result().output()), MAX_INPUT_SUMMARY_CHARS) : "";
         String errorMsg = (event.result() != null && event.result().isError())
-                ? event.result().output() : null;
+                ? outputAsText(event.result().output()) : null;
 
         ToolObservation obs = success
                 ? ToolObservation.success(toolName, inputSummary)
@@ -79,6 +80,16 @@ public class SessionObserverHook {
     private static String truncateStr(String s, int max) {
         if (s == null) return "";
         return s.length() > max ? s.substring(0, max) + "..." : s;
+    }
+
+    private static String outputAsText(ToolOutput output) {
+        if (output == null) return "";
+        return switch (output) {
+            case ToolOutput.Text t -> t.content();
+            case ToolOutput.Truncated t -> t.visible();
+            case ToolOutput.Structured s -> s.data().toString();
+            case ToolOutput.Binary b -> "[binary:" + b.mime() + "]";
+        };
     }
 
     private void persistObservation(ToolObservation obs) {
