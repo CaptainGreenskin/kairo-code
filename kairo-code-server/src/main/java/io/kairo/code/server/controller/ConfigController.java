@@ -274,13 +274,39 @@ public class ConfigController {
             @RequestParam String q,
             @RequestParam(defaultValue = "") String path,
             @RequestParam(defaultValue = "50") int limit,
-            @RequestParam(required = false) String workspaceId
+            @RequestParam(required = false) String workspaceId,
+            @RequestParam(defaultValue = "false") boolean regex,
+            @RequestParam(defaultValue = "false") boolean caseSensitive,
+            @RequestParam(defaultValue = "") String include,
+            @RequestParam(defaultValue = "") String exclude,
+            @RequestParam(defaultValue = "0") int contextLines
     ) {
         if (q == null || q.length() < 2) {
             return new SearchResponse(q != null ? q : "", List.of(), false);
         }
 
         int cappedLimit = Math.min(Math.max(limit, 1), HARD_LIMIT);
+        int cappedContext = Math.min(Math.max(contextLines, 0), 5);
+
+        java.util.regex.Pattern pattern;
+        if (regex) {
+            try {
+                int flags = caseSensitive ? 0 : java.util.regex.Pattern.CASE_INSENSITIVE;
+                pattern = java.util.regex.Pattern.compile(q, flags);
+            } catch (java.util.regex.PatternSyntaxException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid regex: " + e.getMessage());
+            }
+        } else {
+            String escaped = java.util.regex.Pattern.quote(q);
+            int flags = caseSensitive ? 0 : java.util.regex.Pattern.CASE_INSENSITIVE;
+            pattern = java.util.regex.Pattern.compile(escaped, flags);
+        }
+
+        java.nio.file.FileSystem fileSystem = java.nio.file.FileSystems.getDefault();
+        java.nio.file.PathMatcher includeMatcher = include.isBlank() ? null
+                : fileSystem.getPathMatcher("glob:" + include);
+        java.nio.file.PathMatcher excludeMatcher = exclude.isBlank() ? null
+                : fileSystem.getPathMatcher("glob:" + exclude);
 
         Path wd = workingDir(workspaceId);
         Path base = wd;
@@ -300,17 +326,21 @@ public class ConfigController {
 
         try (Stream<Path> stream = Files.walk(base, Integer.MAX_VALUE)) {
             stream
+                    .filter(p -> fileCount.incrementAndGet() <= MAX_FILES_WALK)
                     .filter(p -> {
-                        // Cap total files walked
-                        return fileCount.incrementAndGet() <= MAX_FILES_WALK;
-                    })
-                    .filter(p -> {
-                        // Skip noise directories
                         Path relative = wd.relativize(p);
-                        String first = relative.getNameCount() > 0 ? relative.getName(0).toString() : "";
-                        return !SKIP_DIRS.contains(first);
+                        for (int i = 0; i < relative.getNameCount(); i++) {
+                            if (SKIP_DIRS.contains(relative.getName(i).toString())) return false;
+                        }
+                        return true;
                     })
                     .filter(Files::isRegularFile)
+                    .filter(p -> {
+                        Path fileName = p.getFileName();
+                        if (includeMatcher != null && !includeMatcher.matches(fileName)) return false;
+                        if (excludeMatcher != null && excludeMatcher.matches(fileName)) return false;
+                        return true;
+                    })
                     .filter(p -> !isBinary(p))
                     .forEach(p -> {
                         if (results.size() >= cappedLimit) {
@@ -318,7 +348,7 @@ public class ConfigController {
                             return;
                         }
                         String relative = wd.relativize(p).toString();
-                        searchInFile(p, relative, q.toLowerCase(), results, cappedLimit, hasMore);
+                        searchInFile(p, relative, pattern, results, cappedLimit, hasMore, cappedContext);
                     });
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to search files", e);
@@ -327,23 +357,77 @@ public class ConfigController {
         return new SearchResponse(q, results, hasMore.get());
     }
 
-    private void searchInFile(Path file, String relativePath, String queryLower,
-                              List<SearchMatch> results, int limit, AtomicBoolean hasMore) {
-        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            String line;
-            int lineNum = 0;
-            while ((line = reader.readLine()) != null) {
-                lineNum++;
+    @GetMapping("/search/files")
+    public List<String> searchFileNames(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(required = false) String workspaceId
+    ) {
+        if (q == null || q.isBlank()) return List.of();
+        String queryLower = q.toLowerCase();
+        Path wd = workingDir(workspaceId);
+        List<String> results = new ArrayList<>();
+        AtomicInteger fileCount = new AtomicInteger(0);
+
+        try (Stream<Path> stream = Files.walk(wd, Integer.MAX_VALUE)) {
+            stream
+                    .filter(p -> fileCount.incrementAndGet() <= MAX_FILES_WALK)
+                    .filter(p -> {
+                        Path relative = wd.relativize(p);
+                        for (int i = 0; i < relative.getNameCount(); i++) {
+                            if (SKIP_DIRS.contains(relative.getName(i).toString())) return false;
+                        }
+                        return true;
+                    })
+                    .filter(Files::isRegularFile)
+                    .forEach(p -> {
+                        String relative = wd.relativize(p).toString();
+                        if (fuzzyMatch(relative.toLowerCase(), queryLower)) {
+                            results.add(relative);
+                        }
+                    });
+        } catch (IOException e) {
+            // Return partial results
+        }
+
+        results.sort(java.util.Comparator.comparingInt(String::length));
+        return results.subList(0, Math.min(results.size(), limit));
+    }
+
+    private static boolean fuzzyMatch(String text, String query) {
+        int qi = 0;
+        for (int ti = 0; ti < text.length() && qi < query.length(); ti++) {
+            if (text.charAt(ti) == query.charAt(qi)) qi++;
+        }
+        return qi == query.length();
+    }
+
+    private void searchInFile(Path file, String relativePath, java.util.regex.Pattern pattern,
+                              List<SearchMatch> results, int limit, AtomicBoolean hasMore,
+                              int contextLines) {
+        try {
+            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+            for (int i = 0; i < lines.size(); i++) {
                 if (results.size() >= limit) {
                     hasMore.set(true);
                     break;
                 }
-                if (line.toLowerCase().contains(queryLower)) {
-                    String preview = line.trim();
+                if (pattern.matcher(lines.get(i)).find()) {
+                    String preview = lines.get(i).trim();
                     if (preview.length() > MAX_PREVIEW_LENGTH) {
                         preview = preview.substring(0, MAX_PREVIEW_LENGTH);
                     }
-                    results.add(new SearchMatch(relativePath, lineNum, preview));
+                    List<String> before = List.of();
+                    List<String> after = List.of();
+                    if (contextLines > 0) {
+                        int fromBefore = Math.max(0, i - contextLines);
+                        int toAfter = Math.min(lines.size(), i + contextLines + 1);
+                        before = lines.subList(fromBefore, i).stream().map(String::trim).toList();
+                        after = (i + 1 < toAfter)
+                                ? lines.subList(i + 1, toAfter).stream().map(String::trim).toList()
+                                : List.of();
+                    }
+                    results.add(new SearchMatch(relativePath, i + 1, preview, before, after));
                 }
             }
         } catch (MalformedInputException e) {

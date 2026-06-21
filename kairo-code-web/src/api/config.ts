@@ -82,15 +82,51 @@ export interface SearchMatch {
     file: string;
     line: number;
     preview: string;
+    beforeContext?: string[];
+    afterContext?: string[];
 }
 
-export async function searchFiles(q: string, path?: string, limit?: number, workspaceId?: string): Promise<SearchResponse> {
+export interface SearchOptions {
+    q: string;
+    path?: string;
+    limit?: number;
+    workspaceId?: string;
+    regex?: boolean;
+    caseSensitive?: boolean;
+    include?: string;
+    exclude?: string;
+    contextLines?: number;
+}
+
+export async function searchFiles(opts: SearchOptions): Promise<SearchResponse>;
+export async function searchFiles(q: string, path?: string, limit?: number, workspaceId?: string): Promise<SearchResponse>;
+export async function searchFiles(qOrOpts: string | SearchOptions, path?: string, limit?: number, workspaceId?: string): Promise<SearchResponse> {
+    const params = new URLSearchParams();
+    if (typeof qOrOpts === 'string') {
+        params.set('q', qOrOpts);
+        if (path) params.set('path', path);
+        if (limit) params.set('limit', String(limit));
+        if (workspaceId) params.set('workspaceId', workspaceId);
+    } else {
+        params.set('q', qOrOpts.q);
+        if (qOrOpts.path) params.set('path', qOrOpts.path);
+        if (qOrOpts.limit) params.set('limit', String(qOrOpts.limit));
+        if (qOrOpts.workspaceId) params.set('workspaceId', qOrOpts.workspaceId);
+        if (qOrOpts.regex) params.set('regex', 'true');
+        if (qOrOpts.caseSensitive) params.set('caseSensitive', 'true');
+        if (qOrOpts.include) params.set('include', qOrOpts.include);
+        if (qOrOpts.exclude) params.set('exclude', qOrOpts.exclude);
+        if (qOrOpts.contextLines) params.set('contextLines', String(qOrOpts.contextLines));
+    }
+    return request<SearchResponse>(`/search?${params}`);
+}
+
+export async function searchFileNames(q: string, limit?: number, workspaceId?: string): Promise<string[]> {
     const params = new URLSearchParams();
     params.set('q', q);
-    if (path) params.set('path', path);
     if (limit) params.set('limit', String(limit));
     if (workspaceId) params.set('workspaceId', workspaceId);
-    return request<SearchResponse>(`/search?${params}`);
+    return request<string[]>(`/search/files?${params}`);
 }
 
 export interface DirEntry {

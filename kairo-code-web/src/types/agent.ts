@@ -372,6 +372,8 @@ export interface SearchMatch {
     file: string;
     line: number;
     preview: string;
+    beforeContext?: string[];
+    afterContext?: string[];
 }
 
 export interface SearchResponse {
