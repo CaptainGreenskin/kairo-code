@@ -573,9 +573,9 @@ public final class CodeAgentFactory {
 
         // LLM-based memory extraction: at session end, calls the model to intelligently
         // extract durable memories (preferences, decisions, learnings) that regex misses.
-        if (options.memoryStore() != null && options.modelProvider() != null) {
+        if (options.memoryStore() != null) {
             builder.hook(new io.kairo.code.core.memory.LlmMemoryExtractionHook(
-                    options.modelProvider(), options.memoryStore(), config.modelName()));
+                    modelProvider, options.memoryStore(), config.modelName()));
         }
 
         // Auto-register the self-reflection write path: when the same tool fails 3 times in
