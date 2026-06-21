@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Settings, Github, FileText, HelpCircle, Moon, Sun, Terminal, Bookmark, Clock, Download, Plug, LogOut } from 'lucide-react';
+import { Settings, Github, FileText, HelpCircle, Moon, Sun, Terminal, Bookmark, Clock, Download, Plug, LogOut, QrCode } from 'lucide-react';
 import type { ConnectionStatus } from '@/types/agent';
 import { useAuthStore } from '@store/authStore';
+import { getAuthToken } from '@/api/auth';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface StatusBarProps {
     connectionStatus?: ConnectionStatus;
@@ -135,14 +137,17 @@ export function StatusBar({
                     <Settings size={13} />
                 </button>
                 {useAuthStore.getState().isAuthenticated && (
-                    <button
-                        onClick={() => useAuthStore.getState().logout()}
-                        className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                        title={`Logout (${useAuthStore.getState().user?.username ?? ''})`}
-                        aria-label="Logout"
-                    >
-                        <LogOut size={13} />
-                    </button>
+                    <>
+                        <ShareQrButton />
+                        <button
+                            onClick={() => useAuthStore.getState().logout()}
+                            className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                            title={`Logout (${useAuthStore.getState().user?.username ?? ''})`}
+                            aria-label="Logout"
+                        >
+                            <LogOut size={13} />
+                        </button>
+                    </>
                 )}
                 <a
                     href="https://github.com/CaptainGreenskin/kairo-code"
@@ -174,5 +179,56 @@ export function StatusBar({
                 )}
             </div>
         </footer>
+    );
+}
+
+function ShareQrButton() {
+    const [show, setShow] = useState(false);
+    const [qrUrl, setQrUrl] = useState('');
+
+    const handleClick = async () => {
+        if (show) { setShow(false); return; }
+        const token = getAuthToken();
+        try {
+            const res = await fetch('/api/server-info');
+            const info = await res.json();
+            const base = info.lanUrl || window.location.origin;
+            setQrUrl(token ? `${base}?token=${token}` : base);
+        } catch {
+            setQrUrl(`${window.location.origin}?token=${token}`);
+        }
+        setShow(true);
+    };
+
+    return (
+        <>
+            <button
+                onClick={handleClick}
+                className="p-1 rounded hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                title="Share to mobile (QR code)"
+                aria-label="Share QR"
+            >
+                <QrCode size={13} />
+            </button>
+            {show && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center"
+                     style={{ background: 'rgba(0,0,0,0.5)' }}
+                     onClick={() => setShow(false)}>
+                    <div className="p-6 rounded-lg text-center"
+                         style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
+                         onClick={e => e.stopPropagation()}>
+                        <p className="text-sm font-medium mb-3" style={{ color: 'var(--text-primary)' }}>
+                            Scan to access on mobile
+                        </p>
+                        <div className="p-3 rounded-lg inline-block" style={{ background: '#fff' }}>
+                            <QRCodeSVG value={qrUrl} size={180} />
+                        </div>
+                        <p className="text-[10px] mt-2" style={{ color: 'var(--text-secondary)' }}>
+                            Auto-login · no password needed
+                        </p>
+                    </div>
+                </div>
+            )}
+        </>
     );
 }

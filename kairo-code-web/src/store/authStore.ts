@@ -101,7 +101,15 @@ export const useAuthStore = create<AuthState>()((set) => ({
     },
 
     checkAuth: async () => {
-        const token = getAuthToken();
+        // Auto-login from URL token (QR code scan with embedded JWT)
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlToken = urlParams.get('token');
+        if (urlToken) {
+            setAuthToken(urlToken);
+            window.history.replaceState({}, '', window.location.pathname);
+        }
+
+        const token = urlToken || getAuthToken();
         if (!token) {
             set({ isAuthenticated: false, isLoading: false });
             return;
