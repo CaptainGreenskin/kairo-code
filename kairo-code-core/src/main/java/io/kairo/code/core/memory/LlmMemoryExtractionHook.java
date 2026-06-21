@@ -159,13 +159,10 @@ public class LlmMemoryExtractionHook {
         List<ExtractedMemory> extracted = parseMemoryBlocks(responseText);
         for (ExtractedMemory mem : extracted) {
             try {
-                MemoryEntry entry = MemoryEntry.agent(
-                        "llm-" + mem.name,
-                        agentId,
-                        mem.name + ": " + mem.content,
-                        Set.of("llm-extracted", mem.type));
+                MemoryEntry entry = buildEntry(mem);
                 memoryStore.save(entry).block(java.time.Duration.ofSeconds(5));
-                log.info("LLM extracted memory: {} ({})", mem.name, mem.type);
+                log.info("LLM extracted memory: {} ({}) → scope={}", mem.name, mem.type,
+                        entry.scope());
             } catch (Exception e) {
                 log.warn("Failed to save extracted memory '{}': {}", mem.name, e.getMessage());
             }
@@ -174,9 +171,13 @@ public class LlmMemoryExtractionHook {
 
     private String loadExistingMemoryManifest() {
         try {
-            var entries = memoryStore.list(MemoryScope.AGENT)
-                    .collectList()
-                    .block(java.time.Duration.ofSeconds(3));
+            var agentEntries = memoryStore.list(MemoryScope.AGENT)
+                    .collectList().block(java.time.Duration.ofSeconds(3));
+            var globalEntries = memoryStore.list(MemoryScope.GLOBAL)
+                    .collectList().block(java.time.Duration.ofSeconds(3));
+            var entries = new ArrayList<MemoryEntry>();
+            if (agentEntries != null) entries.addAll(agentEntries);
+            if (globalEntries != null) entries.addAll(globalEntries);
             if (entries == null || entries.isEmpty()) return "";
             StringBuilder sb = new StringBuilder();
             for (var entry : entries.subList(0, Math.min(20, entries.size()))) {
@@ -187,6 +188,29 @@ public class LlmMemoryExtractionHook {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /**
+     * Build a MemoryEntry with scope determined by memory type:
+     * - user/feedback/reference → GLOBAL (personal preferences, cross-project)
+     * - project → AGENT (workspace-specific context)
+     */
+    private MemoryEntry buildEntry(ExtractedMemory mem) {
+        String content = mem.name + ": " + mem.content;
+        Set<String> tags = Set.of("llm-extracted", mem.type);
+        MemoryScope scope = switch (mem.type) {
+            case "user", "feedback", "reference" -> MemoryScope.GLOBAL;
+            default -> MemoryScope.AGENT;
+        };
+        double importance = switch (mem.type) {
+            case "user" -> 0.9;
+            case "feedback" -> 0.85;
+            case "reference" -> 0.7;
+            default -> 0.75;
+        };
+        return new MemoryEntry(
+                "llm-" + mem.name, agentId, content, null,
+                scope, importance, null, tags, Instant.now(), Map.of());
     }
 
     private String buildConversationSummary(List<Msg> history) {
