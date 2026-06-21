@@ -1455,13 +1455,18 @@ public class AgentService implements DisposableBean, InitializingBean {
         registry.setDestroyCallback(this::destroySession);
         registry.startReaper();
         sessionIndexService.migrateIfAbsent();
-        // Delay rehydrate by 5s to let Spring finish wiring all beans (defaultConfig
-        // is set by ServerConfig @Bean which may not be ready during afterPropertiesSet).
+        // Wait for defaultConfig to be set by ServerConfig @Bean before rehydrating.
+        // Fixed delay was unreliable; poll every 1s up to 30s.
         java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "kairo-session-rehydrate");
             t.setDaemon(true);
             return t;
-        }).schedule(this::rehydrateSessions, 5, java.util.concurrent.TimeUnit.SECONDS);
+        }).schedule(() -> {
+            for (int i = 0; i < 30 && defaultConfig == null; i++) {
+                try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            }
+            rehydrateSessions();
+        }, 1, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     private void rehydrateSessions() {
