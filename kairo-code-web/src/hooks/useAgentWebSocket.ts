@@ -308,7 +308,7 @@ export function useAgentWebSocket(
             // Never auto-cancel during plan mode: the model can think for minutes
             // while composing a plan, producing no events. 10s is far too short.
             const planActive = useBuildPhaseStore.getState().phase === 'PLAN_PENDING'
-                || useBuildPhaseStore.getState().phase === 'PLANNING';
+                || useBuildPhaseStore.getState().phase === 'EXECUTING';
             if (planActive) {
                 return;
             }

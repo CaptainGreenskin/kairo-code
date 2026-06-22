@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Loader2, FileText, AtSign, ChevronRight, ChevronDown, CaseSensitive, Regex, WholeWord } from 'lucide-react';
+import { X, Loader2, FileText, ChevronRight, ChevronDown, CaseSensitive, Regex, WholeWord } from 'lucide-react';
 import { searchFiles, searchFileNames, searchSymbols, getFileContent } from '@api/config';
 import type { SymbolResult } from '@api/config';
 import type { SearchMatch, SearchResponse } from '@/types/agent';
