@@ -11,6 +11,33 @@
 const streamingChunks: Map<string, string> = new Map()
 const subscribers: Set<() => void> = new Set()
 
+// Throttle subscriber notifications to one per ~50ms window.
+// TEXT_CHUNK events arrive dozens of times per second; notifying per-chunk
+// makes ChatMessage re-render per-token, which drives Virtuoso's internal
+// ResizeObserver into a re-measurement storm — the transient 0-height
+// measurement during React's commit phase surfaces as the
+// "Zero-sized element {child: div}" warning and visible page flashing.
+//
+// Chunks still accumulate into the buffer synchronously (no data loss); only
+// the React-facing notification is coalesced. 20fps is indistinguishable from
+// per-token to a human reader but cuts Virtuoso reflow frequency by 10-50x.
+const NOTIFY_THROTTLE_MS = 50
+let pendingFlush: ReturnType<typeof setTimeout> | null = null
+let lastFlushMs = 0
+
+function flushSubscribers() {
+  pendingFlush = null
+  lastFlushMs = Date.now()
+  subscribers.forEach((fn) => fn())
+}
+
+function scheduleFlush() {
+  if (pendingFlush !== null) return // a flush is already scheduled — it will pick up the latest buffer
+  const elapsed = Date.now() - lastFlushMs
+  const delay = Math.max(0, NOTIFY_THROTTLE_MS - elapsed)
+  pendingFlush = setTimeout(flushSubscribers, delay)
+}
+
 /**
  * Collapse a string that is entirely N copies of a repeating prefix down to
  * a single copy. Backend retries (ReactiveRetryPolicy) re-stream the same
@@ -59,7 +86,7 @@ export const streamingStore = {
   append(sessionId: string, chunk: string, notify = true) {
     const current = streamingChunks.get(sessionId) ?? ''
     streamingChunks.set(sessionId, current + chunk)
-    if (notify) subscribers.forEach(fn => fn())
+    if (notify) scheduleFlush()
   },
 
   getContent(sessionId: string): string {
