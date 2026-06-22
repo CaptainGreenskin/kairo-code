@@ -260,7 +260,8 @@ public class ConfigController {
     }
 
     private static final Set<String> SKIP_DIRS = Set.of(
-            ".git", "node_modules", "target", ".idea", "build", "dist", ".gradle", "__pycache__"
+            ".git", "node_modules", "target", ".idea", "build", "dist", ".gradle", "__pycache__",
+            ".kairo-session", ".kairo-trace", ".kairo", ".kairo-code", ".dispatcher", ".acp", "logs"
     );
     private static final int MAX_FILES_WALK = 10_000;
     private static final int MAX_PREVIEW_LENGTH = 120;
@@ -400,6 +401,89 @@ public class ConfigController {
             if (text.charAt(ti) == query.charAt(qi)) qi++;
         }
         return qi == query.length();
+    }
+
+    /**
+     * Search for code symbols (classes, interfaces, methods, functions).
+     * Uses regex pattern matching as a portable fallback (no LSP dependency).
+     */
+    @GetMapping("/search/symbols")
+    public List<Map<String, Object>> searchSymbols(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "30") int limit,
+            @RequestParam(required = false) String workspaceId
+    ) {
+        if (q == null || q.isBlank()) return List.of();
+        Path wd = workingDir(workspaceId);
+        List<Map<String, Object>> results = new ArrayList<>();
+        AtomicInteger fileCount = new AtomicInteger(0);
+
+        // Match symbol declarations: class/interface/enum/record/def/fun NAME
+        java.util.regex.Pattern symbolPattern = java.util.regex.Pattern.compile(
+                "\\b(?:class|interface|enum|record|trait|struct|def|fun|func|function|type)\\s+" +
+                "(" + java.util.regex.Pattern.quote(q) + ")\\b",
+                java.util.regex.Pattern.CASE_INSENSITIVE
+        );
+
+        java.util.Set<String> codeExts = java.util.Set.of(
+                ".java", ".kt", ".scala", ".cs", ".ts", ".tsx", ".js", ".jsx",
+                ".py", ".go", ".rs", ".rb", ".cpp", ".c", ".h", ".cc");
+
+        java.nio.file.FileVisitor<Path> visitor = new java.nio.file.SimpleFileVisitor<>() {
+            @Override
+            public java.nio.file.FileVisitResult preVisitDirectory(Path dir, java.nio.file.attribute.BasicFileAttributes attrs) {
+                String name = dir.getFileName() != null ? dir.getFileName().toString() : "";
+                if (SKIP_DIRS.contains(name)) return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs) {
+                if (results.size() >= limit) return java.nio.file.FileVisitResult.TERMINATE;
+                if (fileCount.incrementAndGet() > MAX_FILES_WALK) return java.nio.file.FileVisitResult.TERMINATE;
+                String name = file.getFileName().toString();
+                int dot = name.lastIndexOf('.');
+                if (dot > 0 && codeExts.contains(name.substring(dot).toLowerCase()) && !isBinary(file)) {
+                    try {
+                        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                        String relative = wd.relativize(file).toString();
+                        for (int i = 0; i < lines.size() && results.size() < limit; i++) {
+                            java.util.regex.Matcher m = symbolPattern.matcher(lines.get(i));
+                            if (m.find()) {
+                                results.add(Map.of(
+                                        "name", m.group(1),
+                                        "kind", inferKind(lines.get(i)),
+                                        "file", relative,
+                                        "line", i + 1,
+                                        "preview", lines.get(i).trim()
+                                ));
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        };
+
+        try {
+            Files.walkFileTree(wd, visitor);
+        } catch (IOException ignored) {}
+
+        return results;
+    }
+
+    private static String inferKind(String line) {
+        String lower = line.trim().toLowerCase();
+        if (lower.contains("interface")) return "Interface";
+        if (lower.contains("enum")) return "Enum";
+        if (lower.contains("record")) return "Record";
+        if (lower.contains("class")) return "Class";
+        if (lower.contains("trait")) return "Trait";
+        if (lower.contains("struct")) return "Struct";
+        if (lower.contains("def ") || lower.contains("fun ") || lower.contains("func ")
+                || lower.contains("function ")) return "Function";
+        if (lower.contains("type ")) return "Type";
+        return "Symbol";
     }
 
     private void searchInFile(Path file, String relativePath, java.util.regex.Pattern pattern,

@@ -129,6 +129,22 @@ export async function searchFileNames(q: string, limit?: number, workspaceId?: s
     return request<string[]>(`/search/files?${params}`);
 }
 
+export interface SymbolResult {
+    name: string;
+    kind: string;
+    file: string;
+    line: number;
+    preview: string;
+}
+
+export async function searchSymbols(q: string, limit?: number, workspaceId?: string): Promise<SymbolResult[]> {
+    const params = new URLSearchParams();
+    params.set('q', q);
+    if (limit) params.set('limit', String(limit));
+    if (workspaceId) params.set('workspaceId', workspaceId);
+    return request<SymbolResult[]>(`/search/symbols?${params}`);
+}
+
 export interface DirEntry {
     name: string;
     path: string;

@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Loader2, FileText, AtSign, ChevronRight, ChevronDown, CaseSensitive, Regex, WholeWord } from 'lucide-react';
-import { searchFiles, getFileContent } from '@api/config';
+import { searchFiles, searchFileNames, searchSymbols, getFileContent } from '@api/config';
+import type { SymbolResult } from '@api/config';
 import type { SearchMatch, SearchResponse } from '@/types/agent';
 import { useWorkspaceStore } from '@store/workspaceStore';
+
+type SearchMode = 'text' | 'files' | 'classes';
 
 interface SearchPanelProps {
     isOpen: boolean;
@@ -18,7 +21,10 @@ export function SearchPanel({ isOpen, onClose, onInsertResult, onOpenFile, works
     const workspaceId = propWorkspaceId ?? storeWorkspaceId ?? undefined;
 
     const [query, setQuery] = useState('');
+    const [searchMode, setSearchMode] = useState<SearchMode>('text');
     const [results, setResults] = useState<SearchResponse | null>(null);
+    const [fileResults, setFileResults] = useState<string[]>([]);
+    const [symbolResults, setSymbolResults] = useState<SymbolResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -45,31 +51,40 @@ export function SearchPanel({ isOpen, onClose, onInsertResult, onOpenFile, works
 
     const doSearch = useCallback(() => {
         if (!isOpen || query.length < 2) {
-            if (query.length < 2) setResults(null);
+            if (query.length < 2) { setResults(null); setFileResults([]); setSymbolResults([]); }
             return;
         }
 
         setIsSearching(true);
         setError(null);
 
-        let searchQuery = query;
-        if (wholeWord && !useRegex) {
-            searchQuery = `\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`;
+        if (searchMode === 'files') {
+            searchFileNames(query, 30, workspaceId)
+                .then((res) => { setFileResults(res); setIsSearching(false); })
+                .catch((err) => { setError(err.message); setIsSearching(false); });
+        } else if (searchMode === 'classes') {
+            searchSymbols(query, 30, workspaceId)
+                .then((res) => { setSymbolResults(res); setIsSearching(false); })
+                .catch((err) => { setError(err.message); setIsSearching(false); });
+        } else {
+            let searchQuery = query;
+            if (wholeWord && !useRegex) {
+                searchQuery = `\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`;
+            }
+            searchFiles({
+                q: wholeWord && !useRegex ? searchQuery : query,
+                regex: useRegex || wholeWord,
+                caseSensitive,
+                include: includeGlob || undefined,
+                exclude: excludeGlob || undefined,
+                contextLines: 0,
+                limit: 100,
+                workspaceId,
+            })
+                .then((res) => { setResults(res); setIsSearching(false); })
+                .catch((err) => { setError(err.message); setIsSearching(false); });
         }
-
-        searchFiles({
-            q: wholeWord && !useRegex ? searchQuery : query,
-            regex: useRegex || wholeWord,
-            caseSensitive,
-            include: includeGlob || undefined,
-            exclude: excludeGlob || undefined,
-            contextLines: 0,
-            limit: 100,
-            workspaceId,
-        })
-            .then((res) => { setResults(res); setIsSearching(false); })
-            .catch((err) => { setError(err.message); setIsSearching(false); });
-    }, [query, isOpen, workspaceId, useRegex, caseSensitive, wholeWord, includeGlob, excludeGlob]);
+    }, [query, isOpen, workspaceId, searchMode, useRegex, caseSensitive, wholeWord, includeGlob, excludeGlob]);
 
     useEffect(() => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -131,6 +146,27 @@ export function SearchPanel({ isOpen, onClose, onInsertResult, onOpenFile, works
 
     const body = (
         <>
+            {/* Mode tabs */}
+            <div className="flex items-center gap-0.5 px-2 pt-2 border-b border-[var(--border)]">
+                {([
+                    { id: 'text', label: 'Text' },
+                    { id: 'files', label: 'Files' },
+                    { id: 'classes', label: 'Classes' },
+                ] as { id: SearchMode; label: string }[]).map((t) => (
+                    <button
+                        key={t.id}
+                        onClick={() => { setSearchMode(t.id); setResults(null); setFileResults([]); setSymbolResults([]); }}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${
+                            searchMode === t.id
+                                ? 'text-[var(--accent)] border-b-2 border-[var(--accent)] -mb-px'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] border-b-2 border-transparent'
+                        }`}
+                    >
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+
             {/* Search input + toggles */}
             <div className="px-3 py-2 border-b border-[var(--border)] space-y-2">
                 <div className="flex items-center gap-1.5">
@@ -143,12 +179,16 @@ export function SearchPanel({ isOpen, onClose, onInsertResult, onOpenFile, works
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') doSearch(); }}
                     />
-                    {toggleBtn(caseSensitive, () => setCaseSensitive(v => !v), 'Match Case',
-                        <CaseSensitive size={14} />)}
-                    {toggleBtn(wholeWord, () => setWholeWord(v => !v), 'Match Whole Word',
-                        <WholeWord size={14} />)}
-                    {toggleBtn(useRegex, () => setUseRegex(v => !v), 'Use Regular Expression',
-                        <Regex size={14} />)}
+                    {searchMode === 'text' && (
+                        <>
+                            {toggleBtn(caseSensitive, () => setCaseSensitive(v => !v), 'Match Case',
+                                <CaseSensitive size={14} />)}
+                            {toggleBtn(wholeWord, () => setWholeWord(v => !v), 'Match Whole Word',
+                                <WholeWord size={14} />)}
+                            {toggleBtn(useRegex, () => setUseRegex(v => !v), 'Use Regular Expression',
+                                <Regex size={14} />)}
+                        </>
+                    )}
                     {!embedded && (
                         <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]" title="Close">
                             <X size={16} />
@@ -198,60 +238,37 @@ export function SearchPanel({ isOpen, onClose, onInsertResult, onOpenFile, works
                     <div className="px-3 py-3 text-xs text-red-400">{error}</div>
                 )}
 
-                {!isSearching && !error && query.length >= 2 && matchCount === 0 && (
+                {/* Text mode: full-text search grouped by file */}
+                {searchMode === 'text' && !isSearching && !error && query.length >= 2 && matchCount === 0 && (
                     <div className="px-3 py-8 text-center text-xs text-[var(--text-muted)]">
                         No results found for &ldquo;{query}&rdquo;
                     </div>
                 )}
 
-                {!isSearching && !error && results && matchCount > 0 && (
+                {searchMode === 'text' && !isSearching && !error && results && matchCount > 0 && (
                     <div className="py-1">
                         <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-b border-[var(--border)]">
                             {matchCount} result{matchCount !== 1 ? 's' : ''} in {fileCount} file{fileCount !== 1 ? 's' : ''}
                             {results.truncated && ' (truncated)'}
                         </div>
-
                         {Array.from(filesMap.entries()).map(([file, matches]) => {
                             const collapsed = collapsedFiles.has(file);
                             return (
                                 <div key={file} className="border-b border-[var(--border)] last:border-0">
                                     <div className="group flex items-center gap-1 px-2 py-1.5 hover:bg-[var(--bg-hover)] transition-colors">
-                                        <button
-                                            onClick={() => toggleFileCollapse(file)}
-                                            className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
-                                        >
+                                        <button onClick={() => toggleFileCollapse(file)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
                                             {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--text-muted)]" />
-                                                        : <ChevronDown size={12} className="shrink-0 text-[var(--text-muted)]" />}
+                                                       : <ChevronDown size={12} className="shrink-0 text-[var(--text-muted)]" />}
                                             <FileText size={13} className="shrink-0 text-[var(--text-muted)]" />
-                                            <span className="text-xs text-[var(--text-primary)] truncate flex-1 font-mono">
-                                                {file}
-                                            </span>
-                                            <span className="text-[10px] text-[var(--text-muted)] shrink-0 px-1.5 py-0.5 rounded-full bg-[var(--bg-hover)]">
-                                                {matches.length}
-                                            </span>
+                                            <span className="text-xs text-[var(--text-primary)] truncate flex-1 font-mono">{file}</span>
+                                            <span className="text-[10px] text-[var(--text-muted)] shrink-0 px-1.5 py-0.5 rounded-full bg-[var(--bg-hover)]">{matches.length}</span>
                                         </button>
-                                        {onOpenFile && (
-                                            <button
-                                                className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-opacity"
-                                                onClick={() => handleFileClick(file)}
-                                                title="Open file"
-                                            >
-                                                <AtSign size={11} />
-                                            </button>
-                                        )}
                                     </div>
                                     {!collapsed && (
                                         <div className="pl-8 pr-2 pb-1">
                                             {matches.map((m, i) => (
-                                                <button
-                                                    key={i}
-                                                    className="w-full text-left text-[11px] py-0.5 px-1.5 rounded hover:bg-[var(--bg-hover)] cursor-pointer font-mono truncate flex items-baseline gap-1.5"
-                                                    onClick={() => handleMatchClick(m)}
-                                                    title={`Line ${m.line}: ${m.preview}`}
-                                                >
-                                                    <span className="text-[var(--text-muted)] shrink-0 w-8 text-right">
-                                                        {m.line}
-                                                    </span>
+                                                <button key={i} className="w-full text-left text-[11px] py-0.5 px-1.5 rounded hover:bg-[var(--bg-hover)] cursor-pointer font-mono truncate flex items-baseline gap-1.5" onClick={() => handleMatchClick(m)} title={`Line ${m.line}: ${m.preview}`}>
+                                                    <span className="text-[var(--text-muted)] shrink-0 w-8 text-right">{m.line}</span>
                                                     <HighlightedPreview text={m.preview} query={query} useRegex={useRegex} caseSensitive={caseSensitive} />
                                                 </button>
                                             ))}
@@ -260,6 +277,41 @@ export function SearchPanel({ isOpen, onClose, onInsertResult, onOpenFile, works
                                 </div>
                             );
                         })}
+                    </div>
+                )}
+
+                {/* Files mode: fuzzy file name match */}
+                {searchMode === 'files' && !isSearching && !error && query.length >= 2 && (
+                    <div className="py-1">
+                        <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-b border-[var(--border)]">
+                            {fileResults.length} file{fileResults.length !== 1 ? 's' : ''} matched
+                        </div>
+                        {fileResults.length === 0 ? (
+                            <div className="px-3 py-8 text-center text-xs text-[var(--text-muted)]">No files found</div>
+                        ) : fileResults.map((f) => (
+                            <button key={f} className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--bg-hover)] text-left" onClick={() => handleFileClick(f)}>
+                                <FileText size={13} className="shrink-0 text-[var(--text-muted)]" />
+                                <span className="text-xs text-[var(--text-primary)] truncate flex-1 font-mono">{f}</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {/* Classes mode: symbol search */}
+                {searchMode === 'classes' && !isSearching && !error && query.length >= 2 && (
+                    <div className="py-1">
+                        <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-b border-[var(--border)]">
+                            {symbolResults.length} symbol{symbolResults.length !== 1 ? 's' : ''} matched
+                        </div>
+                        {symbolResults.length === 0 ? (
+                            <div className="px-3 py-8 text-center text-xs text-[var(--text-muted)]">No symbols found</div>
+                        ) : symbolResults.map((s, i) => (
+                            <button key={i} className="w-full flex items-baseline gap-2 px-3 py-1.5 hover:bg-[var(--bg-hover)] text-left" onClick={() => onOpenFile?.(s.file, s.line) || onInsertResult(`file:${s.file}:L${s.line}\n${s.preview}`)}>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent)]/15 text-[var(--accent)] shrink-0 font-medium">{s.kind}</span>
+                                <span className="text-xs text-[var(--text-primary)] font-mono shrink-0">{s.name}</span>
+                                <span className="text-[10px] text-[var(--text-muted)] truncate flex-1 font-mono">{s.file}:{s.line}</span>
+                            </button>
+                        ))}
                     </div>
                 )}
             </div>
