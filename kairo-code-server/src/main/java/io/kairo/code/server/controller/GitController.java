@@ -12,8 +12,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -264,12 +266,27 @@ public class GitController {
             pb.directory(workingDir.toFile());
             pb.redirectErrorStream(true);
             proc = pb.start();
+
+            // Drain stdout (merged with stderr) asynchronously. Windows anonymous
+            // pipes buffer only ~4KB; if the caller waits on proc before reading,
+            // the child blocks on WriteFile and waitFor never returns — a deadlock
+            // that looks like a timeout. Read into a buffer and join after waitFor.
+            final Process finalProc = proc;
+            ByteArrayOutputStream outBuf = new ByteArrayOutputStream();
+            Thread stdoutDrain = new Thread(() -> {
+                try { finalProc.getInputStream().transferTo(outBuf); }
+                catch (IOException ignored) {}
+            });
+            stdoutDrain.setDaemon(true);
+            stdoutDrain.start();
+
             boolean finished = proc.waitFor(GIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!finished) {
                 proc.destroyForcibly();
                 throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "Git command timed out");
             }
-            String output = new String(proc.getInputStream().readAllBytes());
+            stdoutDrain.join(1000);
+            String output = outBuf.toString(StandardCharsets.UTF_8);
             int exitCode = proc.exitValue();
             if (exitCode != 0) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -296,8 +313,20 @@ public class GitController {
             // leak into the porcelain status output.
             proc = pb.start();
 
-            // Drain stderr asynchronously so the OS buffer doesn't fill and block.
+            // Drain BOTH streams asynchronously. Windows anonymous pipes buffer
+            // only ~4KB; if stdout is read only after waitFor, the child blocks
+            // on WriteFile the moment its output crosses 4KB and waitFor never
+            // returns — a deadlock that surfaces as an HTTP 504. Reading into
+            // in-memory buffers and joining after waitFor avoids it.
             final Process finalProc = proc;
+            ByteArrayOutputStream stdoutBuf = new ByteArrayOutputStream();
+            Thread stdoutDrain = new Thread(() -> {
+                try { finalProc.getInputStream().transferTo(stdoutBuf); }
+                catch (IOException ignored) {}
+            });
+            stdoutDrain.setDaemon(true);
+            stdoutDrain.start();
+
             Thread stderrDrain = new Thread(() -> {
                 try { finalProc.getErrorStream().transferTo(OutputStream.nullOutputStream()); }
                 catch (IOException ignored) {}
@@ -310,17 +339,16 @@ public class GitController {
                 proc.destroyForcibly();
                 throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "Git command timed out");
             }
+            stdoutDrain.join(1000);
             stderrDrain.join(1000);
-            // Read stdout BEFORE branching on exit code — `git diff --no-index` returns
-            // exit 1 when files differ (which is the success case for our untracked-file
-            // diff). Treat exit ∈ {0, 1} as "stdout is meaningful"; only severe failures
-            // (e.g. exit 128 = not a git repo) collapse to empty.
-            byte[] stdout = proc.getInputStream().readAllBytes();
+            // Treat exit ∈ {0, 1} as "stdout is meaningful"; only severe failures
+            // (e.g. exit 128 = not a git repo) collapse to empty. `git diff --no-index`
+            // returns exit 1 when files differ, which is the success case there.
             int exitCode = proc.exitValue();
             if (exitCode > 1) {
                 return "";
             }
-            return new String(stdout);
+            return stdoutBuf.toString(StandardCharsets.UTF_8);
         } catch (ResponseStatusException e) {
             throw e;
         } catch (InterruptedException e) {
