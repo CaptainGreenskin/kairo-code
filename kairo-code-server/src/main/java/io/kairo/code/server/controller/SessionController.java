@@ -93,6 +93,8 @@ public class SessionController {
      */
     @GetMapping("/index")
     public List<SessionIndexResponse> getSessionIndex() {
+        // Lazy reconcile: sync index with live state on first access (not startup)
+        agentService.reconcileIndexIfNeeded();
         List<SessionIndexEntry> entries = sessionIndexService.loadIndex();
         Set<String> runningIds = agentService.listSessions().stream()
                 .filter(SessionInfo::running)

@@ -36,7 +36,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -115,8 +118,26 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     private final SessionMetaPersistence sessionMetaPersistence = new SessionMetaPersistence();
     private final SessionIndexService sessionIndexService = new SessionIndexService();
+    private final ScheduledExecutorService reaperScheduler =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "session-meta-reaper");
+                t.setDaemon(true);
+                return t;
+            });
 
     private volatile CodeAgentConfig defaultConfig;
+    private final AtomicBoolean indexReconciled = new AtomicBoolean(false);
+
+    /**
+     * Injected from {@code ServerConfig.defaultAgentConfig()} @Bean so that
+     * lazy on-demand rehydration can build session configs when the frontend binds.
+     */
+    @Autowired(required = false)
+    public void setDefaultAgentConfig(CodeAgentConfig config) {
+        if (config != null && this.defaultConfig == null) {
+            this.defaultConfig = config;
+        }
+    }
 
     /**
      * Hot-update the default config for new sessions.
@@ -973,8 +994,26 @@ public class AgentService implements DisposableBean, InitializingBean {
      */
     public AgentEvent bindSession(String sessionId) {
         SessionContext bindCtx = registry.get(sessionId);
+
+        // Lazy rehydration: if session not in memory, try to restore from persisted meta
+        if (bindCtx == null && defaultConfig != null) {
+            SessionMetaPersistence.SessionMeta meta = sessionMetaPersistence.load(sessionId);
+            if (meta != null) {
+                try {
+                    CodeAgentConfig config = buildConfigFromMeta(meta);
+                    createSession(config, meta.workspaceId(), false, meta.mode(), null, meta.sessionId(), meta.createdAt());
+                    bindCtx = registry.get(sessionId);
+                    log.info("Lazily rehydrated session {} on bind (workspace={})", sessionId, meta.workspaceId());
+                    sessionIndexService.updateStatus(sessionId, SessionIndexEntry.STATUS_ACTIVE);
+                } catch (Exception e) {
+                    log.warn("Failed to lazily rehydrate session {}: {}", sessionId, e.getMessage());
+                    sessionMetaPersistence.remove(sessionId);
+                }
+            }
+        }
+
         if (bindCtx == null) {
-            log.warn("bindSession: session {} not found", sessionId);
+            log.warn("bindSession: session {} not found (no persisted meta)", sessionId);
             return null;
         }
 
@@ -1158,6 +1197,16 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     public SessionIndexService getSessionIndexService() {
         return sessionIndexService;
+    }
+
+    /**
+     * Reconcile the session index with live state. Called lazily on first
+     * index access rather than on startup to keep startup instant.
+     */
+    public void reconcileIndexIfNeeded() {
+        if (indexReconciled.compareAndSet(false, true)) {
+            sessionIndexService.reconcile(registry.sessionIds());
+        }
     }
 
     /**
@@ -1447,6 +1496,7 @@ public class AgentService implements DisposableBean, InitializingBean {
 
     @Override
     public void destroy() {
+        reaperScheduler.shutdownNow();
         // Registry and DiagnosticsService manage their own lifecycle via @PreDestroy / DisposableBean.
     }
 
@@ -1455,53 +1505,47 @@ public class AgentService implements DisposableBean, InitializingBean {
         registry.setDestroyCallback(this::destroySession);
         registry.startReaper();
         sessionIndexService.migrateIfAbsent();
-        // Wait for defaultConfig to be set by ServerConfig @Bean before rehydrating.
-        // Fixed delay was unreliable; poll every 1s up to 30s.
-        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "kairo-session-rehydrate");
-            t.setDaemon(true);
-            return t;
-        }).schedule(() -> {
-            for (int i = 0; i < 30 && defaultConfig == null; i++) {
-                try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
-            }
-            rehydrateSessions();
-        }, 1, java.util.concurrent.TimeUnit.SECONDS);
+        // No eager rehydration — sessions are restored on-demand when frontend binds.
+        // This gives instant startup regardless of how many historical sessions exist.
+        log.info("Server ready (lazy session rehydration enabled)");
+        // Schedule background reaper: first run after 60s, then every hour
+        reaperScheduler.scheduleWithFixedDelay(this::reapStaleMeta, 60, 3600, TimeUnit.SECONDS);
     }
 
-    private void rehydrateSessions() {
-        List<SessionMetaPersistence.SessionMeta> pending = sessionMetaPersistence.loadNonTerminal();
-        if (pending.isEmpty()) {
-            log.info("No sessions to rehydrate on startup");
-            return;
-        }
-        log.info("Rehydrating {} session(s) from previous run", pending.size());
-        int restored = 0;
-        for (SessionMetaPersistence.SessionMeta meta : pending) {
-            try {
-                if (defaultConfig == null) {
-                    log.warn("Cannot rehydrate session {} -- no default config available yet", meta.sessionId());
-                    continue;
-                }
-                CodeAgentConfig config = new CodeAgentConfig(
-                        defaultConfig.apiKey(),
-                        meta.baseUrl() != null && !meta.baseUrl().isBlank() ? meta.baseUrl() : defaultConfig.baseUrl(),
-                        meta.modelName() != null && !meta.modelName().isBlank() ? meta.modelName() : defaultConfig.modelName(),
-                        Integer.MAX_VALUE,
-                        meta.workingDir(),
-                        null, 0, 0,
-                        defaultConfig.thinkingBudget(),
-                        defaultConfig.llmClassifier());
-                String sid = createSession(config, meta.workspaceId(), false, meta.mode(), null, meta.sessionId(), meta.createdAt());
-                log.info("Rehydrated session {} (workspace={})", sid, meta.workspaceId());
-                restored++;
-            } catch (Exception e) {
-                log.warn("Failed to rehydrate session {}: {}", meta.sessionId(), e.getMessage());
-                sessionMetaPersistence.remove(meta.sessionId());
+    /**
+     * Build a {@link CodeAgentConfig} from persisted session metadata,
+     * falling back to the current defaultConfig for missing fields.
+     */
+    private CodeAgentConfig buildConfigFromMeta(SessionMetaPersistence.SessionMeta meta) {
+        return new CodeAgentConfig(
+                defaultConfig.apiKey(),
+                meta.baseUrl() != null && !meta.baseUrl().isBlank() ? meta.baseUrl() : defaultConfig.baseUrl(),
+                meta.modelName() != null && !meta.modelName().isBlank() ? meta.modelName() : defaultConfig.modelName(),
+                Integer.MAX_VALUE,
+                meta.workingDir(),
+                null, 0, 0,
+                defaultConfig.thinkingBudget(),
+                defaultConfig.llmClassifier());
+    }
+
+    /**
+     * Background reaper that cleans up stale session meta files older than 7 days
+     * that are not currently live in the registry. Runs on first invocation from
+     * a scheduled executor or can be triggered manually.
+     */
+    void reapStaleMeta() {
+        long cutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(7);
+        List<SessionMetaPersistence.SessionMeta> all = sessionMetaPersistence.loadAll();
+        int cleaned = 0;
+        for (SessionMetaPersistence.SessionMeta m : all) {
+            if (m.createdAt() < cutoff && !registry.contains(m.sessionId())) {
+                sessionMetaPersistence.remove(m.sessionId());
+                cleaned++;
             }
         }
-        log.info("Rehydrated {}/{} sessions", restored, pending.size());
-        sessionIndexService.reconcile(registry.sessionIds());
+        if (cleaned > 0) {
+            log.info("Reaped {} stale session meta files (older than 7 days)", cleaned);
+        }
     }
 
     /**
