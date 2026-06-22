@@ -35,21 +35,51 @@ public class KairoCodeServerApplication {
     }
 
     private static List<String> getLanIps() {
-        List<String> ips = new ArrayList<>();
+        // Preferred IPs: real LAN (192.168.x / 10.x / 172.16-31.x), excluding virtual adapters.
+        List<String> preferred = new ArrayList<>();
+        List<String> others = new ArrayList<>();
         try {
             var interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
                 var iface = interfaces.nextElement();
                 if (iface.isLoopback() || !iface.isUp()) continue;
+                String name = iface.getDisplayName() != null
+                        ? iface.getDisplayName().toLowerCase() : "";
+                // Skip known virtual adapters (VMware, VirtualBox, Docker, WSL, VPN, etc.)
+                boolean virtual = name.contains("vmware") || name.contains("virtualbox")
+                        || name.contains("docker") || name.contains("wsl")
+                        || name.contains("vpn") || name.contains("tap") || name.contains("veth")
+                        || name.contains("hyper-v") || name.contains("virtual");
                 var addrs = iface.getInetAddresses();
                 while (addrs.hasMoreElements()) {
                     var addr = addrs.nextElement();
                     if (addr instanceof Inet4Address) {
-                        ips.add(addr.getHostAddress());
+                        String ip = addr.getHostAddress();
+                        if (virtual) {
+                            others.add(ip);
+                        } else if (isPrivateLan(ip)) {
+                            preferred.add(ip);
+                        } else {
+                            others.add(ip);
+                        }
                     }
                 }
             }
         } catch (Exception ignored) {}
-        return ips;
+        List<String> result = new ArrayList<>(preferred);
+        result.addAll(others);
+        return result;
+    }
+
+    private static boolean isPrivateLan(String ip) {
+        if (ip.startsWith("192.168.")) return true;
+        if (ip.startsWith("10.")) return true;
+        if (ip.startsWith("172.")) {
+            try {
+                int second = Integer.parseInt(ip.split("\\.")[1]);
+                if (second >= 16 && second <= 31) return true;
+            } catch (Exception ignored) {}
+        }
+        return false;
     }
 }
