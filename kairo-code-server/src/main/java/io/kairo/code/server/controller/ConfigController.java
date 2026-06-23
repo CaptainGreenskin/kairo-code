@@ -91,21 +91,44 @@ public class ConfigController {
      */
     @GetMapping("/server-info")
     public Map<String, Object> serverInfo(jakarta.servlet.http.HttpServletRequest request) {
-        java.util.List<String> ips = new java.util.ArrayList<>();
+        // Prioritize real LAN IPs: exclude loopback, virtual adapters, and point-to-point tunnels.
+        java.util.List<String> preferred = new java.util.ArrayList<>();
+        java.util.List<String> others = new java.util.ArrayList<>();
         try {
             var interfaces = java.net.NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
                 var iface = interfaces.nextElement();
                 if (iface.isLoopback() || !iface.isUp()) continue;
+                // Skip point-to-point tunnels (VPN utun, etc.) — unreachable from phone
+                if (iface.isPointToPoint()) {
+                    var addrs = iface.getInetAddresses();
+                    while (addrs.hasMoreElements()) {
+                        var addr = addrs.nextElement();
+                        if (addr instanceof java.net.Inet4Address) others.add(addr.getHostAddress());
+                    }
+                    continue;
+                }
+                String name = (iface.getDisplayName() != null ? iface.getDisplayName() : "").toLowerCase();
+                boolean virtual = name.contains("vmware") || name.contains("virtualbox")
+                        || name.contains("docker") || name.contains("wsl")
+                        || name.contains("vpn") || name.contains("tap") || name.contains("veth")
+                        || name.contains("hyper-v") || name.contains("virtual");
                 var addrs = iface.getInetAddresses();
                 while (addrs.hasMoreElements()) {
                     var addr = addrs.nextElement();
                     if (addr instanceof java.net.Inet4Address) {
-                        ips.add(addr.getHostAddress());
+                        String ip = addr.getHostAddress();
+                        if (virtual) {
+                            others.add(ip);
+                        } else {
+                            preferred.add(ip);
+                        }
                     }
                 }
             }
         } catch (Exception ignored) {}
+        java.util.List<String> ips = new java.util.ArrayList<>(preferred);
+        ips.addAll(others);
         int port = request.getServerPort();
         String lanUrl = ips.isEmpty() ? null : "http://" + ips.get(0) + ":" + port;
         return Map.of(
