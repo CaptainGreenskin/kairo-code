@@ -110,6 +110,11 @@ body {
     scrollbar-color: var(--color-scrollbar) transparent;
 }
 
+/* Prevent elastic bounce-back on all scrollable containers */
+html, body {
+    overscroll-behavior: none;
+}
+
 /* Chromium / WebKit scrollbar styling */
 ::-webkit-scrollbar {
     width: 6px;

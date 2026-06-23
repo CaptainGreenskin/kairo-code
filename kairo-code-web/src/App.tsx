@@ -1686,7 +1686,7 @@ ${content}
                                         <Virtuoso
                                             ref={virtuosoRef}
                                             scrollerRef={(ref) => { virtuosoScrollerRef.current = ref as HTMLElement; }}
-                                            className="overflow-x-hidden [scrollbar-gutter:stable]"
+                                            className="overflow-x-hidden [scrollbar-gutter:stable] [overscroll-behavior-y:none]"
                                             style={{ height: '100%' }}
                                             defaultItemHeight={80}
                                             data={filteredMessages}
