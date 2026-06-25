@@ -57,6 +57,14 @@ public final class ExpertTeamFactory {
         // message bus + agent loop) to the upstream ExpertTeamComposer, only supplying the
         // kairo-code-specific worker factory. This is what made kairo-assistant unable to
         // reuse the original method — it hardcoded CodeAgentFactory.
+        //
+        // Self-evolution: wire an ExpertMemoryStore (persists lessons to
+        // ~/.kairo-code/expert-memory/) + an LLM-backed LessonExtractor so the expert team
+        // accumulates cross-task experience (recall injected into prompts at generation time).
+        io.kairo.multiagent.orchestration.ExpertMemoryStore memoryStore =
+                new io.kairo.multiagent.orchestration.ExpertMemoryStore();
+        io.kairo.multiagent.orchestration.LessonExtractor extractor =
+                new io.kairo.code.core.team.LlmLessonExtractor(modelProvider, config.modelName());
         var composition =
                 io.kairo.multiagent.orchestration.ExpertTeamComposer.create(
                         agentCount,
@@ -66,7 +74,9 @@ public final class ExpertTeamFactory {
                                                 CodeAgentFactory.SessionOptions.empty()
                                                         .withModelProvider(modelProvider)
                                                         .asChildSession())
-                                        .agent());
+                                        .agent(),
+                        memoryStore,
+                        extractor);
         return new SwarmCoordinator(
                 composition.coordinator(),
                 composition.roleRegistry(),
