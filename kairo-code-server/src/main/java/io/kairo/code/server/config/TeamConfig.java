@@ -120,8 +120,13 @@ public class TeamConfig {
                     .toolExecutor(toolExecutor)
                     .shutdownManager(shutdownManager)
                     .systemPrompt(
-                            "You are an expert-team task planner. Decompose the goal into a DAG of "
-                                    + "role-assigned steps and output ONLY the JSON array — no prose, "
+                            "You are an expert-team task planner. Decompose the goal into role-assigned "
+                                    + "steps ONLY when decomposition genuinely helps. For simple tasks "
+                                    + "(read a file, write a doc, fix a bug), output a SINGLE step — "
+                                    + "do not over-decompose. Choose roles based on what the task "
+                                    + "actually needs (coder for writing, researcher for analysis). "
+                                    + "Write specific, actionable step instructions with concrete "
+                                    + "deliverables. Output ONLY the JSON array — no prose, "
                                     + "no code fences.");
             if (customizers != null) {
                 customizers.forEach(c -> c.customize(builder));
@@ -136,6 +141,9 @@ public class TeamConfig {
             ExpertRoleRegistry registry,
             DefaultPlanner planner,
             MessageBus messageBus,
+            ExpertMemoryStore memoryStore,
+            ModelProvider modelProvider,
+            ServerConfig.ServerProperties serverProperties,
             @Autowired(required = false) KairoEventBus eventBus,
             @Autowired(required = false) SynthesizerStep synthesizer) {
         return new ExpertTeamCoordinator(
@@ -146,7 +154,10 @@ public class TeamConfig {
                 registry,
                 messageBus,
                 null, // no arbitrator yet
-                synthesizer);
+                synthesizer,
+                memoryStore,
+                new io.kairo.code.core.team.LlmLessonExtractor(
+                        modelProvider, serverProperties.model()));
     }
 
     @Bean
