@@ -112,6 +112,20 @@ public final class TeamSessionPayload implements SessionPayload {
     private final Disposable swarmEventBridge;
     private final NarratorDispatcher narrator;
 
+    /**
+     * User messages received during EXECUTING phase. Stored and incorporated into the next
+     * plan after the current team execution completes — enables mid-flight intervention
+     * without rejecting the user with SESSION_BUSY.
+     */
+    private final java.util.concurrent.ConcurrentLinkedQueue<String> midFlightDirectives =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    /**
+     * Accumulated mid-flight directives, set when team execution completes. Prepended to the
+     * next planning goal so the user's mid-flight feedback isn't lost.
+     */
+    private volatile String pendingDirectivesGoal = null;
+
     private final AtomicReference<Disposable> currentRun = new AtomicReference<>();
     private final AtomicReference<Disposable> peerPoller = new AtomicReference<>();
     private final AtomicBoolean doneEmitted = new AtomicBoolean(false);
@@ -183,7 +197,14 @@ public final class TeamSessionPayload implements SessionPayload {
                     if (narrator != null) {
                         narrator.suspend();
                     }
-                    return startPlanOnly(request.text());
+                    // Prepend any mid-flight directives accumulated during previous execution.
+                    String goal = request.text();
+                    if (pendingDirectivesGoal != null) {
+                        goal = "Additional requirements from mid-flight feedback:\n"
+                                + pendingDirectivesGoal + "\n\nOriginal goal: " + goal;
+                        pendingDirectivesGoal = null;
+                    }
+                    return startPlanOnly(goal);
                 }
                 case PLAN_PENDING -> {
                     if (narrator != null) {
@@ -197,9 +218,20 @@ public final class TeamSessionPayload implements SessionPayload {
                             "SESSION_BUSY"));
                 }
                 case EXECUTING -> {
-                    return Flux.just(AgentEvent.error(sessionId,
-                            "Expert team is currently executing. Please wait for completion.",
-                            "SESSION_BUSY"));
+                    // Mid-flight intervention (v1): accept user messages during execution
+                    // instead of rejecting with SESSION_BUSY. The message is stored as a
+                    // directive and will be incorporated into the next plan after the current
+                    // team execution completes. This removes the frustrating "wait for completion"
+                    // rejection and lets users add requirements mid-flight.
+                    String directive = request.text();
+                    if (directive != null && !directive.isBlank()) {
+                        midFlightDirectives.add(directive);
+                        // Emit the user's message so it appears in chat (not silently swallowed).
+                        ctx.emit(AgentEvent.textChunk(sessionId, directive));
+                        ctx.emit(AgentEvent.textChunk(sessionId,
+                                "\n\n_⏳ Received. Will be incorporated after current execution completes._"));
+                    }
+                    return Flux.empty();
                 }
                 case COMPLETED -> {
                     phaseRef.set(SessionPhase.IDLE);
@@ -460,6 +492,19 @@ public final class TeamSessionPayload implements SessionPayload {
                     TeamResult result = tuple.getT1();
                     Map<String, Object> planAttrs = tuple.getT2();
                     lastPlanReadyAttributes = planAttrs.isEmpty() ? null : planAttrs;
+
+                    // Mid-flight intervention: if the user sent directives during execution,
+                    // store them to be prepended to the next planning goal.
+                    if (!midFlightDirectives.isEmpty()) {
+                        StringBuilder combined = new StringBuilder();
+                        String d;
+                        while ((d = midFlightDirectives.poll()) != null) {
+                            combined.append("- ").append(d).append('\n');
+                        }
+                        pendingDirectivesGoal = combined.toString();
+                        ctx.emit(AgentEvent.textChunk(sessionId,
+                                "\n\n_🔄 Your mid-flight feedback will be incorporated into the next plan._"));
+                    }
                     Map<String, Object> meta = buildPlanReadyMeta(pendingTeamId,
                             planAttrs.isEmpty() ? null : planAttrs);
                     ctx.emit(AgentEvent.planReady(sessionId,
