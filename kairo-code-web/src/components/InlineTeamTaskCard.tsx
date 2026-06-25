@@ -6,12 +6,11 @@ import { StepProgressBar } from './StepProgressBar';
 // ── Role metadata ────────────────────────────────────────────────────────────
 
 const ROLE_META: Record<string, { icon: string; label: string }> = {
-  architect: { icon: '🏗️', label: 'Architect' },
   researcher: { icon: '🔍', label: 'Researcher' },
-  coder: { icon: '💻', label: 'Coder' },
+  coder: { icon: '💻', label: 'Engineer' },
   reviewer: { icon: '👀', label: 'Reviewer' },
-  tester: { icon: '🧪', label: 'Tester' },
-  synthesizer: { icon: '📋', label: 'Synthesizer' },
+  tester: { icon: '🧪', label: 'QA' },
+  debugger: { icon: '🐞', label: 'Debugger' },
 };
 
 function getRoleMeta(roleId: string) {
