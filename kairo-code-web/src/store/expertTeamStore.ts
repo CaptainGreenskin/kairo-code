@@ -346,6 +346,14 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
           updatedTeam.status = 'planning';
           updatedTeam.goal = (attributes.goal as string) ?? '';
           updatedTeam.startedAt = timestamp;
+          // Clear previous execution state so stale steps don't linger when a new
+          // task is sent to the same Experts session.
+          updatedTeam.steps = {};
+          updatedTeam.dag = [];
+          updatedTeam.edges = [];
+          updatedTeam.planPreview = undefined;
+          updatedTeam.output = undefined;
+          updatedTeam.warnings = [];
           break;
 
         case 'PLAN_READY': {
