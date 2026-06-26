@@ -9,6 +9,7 @@ import { FileContentPreview } from './FileContentPreview';
 import { InlineTodoCard, parseTodoWriteInput } from './InlineTodoCard';
 import { SubagentCard } from './SubagentCard';
 import { LazyMarkdown } from './LazyMarkdown';
+import { useBreakpoint } from '@hooks/useBreakpoint';
 
 const FILE_WRITE_TOOLS = new Set([
     'write', 'edit', 'multi_edit',
@@ -494,9 +495,13 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
     const riskLabel = RISK_LABELS[risk];
     const [expanded, setExpanded] = useState(false);
 
+    // Mobile detection for collapsed-by-default behavior
+    const bp = useBreakpoint();
+    const isMobileCard = bp === 'xs' || bp === 'sm';
+
     // Card-level collapse: completed cards stay expanded to show output.
     const isComplete = toolCall.status === 'done' || toolCall.status === 'error' || toolCall.status === 'rejected';
-    const [cardCollapsed, setCardCollapsed] = useState(false);
+    const [cardCollapsed, setCardCollapsed] = useState(isMobileCard && isComplete);
 
     const collapsedPreview = useMemo(
         () => getCollapsedPreview(toolCall.toolName, toolCall.input, toolCall.result),
@@ -726,6 +731,7 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                         </div>
                     </div>
                     {/* Keyboard shortcut hints */}
+                    {!isMobileCard && (
                     <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
                         <kbd className="px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-tertiary)] font-mono">y</kbd>
                         <span>approve</span>
@@ -733,6 +739,7 @@ export function ToolCallCard({ toolCall, onApprove, approvalTimeout = 120 }: Too
                         <kbd className="px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-tertiary)] font-mono">n</kbd>
                         <span>reject</span>
                     </div>
+                    )}
                 </div>
             )}
         </div>

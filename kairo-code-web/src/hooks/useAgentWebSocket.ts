@@ -268,6 +268,7 @@ export function useAgentWebSocket(
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const stalledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const keepaliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const lastMessageTimeRef = useRef<number>(Date.now());
     const onEventRef = useRef(onEvent);
     const sessionIdRef = useRef<string | null>(null);
     const createPendingRef = useRef<{
@@ -484,6 +485,7 @@ export function useAgentWebSocket(
         };
 
         ws.onmessage = (e) => {
+            lastMessageTimeRef.current = Date.now();
             handleIncoming(typeof e.data === 'string' ? e.data : '');
         };
 
@@ -636,6 +638,29 @@ export function useAgentWebSocket(
             cleanupSocket();
         };
     }, [cleanupSocket, clearStalledTimer]);
+
+    // Mobile wake-up reconnect: when the browser tab becomes visible again,
+    // check if the WebSocket is still healthy. If stale or closed, force reconnect.
+    useEffect(() => {
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                const ws = wsRef.current;
+                const staleThreshold = 30_000; // 30 seconds
+                const timeSinceLastMsg = Date.now() - lastMessageTimeRef.current;
+
+                if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+                    // Socket is dead, reconnect immediately
+                    connect();
+                } else if (timeSinceLastMsg > staleThreshold) {
+                    // Socket looks open but hasn't received data in 30s — close and reconnect
+                    ws.close();
+                    // onclose handler will trigger reconnect via backoff
+                }
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => document.removeEventListener('visibilitychange', handleVisibility);
+    }, [connect]);
 
     return {
         isConnected,

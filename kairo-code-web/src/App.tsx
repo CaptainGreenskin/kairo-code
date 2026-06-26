@@ -97,6 +97,9 @@ import { usePlanModeStore } from '@store/planModeStore';
 
 import { useExpertTeamStore } from '@store/expertTeamStore';
 import { FileTrackerBadge } from '@components/FileTrackerBadge';
+import { MobileApprovalSheet } from '@components/MobileApprovalSheet';
+import { MobileStatusBar } from '@components/MobileStatusBar';
+import { useMobileAlerts } from '@hooks/useMobileAlerts';
 
 declare const __APP_VERSION__: string;
 
@@ -478,13 +481,20 @@ function App() {
     }, [refreshWorkspaces]);
 
     // Load config on mount; determine whether onboarding is needed.
-    // Show onboarding when EITHER localStorage flag is unset OR the server has no API key.
+    // Show onboarding ONLY when the server has no API key configured.
+    // This avoids showing the wizard on new devices (e.g. phone via QR) when
+    // the server is already fully configured.
     useEffect(() => {
         getConfig()
             .then((config) => {
                 setCurrentModel(config.defaultModel);
                 setServerConfig(config);
-                setNeedsOnboarding(!isOnboardingDone() || !config.apiKeySet);
+                if (config.apiKeySet) {
+                    markOnboardingDone();
+                    setNeedsOnboarding(false);
+                } else {
+                    setNeedsOnboarding(true);
+                }
             })
             .catch(() => {
                 setNeedsOnboarding(!isOnboardingDone());
@@ -1143,6 +1153,9 @@ function App() {
         isThinking: isThinking,
     });
 
+    // Mobile-specific: vibration, audio alert, title flash when approval needed
+    useMobileAlerts({ pendingCount: pendingToolCount, isMobile });
+
     const currentDraft = useMemo(
         () => (sessionId ? loadDraft(sessionId) : ''),
         [sessionId],
@@ -1443,6 +1456,17 @@ ${content}
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
+            {isMobile ? (
+                <MobileStatusBar
+                    isThinking={isThinking}
+                    currentToolName={currentToolName}
+                    pendingApprovalCount={pendingToolCount}
+                    isConnected={isConnected}
+                    running={running}
+                    onMenuClick={handleMenuClick}
+                    onStop={handleStop}
+                />
+            ) : (
             <Header
                 currentModel={currentModel}
                 tokenUsage={tokenUsage}
@@ -1483,6 +1507,7 @@ ${content}
                 onMenuClick={handleMenuClick}
                 connectionStatus={sessionId ? connectionStatus : undefined}
             />
+            )}
 
             <SearchBar
                 isOpen={showSearch}
@@ -1955,6 +1980,11 @@ ${content}
                 evolvedSkillCount={evolvedSkillCount}
                 evolutionReviewing={evolutionReviewing}
             />
+
+            {/* Mobile approval bottom sheet — fixed position, above everything */}
+            {isMobile && pendingToolCount > 0 && (
+                <MobileApprovalSheet onApprove={handleApproveTool} />
+            )}
 
             {showSettings && serverConfig && (
                 <SettingsModal

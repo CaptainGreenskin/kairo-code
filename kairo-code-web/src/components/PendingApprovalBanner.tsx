@@ -1,4 +1,5 @@
 import { AlertTriangle } from 'lucide-react';
+import { useBreakpoint } from '@hooks/useBreakpoint';
 
 interface PendingApprovalBannerProps {
     count: number;
@@ -6,6 +7,9 @@ interface PendingApprovalBannerProps {
 }
 
 export function PendingApprovalBanner({ count, onScrollToPending }: PendingApprovalBannerProps) {
+    const bp = useBreakpoint();
+    const isMobile = bp === 'xs' || bp === 'sm';
+
     if (count === 0) return null;
 
     return (
@@ -15,11 +19,17 @@ export function PendingApprovalBanner({ count, onScrollToPending }: PendingAppro
                 {count === 1
                     ? '1 tool awaiting approval'
                     : `${count} tools awaiting approval`}
-                {' — '}
-                <kbd className="px-1 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 font-mono text-[10px]">y</kbd>
-                {' approve · '}
-                <kbd className="px-1 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 font-mono text-[10px]">n</kbd>
-                {' reject'}
+                {isMobile ? (
+                    <span className="opacity-70"> — Tap below to approve</span>
+                ) : (
+                    <>
+                        {' — '}
+                        <kbd className="px-1 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 font-mono text-[10px]">y</kbd>
+                        {' approve · '}
+                        <kbd className="px-1 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 font-mono text-[10px]">n</kbd>
+                        {' reject'}
+                    </>
+                )}
             </span>
             <button
                 onClick={onScrollToPending}
