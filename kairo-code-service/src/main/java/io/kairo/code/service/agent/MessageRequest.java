@@ -13,19 +13,27 @@ import javax.annotation.Nullable;
  * @param imageData      base64-encoded image data (nullable)
  * @param imageMediaType MIME type of the image, e.g. "image/png" (nullable)
  * @param prebuiltMsg    pre-built Msg with metadata (nullable; when set, text/image are ignored)
+ * @param targetStepId   when sent during Experts execution, the focused expert step to steer in
+ *                       real time (nullable; null → steer all currently-active steps)
  */
 public record MessageRequest(
         String text,
         String imageData,
         String imageMediaType,
-        @Nullable Msg prebuiltMsg) {
+        @Nullable Msg prebuiltMsg,
+        @Nullable String targetStepId) {
+
+    public MessageRequest(
+            String text, String imageData, String imageMediaType, @Nullable Msg prebuiltMsg) {
+        this(text, imageData, imageMediaType, prebuiltMsg, null);
+    }
 
     public MessageRequest(String text, String imageData, String imageMediaType) {
-        this(text, imageData, imageMediaType, null);
+        this(text, imageData, imageMediaType, null, null);
     }
 
     public MessageRequest(Msg prebuiltMsg) {
-        this(null, null, null, prebuiltMsg);
+        this(null, null, null, prebuiltMsg, null);
     }
 
     public static MessageRequest text(String msg) {

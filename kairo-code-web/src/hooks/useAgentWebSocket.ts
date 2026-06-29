@@ -239,7 +239,7 @@ interface UseAgentWebSocketReturn {
     disconnect: () => void;
     /** Generic send — pass any JSON-serializable payload over the shared WS. */
     send: (payload: Record<string, unknown>) => boolean;
-    sendMessage: (sessionId: string, text: string, imageData?: string, imageMediaType?: string) => void;
+    sendMessage: (sessionId: string, text: string, imageData?: string, imageMediaType?: string, targetStepId?: string) => void;
     approveTool: (
         sessionId: string,
         toolCallId: string,
@@ -535,11 +535,22 @@ export function useAgentWebSocket(
     }, [cleanupSocket, clearStalledTimer]);
 
     const sendMessage = useCallback(
-        (sessionId: string, text: string, imageData?: string, imageMediaType?: string) => {
+        (
+            sessionId: string,
+            text: string,
+            imageData?: string,
+            imageMediaType?: string,
+            targetStepId?: string,
+        ) => {
             const body: Record<string, unknown> = { action: 'message', sessionId, message: text };
             if (imageData) {
                 body.imageData = imageData;
                 body.imageMediaType = imageMediaType;
+            }
+            // Experts mid-flight steering: when a specific running expert is focused, target it so
+            // the directive is injected into just that worker (omitted → backend steers all active).
+            if (targetStepId) {
+                body.targetStepId = targetStepId;
             }
             // A new user message supersedes any prior stop — clear the resumable flag so the
             // general-flow "Resume" affordance does not linger across a fresh turn.

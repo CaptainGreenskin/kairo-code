@@ -217,6 +217,25 @@ export function ExpertStepCard({ step, defaultExpanded = false }: ExpertStepCard
                             <ThinkingEntry duration={displayDuration} text={thinkingText} />
                         )}
 
+                        {/* Mid-flight user interventions (v2 steering): directives injected into
+                            this running expert via Agent.injectMessages. */}
+                        {step.steers && step.steers.length > 0 && (
+                            <div className="space-y-1 py-1">
+                                {step.steers.map((directive, i) => (
+                                    <div
+                                        key={`steer-${i}`}
+                                        className="flex items-start gap-2 rounded border border-sky-500/30 bg-sky-500/10 px-2 py-1"
+                                    >
+                                        <span className="text-xs shrink-0 mt-0.5">👤</span>
+                                        <p className="min-w-0 flex-1 text-[10px] text-sky-300">
+                                            <span className="font-medium">用户实时干预：</span>
+                                            {directive}
+                                        </p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
                         {/* Tool call cards — full args + result/diff/terminal, reusing the
                             main-chat ToolCallCard so experts show their real read/edit/bash work. */}
                         {step.toolCalls.length > 0 && (

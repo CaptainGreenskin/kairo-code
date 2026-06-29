@@ -627,10 +627,18 @@ public class AgentService implements DisposableBean, InitializingBean {
      */
     public Flux<AgentEvent> sendMessage(String sessionId, String text,
                                          String imageData, String imageMediaType) {
-        if (imageData != null && !imageData.isBlank()) {
-            return sendMessage(sessionId, new MessageRequest(text, imageData, imageMediaType));
-        }
-        return sendMessage(sessionId, text);
+        return sendMessage(sessionId, text, imageData, imageMediaType, null);
+    }
+
+    /**
+     * Send a user message, optionally targeting a specific Experts step for real-time mid-flight
+     * steering ({@code targetStepId}; null → steer all active steps when sent during execution).
+     */
+    public Flux<AgentEvent> sendMessage(String sessionId, String text,
+                                         String imageData, String imageMediaType,
+                                         String targetStepId) {
+        return sendMessage(sessionId,
+                new MessageRequest(text, imageData, imageMediaType, null, targetStepId));
     }
 
     private Flux<AgentEvent> sendMessage(String sessionId, MessageRequest request) {

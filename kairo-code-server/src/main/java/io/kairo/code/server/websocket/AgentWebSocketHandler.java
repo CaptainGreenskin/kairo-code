@@ -200,12 +200,15 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         String msg = text(body, "message");
         String imageData = text(body, "imageData");
         String imageMediaType = text(body, "imageMediaType");
+        // Optional: when sent during Experts execution while a specific expert is focused, steer
+        // only that running step in real time (null → steer all active steps).
+        String targetStepId = text(body, "targetStepId");
         if (sid == null || msg == null) {
             sendErr(session, "message", "missing sessionId or message");
             return;
         }
         ensureEventSubscription(sid);
-        agentService.sendMessage(sid, msg, imageData, imageMediaType)
+        agentService.sendMessage(sid, msg, imageData, imageMediaType, targetStepId)
                 .subscribe(
                         event -> { /* events arrive via the single shared subscription */ },
                         err -> log.error("Stream error for session {}", sid, err)
@@ -359,17 +362,27 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
             return;
         }
 
-        // Route user rejection feedback to the step's agent via MessageBus.
-        // The step agent can pick this up on its receive channel to trigger re-generation.
-        Msg feedbackMsg = Msg.of(MsgRole.USER,
-                "User rejected output. Feedback: " + feedback);
-        messageBus.send("user-feedback", stepId, feedbackMsg).subscribe(
-                unused -> {},
-                err -> log.warn("Failed to route reject feedback for team={} step={}",
-                        teamId, stepId, err)
-        );
+        // Route rejection feedback as a real-time, step-targeted steer into the running worker
+        // (Agent.injectMessages via SwarmCoordinator.steer). The previous MessageBus("user-feedback")
+        // channel had no consumer and silently dropped the feedback.
+        String sid = (String) session.getAttributes().get(ATTR_SESSION_ID);
+        if (sid == null) {
+            sendErr(session, "rejectStep", "session not bound");
+            return;
+        }
+        ensureEventSubscription(sid);
+        agentService.sendMessage(
+                        sid,
+                        "Revise the current step per this feedback: " + feedback,
+                        null,
+                        null,
+                        stepId)
+                .subscribe(
+                        event -> { /* events arrive via the single shared subscription */ },
+                        err -> log.warn("Failed to route reject feedback for team={} step={}",
+                                teamId, stepId, err));
 
-        log.info("Reject feedback routed: team={} step={}", teamId, stepId);
+        log.info("Reject feedback steered: team={} step={}", teamId, stepId);
         sendAck(session, "rejectStep");
     }
 

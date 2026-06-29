@@ -148,17 +148,39 @@ public class SwarmCoordinator {
     }
 
     /**
-     * Inject user feedback (rejection) into a running step's agent channel.
-     * The step agent can pick this up via {@link io.kairo.api.team.MessageBus#receive}.
+     * Steer running expert worker(s) in real time by injecting a user directive into the live
+     * worker agent's conversation (picked up at its next reasoning iteration, no interrupt).
+     *
+     * @param stepId target a specific running step; {@code null}/blank → all currently-active steps
+     * @param directive the user's instruction
+     * @return {@code true} if at least one active worker received the directive; {@code false} means
+     *     no step is currently executing (caller should queue the directive for the next plan)
+     */
+    public boolean steer(String stepId, String directive) {
+        return coordinator.steer(stepId, directive);
+    }
+
+    /**
+     * Inject user feedback (e.g. a step rejection) into the running step's worker in real time.
+     * Reuses the {@link #steer} path (which uses {@code Agent.injectMessages}) — the previous
+     * {@code MessageBus.send("user-feedback", …)} channel had no consumer and was a no-op.
      *
      * @param teamId   the team ID (for logging)
-     * @param stepId   the step whose agent should receive the feedback
-     * @param feedback the user's rejection feedback text
-     * @return a Mono that completes when the message is enqueued
+     * @param stepId   the step whose worker should receive the feedback
+     * @param feedback the user's feedback text
+     * @return a Mono that completes once the directive is injected (or skipped if step not active)
      */
     public Mono<Void> injectUserFeedback(String teamId, String stepId, String feedback) {
-        Msg feedbackMsg = Msg.of(MsgRole.USER, "User rejected output. Feedback: " + feedback);
-        return messageBus.send("user-feedback", stepId, feedbackMsg);
+        return Mono.fromRunnable(
+                () -> {
+                    boolean hit = coordinator.steer(stepId, "User feedback: " + feedback);
+                    if (!hit) {
+                        log.debug(
+                                "injectUserFeedback: step {} not active, feedback dropped (team {})",
+                                stepId,
+                                teamId);
+                    }
+                });
     }
 
     /**

@@ -39,6 +39,8 @@ export interface StepState {
     round?: number;
     maxRounds?: number;
   };
+  /** User mid-flight steering directives injected into this running step (v2 intervention). */
+  steers?: string[];
 }
 
 export interface CostSnapshot {
@@ -352,7 +354,7 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
           updatedTeam.dag = [];
           updatedTeam.edges = [];
           updatedTeam.planPreview = undefined;
-          updatedTeam.output = undefined;
+          updatedTeam.finalOutput = undefined;
           updatedTeam.warnings = [];
           break;
 
@@ -464,6 +466,17 @@ export const useExpertTeamStore = create<ExpertTeamStore>((set, get) => ({
             updatedTeam.steps[stepId] = {
               ...artStep,
               artifact: artStep.artifact + ((attributes.chunk as string) ?? ''),
+            };
+          }
+          break;
+
+        case 'STEP_STEERED':
+          if (stepId) {
+            const steeredStep = updatedTeam.steps[stepId] ?? createEmptyStep(stepId);
+            const directive = (attributes.directive as string) ?? '';
+            updatedTeam.steps[stepId] = {
+              ...steeredStep,
+              steers: [...(steeredStep.steers ?? []), directive],
             };
           }
           break;

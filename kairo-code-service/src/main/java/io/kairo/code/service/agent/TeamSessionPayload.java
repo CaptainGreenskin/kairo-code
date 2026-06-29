@@ -218,18 +218,32 @@ public final class TeamSessionPayload implements SessionPayload {
                             "SESSION_BUSY"));
                 }
                 case EXECUTING -> {
-                    // Mid-flight intervention (v1): accept user messages during execution
-                    // instead of rejecting with SESSION_BUSY. The message is stored as a
-                    // directive and will be incorporated into the next plan after the current
-                    // team execution completes. This removes the frustrating "wait for completion"
-                    // rejection and lets users add requirements mid-flight.
+                    // Mid-flight intervention (v2): inject the user's directive into the live
+                    // worker agent(s) in real time via SwarmCoordinator.steer (Agent.injectMessages
+                    // — picked up at the worker's next reasoning iteration, no interrupt). If a step
+                    // is currently executing the directive lands immediately; if we're between steps
+                    // (no active worker) we fall back to the v1 queue so it's incorporated into the
+                    // next plan.
                     String directive = request.text();
                     if (directive != null && !directive.isBlank()) {
-                        midFlightDirectives.add(directive);
-                        // Emit the user's message so it appears in chat (not silently swallowed).
+                        // Echo the user's message so it appears in chat (not silently swallowed).
                         ctx.emit(AgentEvent.textChunk(sessionId, directive));
-                        ctx.emit(AgentEvent.textChunk(sessionId,
-                                "\n\n_⏳ Received. Will be incorporated after current execution completes._"));
+                        boolean injected = false;
+                        try {
+                            injected = preset.coordinator().steer(request.targetStepId(), directive);
+                        } catch (RuntimeException ex) {
+                            log.warn("Mid-flight steer failed for session {}: {}",
+                                    sessionId, ex.toString());
+                        }
+                        if (injected) {
+                            ctx.emit(AgentEvent.textChunk(sessionId,
+                                    "\n\n_⚡ Injected into the running expert(s) — picked up on the next step._"));
+                        } else {
+                            // No active worker right now: queue for the next planning round.
+                            midFlightDirectives.add(directive);
+                            ctx.emit(AgentEvent.textChunk(sessionId,
+                                    "\n\n_⏳ Received between steps. Will be incorporated into the next plan._"));
+                        }
                     }
                     return Flux.empty();
                 }
