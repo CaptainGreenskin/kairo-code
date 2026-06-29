@@ -165,8 +165,9 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         WorkspaceConfig workspace = wsOpt.get();
 
         String apiKey = nonBlank(text(body, "apiKey"), serverProperties.apiKey());
-        String provider = nonBlank(text(body, "provider"), serverProperties.provider());
-        String baseUrl = resolveBaseUrl(provider);
+        String explicitProvider = text(body, "provider");
+        String provider = nonBlank(explicitProvider, serverProperties.provider());
+        String baseUrl = resolveBaseUrl(provider, explicitProvider);
         String model = nonBlank(text(body, "model"), serverProperties.model());
         String mode = nonBlank(text(body, "mode"), "agent");
         String permissionMode = text(body, "permissionMode");
@@ -500,15 +501,23 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
         return (value != null && !value.isBlank()) ? value : fallback;
     }
 
-    private String resolveBaseUrl(String provider) {
-        if (provider == null || provider.isBlank()) {
+    private String resolveBaseUrl(String provider, String explicitProvider) {
+        // Only override the configured baseUrl when the create message EXPLICITLY switches
+        // to a different known provider — then use that provider's canonical endpoint.
+        if (explicitProvider != null && !explicitProvider.isBlank()
+                && io.kairo.code.core.config.ProviderRegistry.isKnown(explicitProvider)
+                && !explicitProvider.equalsIgnoreCase(serverProperties.provider())) {
+            return io.kairo.code.core.config.ProviderRegistry.resolveBaseUrl(explicitProvider);
+        }
+        // Otherwise honor the explicitly configured baseUrl (e.g. a proxy/gateway like
+        // zenmux). Previously a known provider id (anthropic) unconditionally returned the
+        // ProviderRegistry default (api.anthropic.com), ignoring the user's configured
+        // baseUrl and forcing a per-session credential rebuild on the first message.
+        if (serverProperties.baseUrl() != null && !serverProperties.baseUrl().isBlank()) {
             return serverProperties.baseUrl();
         }
-        // Delegate to ProviderRegistry — was a duplicate of AgentService's switch
-        // that only knew about openai+anthropic. glm / qianwen used to fall
-        // through to whatever serverProperties.baseUrl() was set to (i.e. the
-        // wrong endpoint for their provider id).
-        if (io.kairo.code.core.config.ProviderRegistry.isKnown(provider)) {
+        // No configured baseUrl: fall back to the provider's canonical endpoint.
+        if (provider != null && io.kairo.code.core.config.ProviderRegistry.isKnown(provider)) {
             return io.kairo.code.core.config.ProviderRegistry.resolveBaseUrl(provider);
         }
         return serverProperties.baseUrl();

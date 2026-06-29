@@ -204,7 +204,15 @@ public final class CodeAgentFactory {
         // ctor that the class form would pick. When no LSP is wired (childSession spawns,
         // tests), the LspService is null and the tools fall back to the original behavior.
         var lspForTools = io.kairo.code.core.LspServiceHolder.global();
+        // registerTool() registers the ToolDefinition (schema) so the tool is visible to the
+        // model; registerInstance() then overrides the default no-arg instance with the
+        // LSP-wired one. Without the registerTool() call, write/edit have NO ToolDefinition
+        // (registerInstance only stores the executor, not the schema) and silently vanish from
+        // the model's tool list (getAll() → DeferredToolFilter.coreOnly()), forcing the agent
+        // to fall back to `bash echo` for file writes — the root cause of poor write behavior.
+        registry.registerTool(WriteTool.class);
         registry.registerInstance("write", new WriteTool(null, lspForTools));
+        registry.registerTool(EditTool.class);
         registry.registerInstance("edit", new EditTool(null, lspForTools));
         registry.registerTool(GrepTool.class);
         registry.registerTool(GlobTool.class);
@@ -377,6 +385,26 @@ public final class CodeAgentFactory {
         // (one-shot/batch) mode, where there is no approver anyway.
         if (config.workingDir() != null && !config.workingDir().isBlank()) {
             executor.setWorkspaceRoot(Path.of(config.workingDir()));
+        }
+
+        // Load the layered permission whitelist (~/.kairo/permissions.json + project
+        // .kairo/permissions.json + .kairo/permissions.local.json) so users can declare
+        // Claude-Code-style allow/deny rules and an optional mode. Without this the executor
+        // is stuck on PermissionMode.DEFAULT (WRITE auto-approved, every bash/SYSTEM_CHANGE
+        // requires approval) with no way to pre-allow commands or restrict write paths.
+        // defaults() is (null mode, empty rules), so this is a no-op when no file exists.
+        // Skipped in BYPASS (one-shot/batch) mode — that path already auto-approves everything.
+        if (config.workingDir() != null && !config.workingDir().isBlank()
+                && executor.getPermissionMode() != io.kairo.core.tool.permission.PermissionMode.BYPASS) {
+            try {
+                var permissionSettings =
+                        new io.kairo.core.tool.permission.PermissionSettingsLoader(
+                                        new ObjectMapper(), Path.of(config.workingDir()))
+                                .load();
+                executor.loadPermissionSettings(permissionSettings);
+            } catch (Exception e) {
+                log.warn("Failed to load permission settings: {}", e.getMessage());
+            }
         }
 
         // Workflow tool — the schema is already registered above; now inject the executor
