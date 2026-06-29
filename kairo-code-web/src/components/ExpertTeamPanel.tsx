@@ -282,7 +282,7 @@ export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendActio
       {team.dag.length > 0 && team.status !== 'completed' && (
         <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--bg-secondary)]/50 shrink-0">
           <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-            <span className="font-medium text-[var(--text-primary)]">{team.dag.length} 步计划</span>
+            <span className="font-medium text-[var(--text-primary)]">{team.dag.length}-step plan</span>
             {' · '}
             {team.dag.map((n, i) => {
               const meta = getRoleMeta(n.roleId);
@@ -295,7 +295,7 @@ export function ExpertTeamPanel({ teamId, readOnly: _readOnly = false, sendActio
             })}
             {team.dag.some(n => (n.dependsOn?.length ?? 0) === 0 && team.dag.filter(m => (m.dependsOn?.length ?? 0) === 0).length > 1) && (
               <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">
-                含并行
+                parallel
               </span>
             )}
           </p>

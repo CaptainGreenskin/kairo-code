@@ -228,7 +228,7 @@ export function ExpertStepCard({ step, defaultExpanded = false }: ExpertStepCard
                                     >
                                         <span className="text-xs shrink-0 mt-0.5">👤</span>
                                         <p className="min-w-0 flex-1 text-[10px] text-sky-300">
-                                            <span className="font-medium">用户实时干预：</span>
+                                            <span className="font-medium">User steered: </span>
                                             {directive}
                                         </p>
                                     </div>

@@ -127,6 +127,32 @@
                             </execution>
                         </executions>
                     </plugin>
+                    <!-- Step 2.5: wipe stale bundle chunks before copying the fresh dist.
+                         vite emits content-hashed chunk filenames; without this the static dir
+                         accumulates every past build's chunks (1000+ stale .js, ~30MB jar bloat)
+                         since `clean` does not touch this source-tree dir. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-clean-plugin</artifactId>
+                        <inherited>false</inherited>
+                        <executions>
+                            <execution>
+                                <id>clean-static</id>
+                                <phase>generate-resources</phase>
+                                <goals>
+                                    <goal>clean</goal>
+                                </goals>
+                                <configuration>
+                                    <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                                    <filesets>
+                                        <fileset>
+                                            <directory>${project.basedir}/kairo-code-server/src/main/resources/static</directory>
+                                        </fileset>
+                                    </filesets>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
                     <!-- Step 3: copy dist to server static resources -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>

@@ -1823,7 +1823,7 @@ ${content}
                                                                     </button>
                                                                 </div>
                                                             )}
-                                                            {isRunning && storeRunning && (
+                                                            {isRunning && storeRunning && buildPhase !== 'PLAN_PENDING' && (
                                                                 <div>
                                                                     <ThinkingIndicator
                                                                         isVisible={true}

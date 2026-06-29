@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useSessionStore } from '@store/sessionStore';
+import { useBuildPhaseStore } from '@store/buildPhaseStore';
 
 const YELLOW_THRESHOLD_MS = 60_000;
 const RED_THRESHOLD_MS = 300_000;
@@ -24,6 +25,7 @@ interface Props {
 export function StallIndicator({ onForceCancel }: Props) {
     const running = useSessionStore((s) => s.running);
     const lastEventAt = useSessionStore((s) => s.lastEventAt);
+    const buildPhase = useBuildPhaseStore((s) => s.phase);
     const [now, setNow] = useState(() => Date.now());
 
     // Tick every second only while running so the elapsed counter animates,
@@ -35,6 +37,10 @@ export function StallIndicator({ onForceCancel }: Props) {
     }, [running]);
 
     if (!running || lastEventAt === 0) return null;
+    // During PLAN_PENDING the agent is intentionally idle, awaiting the user's plan approval —
+    // not stalled. The Experts Canvas already shows a clear "Approve and Run" CTA, so suppress
+    // the stall warning here to avoid a misleading "agent silent · still waiting / likely stalled".
+    if (buildPhase === 'PLAN_PENDING') return null;
     const elapsed = now - lastEventAt;
     if (elapsed < YELLOW_THRESHOLD_MS) return null;
 
