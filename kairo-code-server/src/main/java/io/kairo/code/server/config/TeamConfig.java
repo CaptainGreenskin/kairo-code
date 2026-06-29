@@ -204,6 +204,11 @@ public class TeamConfig {
             }
             return builder.build();
         });
+        // L2 team self-evolution: record successful expert compositions and recall them at
+        // planning time so the planner reuses what worked for similar tasks. Same coordinator
+        // instance that confirmAndExecute runs on, so the store is live for every experts session.
+        coordinator.setTeamPatternStore(
+                new io.kairo.multiagent.orchestration.TeamPatternStore());
         SwarmCoordinator sc = new SwarmCoordinator(
                 coordinator,
                 registry,

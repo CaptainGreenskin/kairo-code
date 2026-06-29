@@ -77,6 +77,11 @@ public final class ExpertTeamFactory {
                                         .agent(),
                         memoryStore,
                         extractor);
+        // L2 self-evolution: record successful team compositions to ~/.kairo-code/team-patterns/
+        // and recall them at planning time so the planner reuses what worked for similar tasks.
+        composition
+                .coordinator()
+                .setTeamPatternStore(new io.kairo.multiagent.orchestration.TeamPatternStore());
         return new SwarmCoordinator(
                 composition.coordinator(),
                 composition.roleRegistry(),
