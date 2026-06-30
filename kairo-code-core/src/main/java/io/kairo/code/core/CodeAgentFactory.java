@@ -81,6 +81,13 @@ import io.kairo.tools.agent.TodoWriteTool;
 import io.kairo.tools.info.AskUserTool;
 import io.kairo.tools.info.WebFetchTool;
 import io.kairo.tools.cron.SleepTool;
+import io.kairo.tools.cron.CronCreateTool;
+import io.kairo.tools.cron.CronDeleteTool;
+import io.kairo.tools.cron.CronListTool;
+import io.kairo.tools.cron.CronEditTool;
+import io.kairo.tools.cron.CronPauseTool;
+import io.kairo.tools.cron.CronResumeTool;
+import io.kairo.tools.cron.CronTriggerTool;
 import io.kairo.tools.exec.MvnTool;
 import io.kairo.tools.exec.VerifyExecutionTool;
 import io.kairo.tools.workflow.WorkflowTool;
@@ -121,6 +128,19 @@ import org.slf4j.LoggerFactory;
 public final class CodeAgentFactory {
 
     private static final Logger log = LoggerFactory.getLogger(CodeAgentFactory.class);
+
+    /**
+     * Global {@link io.kairo.api.cron.CronScheduler} backing the cron tools. Set once at server
+     * bootstrap (cron is a process-wide singleton, not per-session) so every agent session gets the
+     * cron tools without threading the scheduler through SessionOptions. When null (cron not wired)
+     * the tools are simply not registered and invisible to the model.
+     */
+    private static volatile io.kairo.api.cron.CronScheduler globalCronScheduler;
+
+    /** Wire the process-wide cron scheduler; call once at server startup. */
+    public static void setGlobalCronScheduler(io.kairo.api.cron.CronScheduler scheduler) {
+        globalCronScheduler = scheduler;
+    }
     private static final String SYSTEM_PROMPT_RESOURCE = "system-prompt.md";
     static final String SYSTEM_PROMPT_CLAUDE_RESOURCE = "system-prompt-claude.md";
     static final String SYSTEM_PROMPT_GLM_RESOURCE = "system-prompt-glm.md";
@@ -240,6 +260,23 @@ public final class CodeAgentFactory {
         // Sleep: lets the agent voluntarily pause (poll CI, rate-limit bulk ops, demo pacing).
         // Reactor-cancellable, capped at 24h. For longer waits the agent should use CronCreate.
         registry.registerTool(SleepTool.class);
+        // Cron tools (Create/Delete/List/Edit/Pause/Resume/Trigger): registered only when a global
+        // CronScheduler has been wired at bootstrap, so the agent can schedule recurring/deferred
+        // tasks. Without this the tools are invisible to the model — the classic "tool exists in
+        // source but agent can't call it" gap.
+        io.kairo.api.cron.CronScheduler cron = globalCronScheduler;
+        if (cron != null) {
+            // registerWithInstance = scanClass (definition → discovery map) + bind instance
+            // (CronScheduler-injected). registerInstance alone would NOT register the definition,
+            // making the tools invisible to search_tools/deferred filtering.
+            registry.registerWithInstance(CronCreateTool.class, new CronCreateTool(cron));
+            registry.registerWithInstance(CronDeleteTool.class, new CronDeleteTool(cron));
+            registry.registerWithInstance(CronListTool.class, new CronListTool(cron));
+            registry.registerWithInstance(CronEditTool.class, new CronEditTool(cron));
+            registry.registerWithInstance(CronPauseTool.class, new CronPauseTool(cron));
+            registry.registerWithInstance(CronResumeTool.class, new CronResumeTool(cron));
+            registry.registerWithInstance(CronTriggerTool.class, new CronTriggerTool(cron));
+        }
         // Workflow tool — schema registration only here. The instance + executor injection
         // happens AFTER the DefaultToolExecutor is constructed below (it doesn't exist yet at
         // this point in the bootstrap).

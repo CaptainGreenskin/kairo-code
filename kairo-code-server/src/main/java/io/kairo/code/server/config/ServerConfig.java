@@ -93,6 +93,39 @@ public class ServerConfig {
     }
 
     /**
+     * Process-wide {@link io.kairo.api.cron.CronScheduler}. Backed by an on-disk task store under
+     * {@code ~/.kairo-code/cron/}, fired via a headless agent session per task (see {@link
+     * io.kairo.code.service.cron.HeadlessCronFireCallback}). Wired into {@link
+     * io.kairo.code.core.CodeAgentFactory} as the global scheduler so every agent session gets the
+     * cron tools (CronCreate/Delete/List/Edit/Pause/Resume/Trigger). Bootstrap failure degrades
+     * gracefully: cron disabled, tools not registered.
+     */
+    @Bean(destroyMethod = "stop")
+    public io.kairo.api.cron.CronScheduler cronScheduler(
+            io.kairo.code.service.AgentService agentService) {
+        try {
+            java.nio.file.Path cronFile =
+                    java.nio.file.Path.of(
+                            System.getProperty("user.home"), ".kairo-code", "cron", "tasks.json");
+            java.nio.file.Files.createDirectories(cronFile.getParent());
+            io.kairo.cron.CronTaskStore store = new io.kairo.cron.CronTaskStore(cronFile);
+            io.kairo.api.cron.CronFireCallback callback =
+                    new io.kairo.code.service.cron.HeadlessCronFireCallback(
+                            agentService, defaultAgentConfig());
+            io.kairo.cron.DefaultCronScheduler scheduler =
+                    new io.kairo.cron.DefaultCronScheduler(
+                            store, callback, java.time.ZoneId.systemDefault());
+            scheduler.start();
+            io.kairo.code.core.CodeAgentFactory.setGlobalCronScheduler(scheduler);
+            log.info("CronScheduler started (store={})", cronFile);
+            return scheduler;
+        } catch (Exception e) {
+            log.warn("CronScheduler bootstrap failed, cron tools disabled: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Override the auto-configured {@code openaiModelProvider} so SwarmCoordinator workers (and any
      * other {@code @Autowired ModelProvider} consumers) see the GLM-aware build. The upstream
      * starter's 2-arg {@code OpenAIProvider} forces a {@code /v1/chat/completions} suffix, which
