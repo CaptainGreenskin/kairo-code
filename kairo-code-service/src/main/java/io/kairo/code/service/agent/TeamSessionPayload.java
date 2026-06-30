@@ -494,6 +494,14 @@ public final class TeamSessionPayload implements SessionPayload {
         Sinks.Many<AgentEvent> sink = ctx.sharedSink();
         ctx.emit(AgentEvent.thinking(sessionId));
 
+        // Bind the session workspace BEFORE planning so the planner's request carries the
+        // workspace root (published into TeamExecutionRequest.context by SwarmCoordinator), which
+        // the WorkspaceContextGatherer reads at execution time. confirmAndExecute reuses this same
+        // request, so the root must be present at plan time, not only at execute time.
+        if (config.workingDir() != null && !config.workingDir().isBlank()) {
+            preset.coordinator().setActiveWorkspace(new SessionWorkspace(config.workingDir()));
+        }
+
         var startResult = preset.coordinator()
                 .startExpertTeamWithId(goal, preset.teamConfig(), List.<String>of(), true);
         pendingTeamId = startResult.teamId();

@@ -146,7 +146,7 @@ public class TeamConfig {
             ServerConfig.ServerProperties serverProperties,
             @Autowired(required = false) KairoEventBus eventBus,
             @Autowired(required = false) SynthesizerStep synthesizer) {
-        return new ExpertTeamCoordinator(
+        ExpertTeamCoordinator coordinator = new ExpertTeamCoordinator(
                 eventBus,
                 new SimpleEvaluationStrategy(),
                 null, // no agent-based evaluator yet
@@ -158,6 +158,11 @@ public class TeamConfig {
                 memoryStore,
                 new io.kairo.code.core.team.LlmLessonExtractor(
                         modelProvider, serverProperties.model()));
+        // Wire workspace-context injection: gathers a per-session workspace snapshot once per
+        // execution and feeds it to worker prompts by role scope (see DefaultGenerator).
+        coordinator.setWorkspaceContextGatherer(
+                new io.kairo.code.core.team.SessionWorkspaceContextGatherer());
+        return coordinator;
     }
 
     @Bean

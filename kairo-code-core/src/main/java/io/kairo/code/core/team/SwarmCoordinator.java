@@ -104,8 +104,16 @@ public class SwarmCoordinator {
 
     public TeamStartResult startExpertTeamWithId(String goal, TeamConfig config, List<String> roleIds, boolean planOnly) {
         io.kairo.api.team.Team team = buildTeam(roleIds);
+        // Publish the session's workspace root into the request context so the (singleton)
+        // WorkspaceContextGatherer can collect the RIGHT workspace per execution instead of being
+        // bound to one fixed root. Absent → gatherer degrades to an empty SharedContext.
+        java.util.Map<String, Object> ctx = new java.util.HashMap<>();
+        Workspace ws = activeWorkspace.get();
+        if (ws != null && ws.root() != null) {
+            ctx.put(SessionWorkspaceContextGatherer.WORKSPACE_ROOT_KEY, ws.root().toString());
+        }
         TeamExecutionRequest request = new TeamExecutionRequest(
-                UUID.randomUUID().toString(), goal, Map.of(), config);
+                UUID.randomUUID().toString(), goal, java.util.Map.copyOf(ctx), config);
         String teamId = team.name();
         lastTeamId = teamId;
         return new TeamStartResult(teamId, coordinator.execute(request, team, planOnly));
