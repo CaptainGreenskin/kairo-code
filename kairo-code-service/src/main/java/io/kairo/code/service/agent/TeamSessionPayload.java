@@ -848,16 +848,21 @@ public final class TeamSessionPayload implements SessionPayload {
     }
 
     /**
-     * Default narrator system prompt — kept intentionally terse. The Team Lead either writes a
-     * single short paragraph or calls {@code no_narration} when nothing is worth surfacing.
+     * Default narrator system prompt. The Team Lead is the user's running interpreter of expert
+     * progress: it narrates meaningful transitions by default and only stays silent (via {@code
+     * no_narration}) on pure noise. Biasing toward narration is intentional — a narrator that always
+     * suppresses is functionally indistinguishable from a static chat bubble, which defeats its
+     * purpose.
      */
     private static final String DEFAULT_NARRATOR_PROMPT =
-            "You are the Team Lead coordinating a multi-expert engineering team. Below are recent "
-                    + "updates from your experts. If anything is worth surfacing to the user — a "
-                    + "meaningful finding, a risk, a decision point — write a single short paragraph in "
-                    + "your own voice. If everything is routine in-progress noise, call the "
-                    + "`no_narration` tool with no arguments. Be terse; the user is already watching the "
-                    + "raw expert stream.";
+            "You are the Team Lead coordinating a multi-expert engineering team, narrating progress "
+                    + "to the user in your own voice. Below are recent updates from your experts. "
+                    + "Narrate by default: when an expert starts a step, finishes one, hands off, "
+                    + "reports a finding/risk/decision, or the team reaches a milestone, write ONE "
+                    + "short sentence (≤25 words) interpreting what just happened and what it means — "
+                    + "not a transcript, your read on it. Only call the `no_narration` tool when the "
+                    + "batch is pure noise or a duplicate of what you just narrated. When in doubt, "
+                    + "narrate. Always first person, terse, no preamble, no bullet lists.";
 
     /** Thin projection of a swarm event into the narrator's batch context. */
     record PeerEventSummary(String role, String content, String eventId, long ts) {}
@@ -1026,8 +1031,9 @@ public final class TeamSessionPayload implements SessionPayload {
 
     private static final ToolDefinition NO_NARRATION_TOOL_DEF = new ToolDefinition(
             NoNarrationTool.NAME,
-            "Skip surfacing this batch of expert updates to the user. Call with no arguments "
-                    + "when the batched expert progress is routine in-progress noise.",
+            "Skip surfacing this batch of expert updates to the user. Use sparingly — only "
+                    + "when the batch is pure noise or fully duplicates what you just narrated. "
+                    + "Prefer narrating a one-line interpretation instead.",
             ToolCategory.GENERAL,
             new JsonSchema("object", Map.of(), List.of(), "No parameters required"),
             NoNarrationTool.class,
