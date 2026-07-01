@@ -291,7 +291,13 @@ public class AgentEventBridgeHook {
         if (diagnosticsTracker != null) {
             diagnosticsTracker.record(event.type(), event.timestamp());
         }
-        Sinks.EmitResult result = sink.tryEmitNext(event);
+        // Spin-retry on FAIL_NON_SERIALIZED. This hook emits the terminal AGENT_DONE / AGENT_ERROR,
+        // and the shared multicast sink is written concurrently (agent reactor, swarm bridge,
+        // narrator, heartbeat). A raw tryEmitNext silently drops the terminal under contention,
+        // leaving the chat stuck on "Stop" forever — the exact failure AgentRuntimeContext.emit
+        // already guards against. Route through the same serialized path.
+        Sinks.EmitResult result =
+                io.kairo.code.service.agent.AgentRuntimeContext.emitSerialized(sink, event);
         if (result.isFailure()) {
             log.warn("Failed to emit event {} for session {}: {}", event.type(), sessionId, result);
         }

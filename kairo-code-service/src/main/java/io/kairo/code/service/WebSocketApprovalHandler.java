@@ -190,7 +190,10 @@ public final class WebSocketApprovalHandler implements UserApprovalHandler {
         }
         Map<String, Object> args = request.args() != null ? request.args() : Map.of();
         AgentEvent event = AgentEvent.toolCall(sessionId, request.toolName(), args, toolCallId, true);
-        Sinks.EmitResult emit = eventSink.tryEmitNext(event);
+        // Serialized spin-retry: this is the approval prompt itself; if a raw tryEmitNext drops it
+        // under sink contention, the tool blocks on approval that the user is never shown → hang.
+        Sinks.EmitResult emit =
+                io.kairo.code.service.agent.AgentRuntimeContext.emitSerialized(eventSink, event);
         if (emit.isFailure()) {
             log.warn("Failed to emit pending-approval TOOL_CALL for session {}: {}", sessionId, emit);
             return;

@@ -125,9 +125,13 @@ public class PlanPendingInterceptHook {
             onPlanPending.run();
         }
 
-        // Emit PLAN_READY event to frontend
-        Sinks.EmitResult emitResult = sink.tryEmitNext(
-                AgentEvent.planReady(sessionId, overview != null ? overview : "Plan ready"));
+        // Emit PLAN_READY event to frontend. Serialized spin-retry: this event flips the UI into
+        // plan-approval; a raw tryEmitNext dropped under sink contention leaves the user waiting on
+        // an approval prompt that never arrives.
+        Sinks.EmitResult emitResult =
+                io.kairo.code.service.agent.AgentRuntimeContext.emitSerialized(
+                        sink,
+                        AgentEvent.planReady(sessionId, overview != null ? overview : "Plan ready"));
         if (emitResult.isFailure()) {
             log.warn("Failed to emit PLAN_READY for session {}: {}", sessionId, emitResult);
         }
