@@ -75,7 +75,13 @@ public record AgentEvent(
          * ("TOOL_CALL" / "TOOL_RESULT" / "TEXT_CHUNK"), {@code childToolName},
          * {@code childIsError}, {@code childElapsedMs}.
          */
-        SUBAGENT_EVENT
+        SUBAGENT_EVENT,
+        /**
+         * Emitted after each ReAct iteration completes (a rewindable checkpoint now exists).
+         * {@code resultMetadata} carries {@code iteration}. The frontend tracks the latest value so
+         * a "rewind to here" affordance can target the right checkpoint.
+         */
+        ITERATION_ADVANCED
     }
 
     public static AgentEvent thinking(String sessionId) {
@@ -93,6 +99,13 @@ public record AgentEvent(
                 "Message queued (position " + position + ")", null, null,
                 false, null, null, null, null, null, null,
                 java.util.Map.of("queuePosition", position), System.currentTimeMillis());
+    }
+
+    /** Signals that ReAct iteration {@code n} completed and a rewind checkpoint now exists. */
+    public static AgentEvent iterationAdvanced(String sessionId, int n) {
+        return new AgentEvent(EventType.ITERATION_ADVANCED, sessionId, null, null, null,
+                false, null, null, null, null, null, null,
+                java.util.Map.of("iteration", n), System.currentTimeMillis());
     }
 
     /** Streaming reasoning_content delta from thinking models (GLM-5.1, o1, Claude thinking). */

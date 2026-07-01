@@ -35,6 +35,8 @@ public class WorkspaceSnapshotService {
 
     private static final String SESSION_DIR = ".kairo-session";
     private static final String SNAPSHOT_REF_FILE = "snapshot.ref";
+    private static final String ITER_SNAPSHOT_PREFIX = "snapshot.iter-";
+    private static final String ITER_SNAPSHOT_SUFFIX = ".ref";
 
     /**
      * Create a snapshot of the current workspace state using git stash.
@@ -92,6 +94,20 @@ public class WorkspaceSnapshotService {
      * @return {@code true} if the revert succeeded
      */
     public boolean revert(String workspaceDir, String snapshotRef) {
+        boolean ok = doRevert(workspaceDir, snapshotRef);
+        if (ok) {
+            deleteRefFile(workspaceDir);
+            log.info("Reverted workspace {} to snapshot {}", workspaceDir, snapshotRef);
+        }
+        return ok;
+    }
+
+    /**
+     * Reset the worktree to HEAD, clean untracked files, and re-apply the given stash ref.
+     * Shared by the whole-run {@link #revert} and the per-iteration {@link #revertToIteration};
+     * does NOT touch any ref bookkeeping (callers own that).
+     */
+    private boolean doRevert(String workspaceDir, String snapshotRef) {
         try {
             // Revert tracked file changes (untracked removed by subsequent git clean)
             int resetRc = run(workspaceDir, "git", "reset", "--hard", "HEAD");
@@ -100,15 +116,18 @@ public class WorkspaceSnapshotService {
                 return false;
             }
 
-            // git clean -fd: remove untracked files/directories (respects .gitignore, no -x flag)
-            int cleanRc = run(workspaceDir, "git", "clean", "-fd");
+            // git clean -fd: remove untracked files/directories (respects .gitignore, no -x flag).
+            // Exclude .kairo-session so our own session state (checkpoints, iteration snapshot refs)
+            // survives the revert/rewind — otherwise a workspace that doesn't gitignore it would have
+            // its checkpoints wiped, breaking subsequent rewinds and history restore.
+            int cleanRc = run(workspaceDir, "git", "clean", "-fd", "-e", SESSION_DIR);
             if (cleanRc != 0) {
                 log.error("git clean -fd failed (rc={}) for workspace {}", cleanRc, workspaceDir);
                 return false;
             }
 
             if (!CLEAN_SENTINEL.equals(snapshotRef)) {
-                // Apply the stash to restore the original dirty state
+                // Apply the stash to restore the captured dirty state
                 int applyRc = run(workspaceDir, "git", "stash", "apply", snapshotRef);
                 if (applyRc != 0) {
                     log.error("git stash apply {} failed (rc={}) for workspace {}",
@@ -116,9 +135,6 @@ public class WorkspaceSnapshotService {
                     return false;
                 }
             }
-
-            deleteRefFile(workspaceDir);
-            log.info("Reverted workspace {} to snapshot {}", workspaceDir, snapshotRef);
             return true;
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
@@ -166,6 +182,179 @@ public class WorkspaceSnapshotService {
      */
     public boolean isGitWorkspace(String workspaceDir) {
         return new File(workspaceDir, ".git").exists();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Per-iteration snapshots (rewind support)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Capture the workspace state for a specific ReAct iteration so the user can later rewind to it.
+     * Stores the stash ref under {@code .kairo-session/snapshot.iter-{N}.ref} (one file per
+     * iteration, unlike the single overwriting {@link #createSnapshot}) and prunes refs older than
+     * the retention window.
+     *
+     * @param workspaceDir workspace root (must be a git repo)
+     * @param iteration    the iteration index this snapshot captures
+     * @param retention    how many recent iteration snapshots to keep
+     * @return the stored ref (or {@code "CLEAN"}), empty on failure
+     */
+    public Optional<String> createIterationSnapshot(
+            String workspaceDir, int iteration, int retention) {
+        try {
+            // `git stash create -u` returns EMPTY when the only changes are untracked files (no
+            // tracked-file diff vs HEAD) on many git versions — which is exactly the rewind case
+            // (agent creates brand-new files). Stage everything first (excluding our own session
+            // dir so checkpoints survive), create a stash from the staged tree, then unstage so the
+            // user's index is untouched. Verified: stash create on a staged untracked file yields a
+            // real ref.
+            run(workspaceDir, "git", "add", "-A", "--", ":(exclude).kairo-session");
+            String ref = runAndCapture(workspaceDir, "git", "stash", "create");
+            // Always restore the index — stash create doesn't touch the working tree, but we staged
+            // files that must not stay staged.
+            run(workspaceDir, "git", "reset", "-q");
+            String stored = ref.isBlank() ? CLEAN_SENTINEL : ref;
+            if (!ref.isBlank()) {
+                int rc = run(workspaceDir, "git", "stash", "store", "-m",
+                        "kairo: iteration " + iteration + " snapshot", ref);
+                if (rc != 0) {
+                    log.warn("git stash store failed (rc={}) for iteration {} in {}",
+                            rc, iteration, workspaceDir);
+                    return Optional.empty();
+                }
+            }
+            persistIterationRef(workspaceDir, iteration, stored);
+            pruneIterationSnapshots(workspaceDir, iteration - retention);
+            return Optional.of(stored);
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.warn("Failed to create iteration snapshot {} for {}: {}",
+                    iteration, workspaceDir, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Rewind the workspace to a specific iteration's snapshot, then drop the now-obsolete snapshots
+     * of later iterations. Returns false if that iteration has no snapshot (e.g. pruned, or not a
+     * git workspace).
+     */
+    public boolean revertToIteration(String workspaceDir, int iteration) {
+        String ref = readIterationRef(workspaceDir, iteration);
+        if (ref == null) {
+            log.warn("No snapshot ref for iteration {} in {}", iteration, workspaceDir);
+            return false;
+        }
+        if (!doRevert(workspaceDir, ref)) {
+            return false;
+        }
+        dropIterationSnapshotsAfter(workspaceDir, iteration);
+        log.info("Rewound workspace {} to iteration {} (ref {})", workspaceDir, iteration, ref);
+        return true;
+    }
+
+    /** Whether a rewind snapshot exists for the given iteration. */
+    public boolean hasIterationSnapshot(String workspaceDir, int iteration) {
+        return readIterationRef(workspaceDir, iteration) != null;
+    }
+
+    private void persistIterationRef(String workspaceDir, int iteration, String ref)
+            throws IOException {
+        Path sessionDir = Path.of(workspaceDir, SESSION_DIR);
+        Files.createDirectories(sessionDir);
+        Files.writeString(
+                sessionDir.resolve(ITER_SNAPSHOT_PREFIX + iteration + ITER_SNAPSHOT_SUFFIX),
+                ref,
+                StandardCharsets.UTF_8);
+    }
+
+    private String readIterationRef(String workspaceDir, int iteration) {
+        try {
+            Path refFile =
+                    Path.of(workspaceDir, SESSION_DIR,
+                            ITER_SNAPSHOT_PREFIX + iteration + ITER_SNAPSHOT_SUFFIX);
+            if (!Files.exists(refFile)) {
+                return null;
+            }
+            String content = Files.readString(refFile, StandardCharsets.UTF_8).trim();
+            return content.isBlank() ? null : content;
+        } catch (IOException e) {
+            log.debug("Could not read iteration ref {} in {}: {}",
+                    iteration, workspaceDir, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Drop iteration snapshots with index &lt;= threshold (retention pruning). */
+    private void pruneIterationSnapshots(String workspaceDir, int threshold) {
+        forEachIterationRef(workspaceDir, (ref, iter) -> {
+            if (iter <= threshold) {
+                dropStashAndRef(workspaceDir, iter, ref);
+            }
+        });
+    }
+
+    /** Drop iteration snapshots with index &gt; iteration (obsolete after a rewind to that point). */
+    private void dropIterationSnapshotsAfter(String workspaceDir, int iteration) {
+        forEachIterationRef(workspaceDir, (ref, iter) -> {
+            if (iter > iteration) {
+                dropStashAndRef(workspaceDir, iter, ref);
+            }
+        });
+    }
+
+    private void dropStashAndRef(String workspaceDir, int iteration, String ref) {
+        try {
+            if (ref != null && !CLEAN_SENTINEL.equals(ref)) {
+                run(workspaceDir, "git", "stash", "drop", ref);
+            }
+            Files.deleteIfExists(
+                    Path.of(workspaceDir, SESSION_DIR,
+                            ITER_SNAPSHOT_PREFIX + iteration + ITER_SNAPSHOT_SUFFIX));
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.debug("Could not drop iteration snapshot {} in {}: {}",
+                    iteration, workspaceDir, e.getMessage());
+        }
+    }
+
+    private void forEachIterationRef(
+            String workspaceDir, java.util.function.ObjIntConsumer<String> action) {
+        Path sessionDir = Path.of(workspaceDir, SESSION_DIR);
+        if (!Files.exists(sessionDir)) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> files = Files.list(sessionDir)) {
+            files.filter(p -> {
+                        String n = p.getFileName().toString();
+                        return n.startsWith(ITER_SNAPSHOT_PREFIX) && n.endsWith(ITER_SNAPSHOT_SUFFIX);
+                    })
+                    .forEach(p -> {
+                        int iter = parseIterationRefNumber(p.getFileName().toString());
+                        if (iter < 0) {
+                            return;
+                        }
+                        String ref = readIterationRef(workspaceDir, iter);
+                        action.accept(ref, iter);
+                    });
+        } catch (IOException e) {
+            log.debug("Could not list iteration refs in {}: {}", workspaceDir, e.getMessage());
+        }
+    }
+
+    private int parseIterationRefNumber(String filename) {
+        try {
+            String num = filename.substring(
+                    ITER_SNAPSHOT_PREFIX.length(),
+                    filename.length() - ITER_SNAPSHOT_SUFFIX.length());
+            return Integer.parseInt(num);
+        } catch (Exception e) {
+            return -1;
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────

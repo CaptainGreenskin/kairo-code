@@ -107,6 +107,7 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
                 case "confirmBuild" -> handleConfirmBuild(session, root);
                 case "stop"         -> handleStop(session, root);
                 case "revert"       -> handleRevert(session, root);
+                case "rewind"       -> handleRewind(session, root);
                 case "resume"       -> handleResume(session, root);
                 case "subscribeTeam"   -> handleSubscribeTeam(session, root);
                 case "unsubscribeTeam" -> handleUnsubscribeTeam(session, root);
@@ -304,6 +305,26 @@ public class AgentWebSocketHandler extends AbstractWebSocketHandler {
             log.info("Revert completed for session {}", sid);
         } else {
             sendErr(session, "revert", "Revert failed or not allowed in current session state");
+        }
+    }
+
+    private void handleRewind(WebSocketSession session, JsonNode body) {
+        String sid = text(body, "sessionId");
+        if (sid == null) {
+            sendErr(session, "rewind", "missing sessionId");
+            return;
+        }
+        int iteration = body.path("iteration").asInt(-1);
+        if (iteration < 0) {
+            sendErr(session, "rewind", "missing or invalid iteration");
+            return;
+        }
+        boolean success = agentService.rewindToIteration(sid, iteration);
+        if (success) {
+            sendAck(session, "rewind");
+            log.info("Session {} rewound to iteration {}", sid, iteration);
+        } else {
+            sendErr(session, "rewind", "Rewind failed or not allowed in current session state");
         }
     }
 

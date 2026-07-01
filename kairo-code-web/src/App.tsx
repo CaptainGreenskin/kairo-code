@@ -636,6 +636,11 @@ function App() {
                 content: text,
                 toolCalls: [] as Message['toolCalls'],
                 timestamp: Date.now(),
+                // Stamp the rewind checkpoint in effect when this turn starts, so a later
+                // "rewind to here" on this message can restore files + conversation to this point.
+                ...(sessionId
+                    ? { iteration: useSessionStore.getState().sessions[sessionId]?.lastIteration }
+                    : {}),
                 ...(image ? { imageData: image.data, imageMediaType: image.mediaType } : {}),
             };
 
@@ -853,7 +858,14 @@ function App() {
         clearFiles();
         sessionStorage.removeItem('kairo-code-session-id');
         clearLastSessionId();
-    }, [disconnect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost, sessionId, clearFiles]);
+        // Reconnect so the input goes from "Offline" back to "Idle" — without
+        // this the socket stays torn down until the workspace-change effect
+        // fires, which only runs when the active workspace actually changes.
+        // On mobile the "+ New Chat" button was leaving users stranded on a
+        // permanently-Offline screen because there was no workspace switch to
+        // trigger the fallback reconnect.
+        connect();
+    }, [disconnect, connect, setSessionId, clearMessages, setTokenUsage, setEstimatedCost, sessionId, clearFiles]);
 
     const handleSelectSession = useCallback(
         async (id: string) => {
@@ -1610,10 +1622,12 @@ ${content}
                     </ErrorBoundary>
                 )}
 
-                {/* Right chat sidebar — Cursor-style two-column: Sessions strip | Chat tabs+messages+input */}
-                {!isMobile && chatSidebarOpen && (
+                {/* Right chat sidebar — Cursor-style two-column: Sessions strip | Chat tabs+messages+input
+                    On mobile: the same panel becomes the full main area (no resize, no min-width,
+                    sessions strip hidden — sessions are reachable via the slide-in sidebar above). */}
+                {(isMobile || chatSidebarOpen) && (
                     <>
-                        {hasOpenTabs && (
+                        {!isMobile && hasOpenTabs && (
                             <ResizeHandle
                                 side="right"
                                 width={chatWidth}
@@ -1624,17 +1638,37 @@ ${content}
                             />
                         )}
                         <aside
-                            className="relative flex flex-row h-full bg-[var(--bg-primary)] border-l border-[var(--border)] min-w-0"
-                            style={{
-                                flex: hasOpenTabs
-                                    ? `0 1 ${isNarrow ? Math.min(chatWidth, 480) : chatWidth}px`
-                                    : '1 1 auto',
-                                minWidth: 360,
-                            }}
+                            className={
+                                isMobile
+                                    ? "relative flex flex-row h-full w-full flex-1 bg-[var(--bg-primary)] min-w-0"
+                                    : "relative flex flex-row h-full bg-[var(--bg-primary)] border-l border-[var(--border)] min-w-0"
+                            }
+                            style={
+                                isMobile
+                                    ? {
+                                          // iOS Safari renders a bottom toolbar (URL bar + share/nav)
+                                          // that overlaps the last ~44-83px of the page. Without
+                                          // padding-bottom = env(safe-area-inset-bottom), the send
+                                          // button sits *underneath* the toolbar and taps land on
+                                          // Safari chrome instead of the button. This is why the
+                                          // purple send button "did nothing" on your iPhone even
+                                          // though the same UI worked in Playwright's iPhone
+                                          // simulator (no OS chrome).
+                                          paddingBottom: 'env(safe-area-inset-bottom)',
+                                      }
+                                    : {
+                                          flex: hasOpenTabs
+                                              ? `0 1 ${isNarrow ? Math.min(chatWidth, 480) : chatWidth}px`
+                                              : '1 1 auto',
+                                          minWidth: 360,
+                                      }
+                            }
                             aria-label="Chat sidebar"
                         >
-                            {/* Embedded Sessions strip (Cursor-style: sessions live with chat) */}
-                            {chatSessionsOpen && (
+                            {/* Embedded Sessions strip (Cursor-style: sessions live with chat).
+                                Hidden on mobile — sessions are reached via the slide-in sidebar
+                                from the hamburger menu, not as a side strip inside the chat panel. */}
+                            {!isMobile && chatSessionsOpen && (
                                 <>
                                     <div
                                         className="shrink-0 h-full border-r border-[var(--border)] overflow-hidden"
@@ -1749,6 +1783,11 @@ ${content}
                                                             sessionId={sessionId ?? undefined}
                                                             onRegenerate={handleRegenerate}
                                                             onEditResend={handleEditResend}
+                                                            onRewind={sessionId ? (iteration) => {
+                                                                if (window.confirm('Rewind the conversation and workspace files to before this message? Later turns will be discarded.')) {
+                                                                    send({ action: 'rewind', sessionId, iteration });
+                                                                }
+                                                            } : undefined}
                                                             onInsertToChat={handleInsertToChat}
                                                             onApplyToFile={handleApplyToFile}
                                                             onRetry={msgObj.role === 'error' ? () => handleRegenerate(msgObj.id) : undefined}

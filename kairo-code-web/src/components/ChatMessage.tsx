@@ -1,7 +1,7 @@
 import { useSyncExternalStore, useState } from 'react';
 import { LazyMarkdown } from './LazyMarkdown';
 import { CodeBlock } from './CodeBlock';
-import { Copy, Check, RefreshCw, Pencil, Brain, ChevronDown, ChevronUp, Star } from 'lucide-react';
+import { Copy, Check, RefreshCw, Pencil, Brain, ChevronDown, ChevronUp, Star, History } from 'lucide-react';
 import type { Message } from '@/types/agent';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolCallGroup } from './ToolCallGroup';
@@ -28,6 +28,8 @@ interface ChatMessageProps {
     sessionId?: string;
     onRegenerate?: (messageId: string) => void;
     onEditResend?: (messageId: string, newText: string) => void;
+    /** Rewind the session (conversation + files) to the checkpoint this user message started at. */
+    onRewind?: (iteration: number) => void;
     onInsertToChat?: (text: string) => void;
     onApplyToFile?: (filename: string, content: string) => void;
     onRetry?: () => void;
@@ -105,7 +107,7 @@ function renderWithTables(content: string, mkComponents: React.ComponentProps<ty
     );
 }
 
-export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch, isBookmarked, onToggleBookmark, isCollapsed, onToggleCollapse, onRunCommand, onOpenFile }: ChatMessageProps) {
+export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, onRegenerate, onEditResend, onRewind, onInsertToChat, onApplyToFile, onRetry, searchHighlight, isCurrentMatch, isBookmarked, onToggleBookmark, isCollapsed, onToggleCollapse, onRunCommand, onOpenFile }: ChatMessageProps) {
     const [copiedMsg, setCopiedMsg] = useState(false);
     const [editing, setEditing] = useState(false);
     const [editText, setEditText] = useState(message.content);
@@ -218,6 +220,15 @@ export function ChatMessage({ message, onApproveTool, isStreaming, sessionId, on
                                     className="absolute -left-8 top-1/2 -translate-y-1/2 p-1 rounded-md bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
                                 >
                                     <Pencil size={12} />
+                                </button>
+                            )}
+                            {onRewind && !isStreaming && typeof message.iteration === 'number' && (
+                                <button
+                                    onClick={() => onRewind(message.iteration as number)}
+                                    title="Rewind conversation and files to before this message"
+                                    className="absolute -left-16 top-1/2 -translate-y-1/2 p-1 rounded-md bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                >
+                                    <History size={12} />
                                 </button>
                             )}
                         </>

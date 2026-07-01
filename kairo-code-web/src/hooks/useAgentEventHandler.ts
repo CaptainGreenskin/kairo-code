@@ -70,6 +70,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
         restoreSessionAs, setActiveSession, clearMessagesFor,
         appendThinkingTextTo, clearThinkingTextFor, setMessageThinkingIn,
         setTodosFor, setRunningFor, setResumableFor, recordEventFor,
+        setLastIterationFor,
     } = useSessionStore();
 
     return useCallback(
@@ -825,6 +826,12 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
                     break;
                 }
 
+                case 'ITERATION_ADVANCED': {
+                    const it = (event.payload as { iteration?: number }).iteration;
+                    if (typeof it === 'number') setLastIterationFor(sid, it);
+                    break;
+                }
+
                 case 'SESSION_RESUMED': {
                     useBuildPhaseStore.getState().setPhase('idle');
                     setRunningFor(sid, false);
@@ -887,6 +894,7 @@ export function useAgentEventHandler(args: UseAgentEventHandlerArgs) {
             setTodosFor,
             setRunningFor,
             setResumableFor,
+            setLastIterationFor,
             recordEventFor,
             setStreamingMsgId,
             setAgentPhase,

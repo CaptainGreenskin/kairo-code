@@ -321,6 +321,27 @@ public final class AgentSessionPayload implements SessionPayload {
      */
     public record AgentSnapshot(String agentName, String model) {}
 
+    /**
+     * Rewind the live agent's in-memory conversation to a prior iteration's history (loaded from a
+     * checkpoint). Mutates the running ReAct loop's history in place — no rebuild — so a subsequent
+     * message continues from the rewound point.
+     *
+     * @param history the conversation history to restore
+     * @throws IllegalStateException if the session is currently running (caller must stop first)
+     */
+    public void rewindHistory(java.util.List<Msg> history) {
+        if (ctx.runningState().get()) {
+            throw new IllegalStateException("Cannot rewind agent while session is running");
+        }
+        Agent a = this.agent;
+        if (a instanceof io.kairo.core.agent.DefaultReActAgent dra) {
+            dra.replaceHistory(history);
+        } else {
+            log.warn("rewindHistory: agent type {} does not support history replacement",
+                    a != null ? a.getClass().getSimpleName() : "null");
+        }
+    }
+
     // ── Plan refinement queue ────────────────────────────────────────────────────
 
     /**

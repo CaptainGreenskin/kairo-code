@@ -87,6 +87,13 @@ function transformEvent(raw: Record<string, unknown>): AgentEvent {
                 payload: { queuePosition: (meta.queuePosition as number) ?? 1 },
             };
         }
+        case 'ITERATION_ADVANCED': {
+            const meta = (raw.resultMetadata as Record<string, unknown>) ?? {};
+            return {
+                type: 'ITERATION_ADVANCED', sessionId, timestamp: ts,
+                payload: { iteration: (meta.iteration as number) ?? 0 },
+            };
+        }
         case 'AGENT_THINKING':
             return {
                 type: 'AGENT_THINKING', sessionId, timestamp: ts,

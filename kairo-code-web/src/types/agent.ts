@@ -22,7 +22,8 @@ export type AgentEventType =
     | 'SESSION_RESUMED'
     | 'CLEAR_EXECUTION_MESSAGES'
     | 'MESSAGE_QUEUED'
-    | 'SKILL_ACTIVATED';
+    | 'SKILL_ACTIVATED'
+    | 'ITERATION_ADVANCED';
 
 /**
  * Mirrors {@code io.kairo.api.tool.FailureReason}. Carried on TOOL_RESULT payloads under
@@ -62,6 +63,7 @@ export type AgentEventPayload =
     | PeerMessagePayload
     | MessageQueuedPayload
     | SkillActivatedPayload
+    | IterationAdvancedPayload
     | Record<string, never>;
 
 export interface TextChunkPayload {
@@ -197,6 +199,9 @@ export interface Message {
     toolCalls: ToolCall[];
     timestamp: number;
     streaming?: boolean;
+    /** ReAct iteration this message belongs to (the rewind checkpoint in effect when it was
+     *  created). Present on user messages so a "rewind to here" affordance can target it. */
+    iteration?: number;
     imageData?: string;        // base64 encoded image data
     imageMediaType?: string;   // e.g. "image/png"
     /** When set, this message renders as a live expert-step card (qoder-style inline agent
@@ -321,6 +326,11 @@ export interface PlanReadyPayload {
  */
 export interface RevertedPayload {
     message?: string;
+}
+
+/** Payload for ITERATION_ADVANCED — a rewind checkpoint now exists at this iteration. */
+export interface IterationAdvancedPayload {
+    iteration: number;
 }
 
 /**

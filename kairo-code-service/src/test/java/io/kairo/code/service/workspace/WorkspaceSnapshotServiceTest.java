@@ -146,6 +146,49 @@ class WorkspaceSnapshotServiceTest {
     }
 
     @Test
+    void iterationSnapshot_revertRestoresThatIterationFileState() throws Exception {
+        initGitRepo(tempDir);
+        Path f = tempDir.resolve("README.md");
+
+        Files.writeString(f, "step 1");
+        assertThat(service.createIterationSnapshot(tempDir.toString(), 1, 20)).isPresent();
+        Files.writeString(f, "step 2");
+        assertThat(service.createIterationSnapshot(tempDir.toString(), 2, 20)).isPresent();
+        Files.writeString(f, "step 3");
+        assertThat(service.createIterationSnapshot(tempDir.toString(), 3, 20)).isPresent();
+
+        // Rewind to iteration 1 → files return to that iteration's captured state.
+        assertThat(service.revertToIteration(tempDir.toString(), 1)).isTrue();
+        assertThat(Files.readString(f)).isEqualTo("step 1");
+
+        // Later iteration snapshots are obsolete after a rewind and get dropped.
+        assertThat(service.hasIterationSnapshot(tempDir.toString(), 1)).isTrue();
+        assertThat(service.hasIterationSnapshot(tempDir.toString(), 2)).isFalse();
+        assertThat(service.hasIterationSnapshot(tempDir.toString(), 3)).isFalse();
+    }
+
+    @Test
+    void iterationSnapshot_retentionPrunesOldRefs() throws Exception {
+        initGitRepo(tempDir);
+        Path f = tempDir.resolve("README.md");
+        for (int i = 0; i <= 5; i++) {
+            Files.writeString(f, "step " + i);
+            service.createIterationSnapshot(tempDir.toString(), i, 2); // retain 2
+        }
+        // retention=2 → as iteration i arrives, refs with index <= i-2 are pruned. After i=5: 4,5 kept.
+        assertThat(service.hasIterationSnapshot(tempDir.toString(), 5)).isTrue();
+        assertThat(service.hasIterationSnapshot(tempDir.toString(), 4)).isTrue();
+        assertThat(service.hasIterationSnapshot(tempDir.toString(), 0)).isFalse();
+        assertThat(service.hasIterationSnapshot(tempDir.toString(), 1)).isFalse();
+    }
+
+    @Test
+    void revertToIteration_missingSnapshot_returnsFalse() throws Exception {
+        initGitRepo(tempDir);
+        assertThat(service.revertToIteration(tempDir.toString(), 7)).isFalse();
+    }
+
+    @Test
     void isGitWorkspace_gitDir_returnsTrue() throws Exception {
         initGitRepo(tempDir);
         assertThat(service.isGitWorkspace(tempDir.toString())).isTrue();

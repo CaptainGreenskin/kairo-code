@@ -471,6 +471,22 @@ public class AgentService implements DisposableBean, InitializingBean {
             CodeAgentSession session = CodeAgentFactory.createSession(config, opts, extraToolDeps);
             bridgeHook.setCostTracker(session.costTracker());
 
+            // Capture a rewindable workspace snapshot after each iteration (keyed to that
+            // iteration's checkpoint) so /rewind restores files, not just the conversation.
+            // Best-effort and git-only; the git op runs inline on the loop's boundedElastic thread.
+            final String rewindDir = config.workingDir();
+            if (rewindDir != null && workspaceSnapshotService != null
+                    && session.agent() instanceof io.kairo.core.agent.DefaultReActAgent rewindAgent
+                    && workspaceSnapshotService.isGitWorkspace(rewindDir)) {
+                int rewindRetention = resolveRewindRetention();
+                final String rewindSid = sessionId;
+                rewindAgent.setOnIterationComplete(iter -> {
+                    workspaceSnapshotService.createIterationSnapshot(rewindDir, iter, rewindRetention);
+                    // Tell the UI a rewind checkpoint now exists at this iteration.
+                    ctx.emit(AgentEvent.iterationAdvanced(rewindSid, iter));
+                });
+            }
+
             // ── Route by mode: Agent → AgentSessionPayload, Experts → TeamSessionPayload ──
             SessionPayload payload;
             if (explicitExperts && swarmCoordinator != null
@@ -859,6 +875,49 @@ public class AgentService implements DisposableBean, InitializingBean {
         return true;
     }
 
+    /**
+     * Startup recovery: rehydrate every non-terminal persisted session so it survives a server
+     * restart, and re-drive any that were interrupted mid-run so they continue autonomously.
+     *
+     * <p>Rehydration makes a session bindable/listable again; {@link #resumeSession} only actually
+     * re-drives sessions left in FAILED_EXECUTION / FAILED_PLANNING (a clean IDLE/PLAN_PENDING
+     * session is a no-op). This is the missing half of unattended overnight autonomy: without it a
+     * run killed by a restart stays dead until a client happens to reconnect.
+     *
+     * <p>The caller gates invocation (KAIRO_AUTO_RESUME_ON_STARTUP) because re-driving spends
+     * tokens without a human in the loop.
+     *
+     * @return the number of sessions that were actually re-driven
+     */
+    public int resumeInterruptedSessions() {
+        List<SessionMetaPersistence.SessionMeta> metas;
+        try {
+            metas = sessionMetaPersistence.loadNonTerminal();
+        } catch (Exception e) {
+            log.warn("Startup recovery: could not list persisted sessions: {}", e.getMessage());
+            return 0;
+        }
+        int resumed = 0;
+        for (SessionMetaPersistence.SessionMeta meta : metas) {
+            try {
+                if (registry.get(meta.sessionId()) == null) {
+                    CodeAgentConfig config = buildConfigFromMeta(meta);
+                    createSession(config, meta.workspaceId(), false, meta.mode(), null,
+                            meta.sessionId(), meta.createdAt());
+                    log.info("Startup recovery: rehydrated session {} (persisted phase {})",
+                            meta.sessionId(), meta.phase());
+                }
+                if (resumeSession(meta.sessionId())) {
+                    resumed++;
+                    log.info("Startup recovery: auto-resumed interrupted session {}", meta.sessionId());
+                }
+            } catch (Exception e) {
+                log.warn("Startup recovery: failed for session {}: {}", meta.sessionId(), e.getMessage());
+            }
+        }
+        return resumed;
+    }
+
     // ── Revert mechanism ─────────────────────────────────────────────────────────
 
     /**
@@ -1027,6 +1086,119 @@ public class AgentService implements DisposableBean, InitializingBean {
 
         SessionEntry entry = bindCtx.entry();
         boolean running = isRunning(sessionId);
+        log.info("Session {} bound (running={})", sessionId, running);
+        return buildSessionRestoredEvent(sessionId, entry);
+    }
+
+    /**
+     * Rewind a session to an earlier iteration: restore workspace files from that iteration's git
+     * snapshot, reset the live agent's conversation to that iteration's checkpoint, discard later
+     * checkpoints/snapshots, and emit SESSION_RESTORED so the UI reflects exactly that point.
+     *
+     * <p>Rejects EXECUTING sessions (stop first), mirroring {@link #revertSession}. File restore is
+     * best-effort — a non-git workspace still gets the conversation rewound.
+     *
+     * @param sessionId the session
+     * @param iteration the iteration checkpoint to rewind to
+     * @return true if the rewind was applied
+     */
+    public boolean rewindToIteration(String sessionId, int iteration) {
+        SessionContext sctx = registry.get(sessionId);
+        if (sctx == null) {
+            log.warn("rewindToIteration: session {} not found", sessionId);
+            return false;
+        }
+        SessionEntry entry = sctx.entry();
+        AtomicReference<SessionPhase> phaseRef = sctx.phase();
+        if (phaseRef.get() == SessionPhase.EXECUTING) {
+            log.warn("rewindToIteration rejected for session {} — still EXECUTING, stop first",
+                    sessionId);
+            return false;
+        }
+        CodeAgentConfig cfg = entry.configOrNull();
+        if (cfg == null || cfg.workingDir() == null) {
+            log.warn("rewindToIteration: session {} has no workingDir", sessionId);
+            return false;
+        }
+        String workingDir = cfg.workingDir();
+
+        var store = checkpointStoreFor(cfg, entry.sessionId());
+
+        // 1. Load the target iteration's full history (before truncation, in case it IS the last).
+        var cpOpt = store.loadAt(iteration).block();
+        if (cpOpt == null || cpOpt.isEmpty()) {
+            log.warn("rewindToIteration: no checkpoint at iteration {} for session {}",
+                    iteration, sessionId);
+            return false;
+        }
+        List<io.kairo.api.message.Msg> history = cpOpt.get().messages();
+
+        // 2. Discard checkpoints after the target so loadLast()==iteration on the next resume.
+        store.deleteAfter(iteration).block();
+
+        // 3. Restore workspace files from the iteration snapshot (git), best-effort.
+        if (workspaceSnapshotService != null
+                && workspaceSnapshotService.isGitWorkspace(workingDir)
+                && workspaceSnapshotService.hasIterationSnapshot(workingDir, iteration)) {
+            if (!workspaceSnapshotService.revertToIteration(workingDir, iteration)) {
+                log.warn("rewindToIteration: file restore failed for session {} iteration {}",
+                        sessionId, iteration);
+            }
+        }
+
+        // 4. Reset the live agent's in-memory conversation to the rewound point.
+        SessionPayload payload = entry.payload();
+        if (payload instanceof AgentSessionPayload asp) {
+            try {
+                asp.rewindHistory(history);
+            } catch (Exception e) {
+                log.warn("rewindToIteration: history reset failed for session {}: {}",
+                        sessionId, e.getMessage());
+            }
+        }
+
+        // 5. Phase → IDLE (continuable) and persist.
+        phaseRef.set(SessionPhase.IDLE);
+        persistPhase(workingDir, SessionPhase.IDLE);
+
+        // 6. Emit SESSION_RESTORED — readCheckpointMessages now sees loadLast()==iteration.
+        AgentRuntimeContext.emitSerialized(
+                sctx.eventSink(), buildSessionRestoredEvent(sessionId, entry));
+
+        log.info("Session {} rewound to iteration {}", sessionId, iteration);
+        return true;
+    }
+
+    /** Rewind snapshot retention window (per-iteration git snapshots kept). Env-configurable. */
+    private static int resolveRewindRetention() {
+        String env = System.getenv("KAIRO_REWIND_RETENTION");
+        if (env != null && !env.isBlank()) {
+            try {
+                int parsed = Integer.parseInt(env.trim());
+                if (parsed >= 1) return parsed;
+            } catch (NumberFormatException ignored) {
+                // fall through to default
+            }
+        }
+        return 20;
+    }
+
+    /** Concrete checkpoint store over the session's iterations dir (session-scoped, else legacy). */
+    private io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore checkpointStoreFor(
+            CodeAgentConfig cfg, String sessionId) {
+        var sessionStorage = new io.kairo.core.session.FileSessionStorageProvider(
+                Path.of(cfg.workingDir()).resolve(".kairo-session"));
+        Path sessionIterDir = sessionStorage.sessionDir(sessionId).resolve("iterations");
+        Path dir = java.nio.file.Files.isDirectory(sessionIterDir)
+                ? sessionIterDir
+                : Path.of(cfg.workingDir()).resolve(".kairo-session").resolve("iterations");
+        return new io.kairo.core.agent.checkpoint.JsonFileIterationCheckpointStore(
+                dir, new io.kairo.core.session.SessionSerializer());
+    }
+
+    /** Build the SESSION_RESTORED event from the session's current (post-truncation) checkpoint. */
+    private AgentEvent buildSessionRestoredEvent(String sessionId, SessionEntry entry) {
+        boolean running = isRunning(sessionId);
         List<Map<String, Object>> messages = readCheckpointMessages(entry);
         String messagesJson;
         try {
@@ -1035,18 +1207,12 @@ public class AgentService implements DisposableBean, InitializingBean {
             log.error("Failed to serialize messages for session {}", sessionId, e);
             messagesJson = "[]";
         }
-
         CodeAgentConfig cfg = entry.configOrNull();
-        // Only send todos if this session has history (avoid showing stale todos from other sessions)
         String todosJson = (cfg != null && !messages.isEmpty())
                 ? TodoStorage.readJson(cfg.workingDir()) : "[]";
-
         SessionPhase phase = getSessionPhase(sessionId);
         boolean resumable =
                 phase == SessionPhase.FAILED_PLANNING || phase == SessionPhase.FAILED_EXECUTION;
-
-        log.info("Session {} bound: {} messages, running={}, resumable={}",
-                sessionId, messages.size(), running, resumable);
         return AgentEvent.sessionRestored(sessionId, messagesJson, running, todosJson, resumable);
     }
 

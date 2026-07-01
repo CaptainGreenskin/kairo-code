@@ -36,6 +36,9 @@ interface PerSession {
      * by starting from the EMPTY_SESSION default. `restoreSessionAs` preserves it.
      */
     resumable: boolean;
+    /** Highest ReAct iteration reported via ITERATION_ADVANCED — the latest rewind checkpoint.
+     *  Stamped onto outgoing user messages so a "rewind to here" affordance can target it. */
+    lastIteration?: number;
 }
 
 const EMPTY_SESSION: PerSession = {
@@ -97,6 +100,7 @@ interface SessionsState {
     setTodosFor: (sid: string, todos: Todo[]) => void;
     setRunningFor: (sid: string, running: boolean) => void;
     setResumableFor: (sid: string, resumable: boolean) => void;
+    setLastIterationFor: (sid: string, iteration: number) => void;
     recordEventFor: (sid: string, ts?: number) => void;
     clearMessagesFor: (sid: string) => void;
     restoreSessionAs: (sid: string, msgs: Message[], running: boolean, todos?: Todo[]) => void;
@@ -371,6 +375,9 @@ export const useSessionStore = create<SessionsState>((set, get) => ({
 
     setResumableFor: (sid, resumable) =>
         set((state) => patchSession(state, sid, (s) => ({ ...s, resumable }))),
+
+    setLastIterationFor: (sid, iteration) =>
+        set((state) => patchSession(state, sid, (s) => ({ ...s, lastIteration: iteration }))),
 
     recordEventFor: (sid, ts) =>
         set((state) =>
